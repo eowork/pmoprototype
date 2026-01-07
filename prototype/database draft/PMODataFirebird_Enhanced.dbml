@@ -1,0 +1,765 @@
+// ==========================================
+// PMO DATABASE SCHEMA - ENHANCED VERSION
+// ==========================================
+// Comprehensive schema for PMO Monitoring and Evaluation System
+// Following best practices and addressing identified gaps
+
+// ==========================================
+// CORE TABLES
+// ==========================================
+
+// Users and Authentication
+Table users {
+  id UUID [pk]
+  email VARCHAR(255) [not null, unique]
+  password_hash VARCHAR(255) [not null]
+  first_name VARCHAR(100) [not null]
+  last_name VARCHAR(100) [not null]
+  phone VARCHAR(20)
+  avatar_url VARCHAR(255)
+  is_active BOOLEAN [not null, default: true]
+  last_login_at TIMESTAMP
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  last_password_change_at TIMESTAMP
+  failed_login_attempts INTEGER [default: 0]
+  account_locked_until TIMESTAMP
+  
+  indexes {
+    email
+    is_active
+  }
+}
+
+Table roles {
+  id UUID [pk]
+  name VARCHAR(50) [not null, unique]
+  description TEXT
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    name
+  }
+}
+
+Table user_roles {
+  user_id UUID [ref: > users.id, not null]
+  role_id UUID [ref: > roles.id, not null]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    (user_id, role_id) [pk]
+  }
+}
+
+Table permissions {
+  id UUID [pk]
+  name VARCHAR(100) [not null, unique]
+  description TEXT
+  resource VARCHAR(100) [not null]
+  action VARCHAR(50) [not null]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    name
+    resource
+  }
+}
+
+Table role_permissions {
+  role_id UUID [ref: > roles.id, not null]
+  permission_id UUID [ref: > permissions.id, not null]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    (role_id, permission_id) [pk]
+  }
+}
+
+// (Removed) audit_logs table to avoid duplication with audit_trail
+
+// ==========================================
+// CONSTRUCTION OF INFRASTRUCTURE
+// ==========================================
+
+Table construction_projects {
+  id UUID [pk]
+  project_id UUID [ref: > projects.id, not null, unique]
+  project_code VARCHAR(50) [not null, unique]
+  title VARCHAR(255) [not null]
+  description TEXT
+  contract_number VARCHAR(50)
+  contractor_id UUID [ref: > contractors.id]
+  contract_amount DECIMAL(15,2)
+  start_date DATE
+  target_completion_date DATE
+  actual_completion_date DATE
+  project_duration VARCHAR(100)
+  project_engineer VARCHAR(255)
+  project_manager VARCHAR(255)
+  location_coordinates POINT
+  building_type VARCHAR(100)
+  floor_area DECIMAL(10,2)
+  number_of_floors INTEGER
+  funding_source_id UUID [ref: > funding_sources.id, not null]
+  subcategory_id UUID [ref: > construction_subcategories.id]
+  campus campus_enum [not null]
+  status project_status_enum [not null]
+  created_by UUID [ref: > users.id, not null]
+  updated_by UUID [ref: > users.id]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    project_id
+    project_code
+    contractor_id
+    status
+    start_date
+    target_completion_date
+    campus
+  }
+}
+
+Table funding_sources {
+  id UUID [pk]
+  name VARCHAR(100) [not null, unique]
+  description TEXT
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+}
+
+Table construction_subcategories {
+  id UUID [pk]
+  name VARCHAR(100) [not null, unique]
+  description TEXT
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+}
+
+Table construction_project_financials {
+  id UUID [pk]
+  project_id UUID [ref: > construction_projects.id, not null]
+  fiscal_year INTEGER [not null]
+  appropriation DECIMAL(15,2) [not null]
+  obligation DECIMAL(15,2) [not null]
+  disbursement DECIMAL(15,2) [default: 0]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    project_id
+    fiscal_year
+  }
+}
+
+Table construction_project_progress {
+  id UUID [pk]
+  project_id UUID [ref: > construction_projects.id, not null]
+  report_date DATE [not null]
+  physical_progress_percentage DECIMAL(5,2) [not null]
+  financial_progress_percentage DECIMAL(5,2) [not null]
+  time_elapsed_percentage DECIMAL(5,2) [not null]
+  slippage_percentage DECIMAL(5,2)
+  remarks TEXT
+  reported_by UUID [ref: > users.id, not null]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    project_id
+    report_date
+  }
+}
+
+Table construction_pow_items {
+  id UUID [pk]
+  project_id UUID [ref: > construction_projects.id, not null]
+  item_number VARCHAR(50) [not null]
+  description TEXT [not null]
+  unit VARCHAR(20) [not null]
+  quantity DECIMAL(15,2) [not null]
+  unit_cost DECIMAL(15,2) [not null]
+  total_cost DECIMAL(15,2) [not null]
+  category VARCHAR(100)
+  phase VARCHAR(100)
+  is_variation_order BOOLEAN [not null, default: false]
+  parent_item_id UUID [ref: > construction_pow_items.id]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    project_id
+    category
+    phase
+    is_variation_order
+  }
+}
+
+// ==========================================
+// REPAIRS SECTION
+// ==========================================
+
+Table repair_projects {
+  id UUID [pk]
+  project_id UUID [ref: > projects.id, not null, unique]
+  project_code VARCHAR(50) [not null, unique]
+  title VARCHAR(255) [not null]
+  description TEXT
+  building_name VARCHAR(255) [not null]
+  floor_number VARCHAR(20)
+  room_number VARCHAR(20)
+  specific_location VARCHAR(255)
+  repair_type_id UUID [ref: > repair_types.id, not null]
+  urgency_level urgency_level_enum [not null]
+  is_emergency BOOLEAN [not null, default: false]
+  campus campus_enum [not null]
+  reported_by VARCHAR(255)
+  reported_date DATE
+  inspection_date DATE
+  inspector_id UUID [ref: > users.id]
+  inspection_findings TEXT
+  status repair_status_enum [not null]
+  start_date DATE
+  end_date DATE
+  budget DECIMAL(15,2)
+  project_manager_id UUID [ref: > users.id]
+  contractor_id UUID [ref: > contractors.id]
+  completion_date DATE
+  created_by UUID [ref: > users.id, not null]
+  updated_by UUID [ref: > users.id]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    project_id
+    project_code
+    building_name
+    repair_type_id
+    status
+    campus
+    is_emergency
+  }
+}
+
+Table repair_types {
+  id UUID [pk]
+  name VARCHAR(100) [not null, unique]
+  description TEXT
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+}
+
+Table repair_pow_items {
+  id UUID [pk]
+  repair_project_id UUID [ref: > repair_projects.id, not null]
+  item_number VARCHAR(50) [not null]
+  description TEXT [not null]
+  unit VARCHAR(20) [not null]
+  quantity DECIMAL(15,2) [not null]
+  estimated_material_cost DECIMAL(15,2) [not null]
+  estimated_labor_cost DECIMAL(15,2) [not null]
+  estimated_project_cost DECIMAL(15,2) [not null]
+  unit_cost DECIMAL(15,2) [not null]
+  date_entry DATE [not null]
+  category VARCHAR(100) [not null]
+  phase VARCHAR(100) [not null]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    repair_project_id
+    category
+    phase
+    date_entry
+  }
+}
+
+// ==========================================
+// CLASSROOM AND ADMINISTRATIVE OFFICES
+// ==========================================
+
+Table buildings {
+  id UUID [pk]
+  name VARCHAR(255) [not null, unique]
+  code VARCHAR(50) [unique]
+  campus campus_enum [not null]
+  building_type building_type_enum [not null]
+  year_built INTEGER
+  total_floors INTEGER
+  total_area DECIMAL(10,2)
+  status building_status_enum [not null]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    name
+    campus
+    building_type
+    status
+  }
+}
+
+Table rooms {
+  id UUID [pk]
+  building_id UUID [ref: > buildings.id, not null]
+  room_number VARCHAR(20) [not null]
+  floor_number INTEGER [not null]
+  room_type room_type_enum [not null]
+  capacity INTEGER
+  area DECIMAL(10,2)
+  status room_status_enum [not null]
+  is_airconditioned BOOLEAN [default: false]
+  has_projector BOOLEAN [default: false]
+  has_whiteboard BOOLEAN [default: true]
+  is_wheelchair_accessible BOOLEAN [default: false]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    building_id
+    room_number
+    room_type
+    status
+  }
+}
+
+Table room_assessments {
+  id UUID [pk]
+  room_id UUID [ref: > rooms.id, not null]
+  assessment_date DATE [not null]
+  academic_year VARCHAR(20) [not null]
+  semester semester_enum [not null]
+  subject_code VARCHAR(50)
+  subject_description VARCHAR(255)
+  number_of_students INTEGER
+  class_schedule TEXT
+  
+  // Assessment Categories
+  functionality_score INTEGER [note: '1-5 scale']
+  utility_systems_score INTEGER [note: '1-5 scale']
+  sanitation_score INTEGER [note: '1-5 scale']
+  equipment_score INTEGER [note: '1-5 scale']
+  furniture_score INTEGER [note: '1-5 scale']
+  space_management_score INTEGER [note: '1-5 scale']
+  safety_score INTEGER [note: '1-5 scale']
+  
+  // Overall Assessment
+  overall_score DECIMAL(5,2)
+  overall_condition condition_enum
+  
+  // Assessment Details (JSON for flexible storage)
+  functionality_details JSON
+  utility_systems_details JSON
+  sanitation_details JSON
+  equipment_details JSON
+  furniture_details JSON
+  space_management_details JSON
+  safety_details JSON
+  
+  // Assessment Metadata
+  assessor_id UUID [ref: > users.id, not null]
+  assessor_position VARCHAR(100)
+  remarks TEXT
+  recommended_actions TEXT
+  
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    room_id
+    assessment_date
+    academic_year
+    semester
+    assessor_id
+  }
+}
+
+// ==========================================
+// UNIVERSITY OPERATIONS
+// ==========================================
+
+Table university_operations {
+  id UUID [pk]
+  operation_type operation_type_enum [not null]
+  title VARCHAR(255) [not null]
+  description TEXT
+  code VARCHAR(50) [unique]
+  start_date DATE
+  end_date DATE
+  status project_status_enum [not null]
+  budget DECIMAL(15,2)
+  campus campus_enum [not null]
+  coordinator_id UUID [ref: > users.id]
+  created_by UUID [ref: > users.id, not null]
+  updated_by UUID [ref: > users.id]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    operation_type
+    status
+    campus
+    coordinator_id
+  }
+}
+
+Table operation_indicators {
+  id UUID [pk]
+  operation_id UUID [ref: > university_operations.id, not null]
+  indicator_type VARCHAR(100) [not null]
+  fiscal_year INTEGER [not null]
+  target_value DECIMAL(15,2)
+  actual_value DECIMAL(15,2)
+  achievement_percentage DECIMAL(5,2)
+  remarks TEXT
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    operation_id
+    indicator_type
+    fiscal_year
+  }
+}
+
+Table operation_financials {
+  id UUID [pk]
+  operation_id UUID [ref: > university_operations.id, not null]
+  fiscal_year INTEGER [not null]
+  budget_allocation DECIMAL(15,2) [not null]
+  obligation DECIMAL(15,2) [default: 0]
+  disbursement DECIMAL(15,2) [default: 0]
+  balance DECIMAL(15,2) [not null]
+  remarks TEXT
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    operation_id
+    fiscal_year
+  }
+}
+
+// ==========================================
+// COMMON TABLES
+// ==========================================
+
+Table projects {
+  id UUID [pk]
+  project_code VARCHAR(50) [not null, unique]
+  title VARCHAR(255) [not null]
+  description TEXT
+  project_type project_type_enum [not null]
+  start_date DATE
+  end_date DATE
+  status project_status_enum [not null]
+  budget DECIMAL(15,2)
+  campus campus_enum [not null]
+  created_by UUID [ref: > users.id, not null]
+  updated_by UUID [ref: > users.id]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    project_code
+    project_type
+    status
+    campus
+  }
+}
+
+Table contractors {
+  id UUID [pk]
+  name VARCHAR(255) [not null]
+  contact_person VARCHAR(255)
+  email VARCHAR(255)
+  phone VARCHAR(20)
+  address TEXT
+  tin_number VARCHAR(50)
+  registration_number VARCHAR(100)
+  validity_date DATE
+  status contractor_status_enum [not null]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    name
+    status
+  }
+}
+
+Table documents {
+  id UUID [pk]
+  documentable_type VARCHAR(100) [not null]
+  documentable_id UUID [not null]
+  document_type VARCHAR(100) [not null]
+  file_name VARCHAR(255) [not null]
+  file_path VARCHAR(255) [not null]
+  file_size INTEGER [not null]
+  mime_type VARCHAR(100) [not null]
+  description TEXT
+  uploaded_by UUID [ref: > users.id, not null]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    (documentable_type, documentable_id)
+    document_type
+    uploaded_by
+  }
+}
+
+Table media {
+  id UUID [pk]
+  mediable_type VARCHAR(100) [not null]
+  mediable_id UUID [not null]
+  media_type media_type_enum [not null]
+  file_name VARCHAR(255) [not null]
+  file_path VARCHAR(255) [not null]
+  file_size INTEGER [not null]
+  mime_type VARCHAR(100) [not null]
+  title VARCHAR(255)
+  description TEXT
+  alt_text VARCHAR(255)
+  is_featured BOOLEAN [default: false]
+  uploaded_by UUID [ref: > users.id, not null]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    (mediable_type, mediable_id)
+    media_type
+    is_featured
+    uploaded_by
+  }
+}
+
+// ==========================================
+// RELATIONSHIPS
+// ==========================================
+
+// Many-to-many relationship between users and departments
+Table user_departments {
+  user_id UUID [ref: > users.id, not null]
+  department_id UUID [ref: > departments.id, not null]
+  is_primary BOOLEAN [default: false]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    (user_id, department_id) [pk]
+  }
+}
+
+Table departments {
+  id UUID [pk]
+  name VARCHAR(255) [not null]
+  code VARCHAR(50) [unique]
+  description TEXT
+  parent_id UUID [ref: > departments.id]
+  head_id UUID [ref: > users.id]
+  email VARCHAR(255)
+  phone VARCHAR(20)
+  status department_status_enum [not null, default: 'ACTIVE']
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    name
+    code
+    status
+  }
+}
+
+// ==========================================
+// SYSTEM SETTINGS
+// ==========================================
+
+Table system_settings {
+  id UUID [pk]
+  setting_key VARCHAR(100) [not null, unique]
+  setting_value TEXT
+  setting_group VARCHAR(50) [not null]
+  data_type setting_data_type_enum [not null]
+  is_public BOOLEAN [default: false]
+  description TEXT
+  updated_by UUID [ref: > users.id]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  updated_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    setting_key
+    setting_group
+  }
+}
+
+// ==========================================
+// NOTIFICATIONS
+// ==========================================
+
+Table notifications {
+  id UUID [pk]
+  user_id UUID [ref: > users.id, not null]
+  title VARCHAR(255) [not null]
+  message TEXT [not null]
+  notification_type VARCHAR(50) [not null]
+  is_read BOOLEAN [default: false]
+  read_at TIMESTAMP
+  action_url VARCHAR(255)
+  related_entity_type VARCHAR(100)
+  related_entity_id UUID
+  created_by UUID [ref: > users.id]
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    user_id
+    is_read
+    notification_type
+    (related_entity_type, related_entity_id)
+  }
+}
+
+// ==========================================
+// AUDIT TRAIL
+// ==========================================
+
+Table audit_trail {
+  id UUID [pk]
+  user_id UUID [ref: > users.id]
+  action VARCHAR(50) [not null]
+  entity_type VARCHAR(100) [not null]
+  entity_id UUID
+  old_values JSON
+  new_values JSON
+  ip_address VARCHAR(45)
+  user_agent TEXT
+  created_at TIMESTAMP [not null, default: `NOW()`]
+  
+  indexes {
+    user_id
+    entity_type
+    created_at
+  }
+}
+
+// ==========================================
+// ENUM DEFINITIONS
+// ==========================================
+
+Enum campus_enum {
+  MAIN
+  CABADBARAN
+  BOTH
+}
+
+Enum project_status_enum {
+  PLANNING
+  ONGOING
+  COMPLETED
+  ON_HOLD
+  CANCELLED
+}
+
+Enum repair_status_enum {
+  REPORTED
+  INSPECTED
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+Enum urgency_level_enum {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+Enum building_type_enum {
+  ACADEMIC
+  ADMINISTRATIVE
+  RESIDENTIAL
+  OTHER
+}
+
+Enum building_status_enum {
+  OPERATIONAL
+  UNDER_CONSTRUCTION
+  RENOVATION
+  CLOSED
+}
+
+Enum room_type_enum {
+  CLASSROOM
+  LABORATORY
+  OFFICE
+  CONFERENCE
+  AUDITORIUM
+  OTHER
+}
+
+Enum room_status_enum {
+  AVAILABLE
+  OCCUPIED
+  UNDER_MAINTENANCE
+  UNAVAILABLE
+}
+
+Enum semester_enum {
+  FIRST
+  SECOND
+  SUMMER
+}
+
+Enum condition_enum {
+  POOR
+  FAIR
+  GOOD
+  VERY_GOOD
+  EXCELLENT
+}
+
+Enum operation_type_enum {
+  HIGHER_EDUCATION
+  ADVANCED_EDUCATION
+  RESEARCH
+  TECHNICAL_ADVISORY
+}
+
+Enum project_type_enum {
+  CONSTRUCTION
+  REPAIR
+  RESEARCH
+  EXTENSION
+  TRAINING
+  OTHER
+}
+
+Enum contractor_status_enum {
+  ACTIVE
+  SUSPENDED
+  BLACKLISTED
+}
+
+Enum media_type_enum {
+  IMAGE
+  VIDEO
+  DOCUMENT
+  OTHER
+}
+
+Enum department_status_enum {
+  ACTIVE
+  INACTIVE
+}
+
+Enum setting_data_type_enum {
+  STRING
+  NUMBER
+  BOOLEAN
+  JSON
+  DATE
+  DATETIME
+}

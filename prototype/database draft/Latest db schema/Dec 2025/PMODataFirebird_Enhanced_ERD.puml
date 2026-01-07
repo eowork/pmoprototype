@@ -1,0 +1,358 @@
+@startuml PMO_Monitoring_Evaluation_ERD
+' Visual settings
+left to right direction
+hide circle
+hide methods
+hide stereotypes
+skinparam linetype ortho
+skinparam shadowing false
+skinparam roundcorner 8
+skinparam packageStyle rectangle
+skinparam classAttributeIconSize 0
+
+' =============================
+' CORE ACCESS CONTROL
+' =============================
+package "Core Access Control" as Core {
+  entity "users" as users {
+    *id : UUID
+    --
+    email : varchar
+    password_hash : varchar
+    first_name : varchar
+    last_name : varchar
+    is_active : boolean
+    created_at : timestamp
+  }
+
+  entity "roles" as roles {
+    *id : UUID
+    --
+    name : varchar
+  }
+
+  entity "user_roles" as user_roles {
+    *user_id : UUID
+    *role_id : UUID
+    --
+    created_at : timestamp
+  }
+
+  entity "permissions" as permissions {
+    *id : UUID
+    --
+    name : varchar
+    resource : varchar
+    action : varchar
+  }
+
+  entity "role_permissions" as role_permissions {
+    *role_id : UUID
+    *permission_id : UUID
+    --
+    created_at : timestamp
+  }
+}
+
+' =============================
+' COMMON / SHARED
+' =============================
+package "Common" as Common {
+  entity "projects" as projects {
+    *id : UUID
+    --
+    project_code : varchar
+    title : varchar
+    project_type : enum
+    status : enum
+    campus : enum
+  }
+
+  entity "contractors" as contractors {
+    *id : UUID
+    --
+    name : varchar
+    status : enum
+  }
+
+  entity "departments" as departments {
+    *id : UUID
+    --
+    name : varchar
+    code : varchar
+    parent_id : UUID (self)
+    head_id : UUID (users)
+  }
+
+  entity "user_departments" as user_departments {
+    *user_id : UUID
+    *department_id : UUID
+    --
+    is_primary : boolean
+  }
+
+  entity "documents" as documents {
+    *id : UUID
+    --
+    documentable_type : varchar
+    documentable_id : UUID
+    document_type : varchar
+    file_name : varchar
+    uploaded_by : UUID (users)
+  }
+
+  entity "media" as media {
+    *id : UUID
+    --
+    mediable_type : varchar
+    mediable_id : UUID
+    media_type : enum
+    file_name : varchar
+    uploaded_by : UUID (users)
+  }
+
+  entity "system_settings" as system_settings {
+    *id : UUID
+    --
+    setting_key : varchar
+    setting_group : varchar
+    data_type : enum
+  }
+
+  entity "notifications" as notifications {
+    *id : UUID
+    --
+    user_id : UUID (users)
+    title : varchar
+    is_read : boolean
+  }
+
+  entity "audit_trail" as audit_trail {
+    *id : UUID
+    --
+    user_id : UUID (users)
+    action : varchar
+    entity_type : varchar
+    entity_id : UUID
+    created_at : timestamp
+  }
+}
+
+' =============================
+' CONSTRUCTION OF INFRASTRUCTURE
+' =============================
+package "Construction" as Construction {
+  entity "funding_sources" as funding_sources {
+    *id : UUID
+    --
+    name : varchar
+  }
+
+  entity "construction_subcategories" as construction_subcategories {
+    *id : UUID
+    --
+    name : varchar
+  }
+
+  entity "construction_projects" as construction_projects {
+    *id : UUID
+    --
+    project_id : UUID (projects)
+    project_code : varchar
+    title : varchar
+    contractor_id : UUID (contractors)
+    funding_source_id : UUID (funding_sources)
+    subcategory_id : UUID (construction_subcategories)
+    status : enum
+    campus : enum
+  }
+
+  entity "construction_project_financials" as construction_project_financials {
+    *id : UUID
+    --
+    project_id : UUID (construction_projects)
+    fiscal_year : int
+    appropriation : decimal
+    obligation : decimal
+    disbursement : decimal
+  }
+
+  entity "construction_project_progress" as construction_project_progress {
+    *id : UUID
+    --
+    project_id : UUID (construction_projects)
+    report_date : date
+    physical_progress_percentage : decimal
+    financial_progress_percentage : decimal
+    reported_by : UUID (users)
+  }
+
+  entity "construction_pow_items" as construction_pow_items {
+    *id : UUID
+    --
+    project_id : UUID (construction_projects)
+    item_number : varchar
+    description : text
+    unit : varchar
+    quantity : decimal
+    unit_cost : decimal
+    parent_item_id : UUID (self)
+  }
+}
+
+' =============================
+' REPAIRS
+' =============================
+package "Repairs" as Repairs {
+  entity "repair_types" as repair_types {
+    *id : UUID
+    --
+    name : varchar
+  }
+
+  entity "repair_projects" as repair_projects {
+    *id : UUID
+    --
+    project_id : UUID (projects)
+    project_code : varchar
+    title : varchar
+    building_name : varchar
+    repair_type_id : UUID (repair_types)
+    contractor_id : UUID (contractors)
+    status : enum
+    campus : enum
+  }
+
+  entity "repair_pow_items" as repair_pow_items {
+    *id : UUID
+    --
+    repair_project_id : UUID (repair_projects)
+    item_number : varchar
+    description : text
+    unit : varchar
+    quantity : decimal
+    unit_cost : decimal
+  }
+}
+
+' =============================
+' CLASSROOMS & ADMIN OFFICES
+' =============================
+package "Classrooms & Offices" as CAO {
+  entity "buildings" as buildings {
+    *id : UUID
+    --
+    name : varchar
+    campus : enum
+    building_type : enum
+  }
+
+  entity "rooms" as rooms {
+    *id : UUID
+    --
+    building_id : UUID (buildings)
+    room_number : varchar
+    room_type : enum
+    status : enum
+  }
+
+  entity "room_assessments" as room_assessments {
+    *id : UUID
+    --
+    room_id : UUID (rooms)
+    assessment_date : date
+    academic_year : varchar
+    semester : enum
+    assessor_id : UUID (users)
+    overall_score : decimal
+    overall_condition : enum
+  }
+}
+
+' =============================
+' UNIVERSITY OPERATIONS
+' =============================
+package "University Operations" as UO {
+  entity "university_operations" as university_operations {
+    *id : UUID
+    --
+    operation_type : enum
+    title : varchar
+    status : enum
+    campus : enum
+    coordinator_id : UUID (users)
+  }
+
+  entity "operation_indicators" as operation_indicators {
+    *id : UUID
+    --
+    operation_id : UUID (university_operations)
+    indicator_type : varchar
+    fiscal_year : int
+    target_value : decimal
+    actual_value : decimal
+  }
+
+  entity "operation_financials" as operation_financials {
+    *id : UUID
+    --
+    operation_id : UUID (university_operations)
+    fiscal_year : int
+    budget_allocation : decimal
+    obligation : decimal
+    disbursement : decimal
+    balance : decimal
+  }
+}
+
+' =============================
+' RELATIONSHIPS (Crow's Foot)
+' =============================
+' Access control
+users ||--o{ user_roles : assigns
+roles ||--o{ user_roles : contains
+roles ||--o{ role_permissions : grants
+permissions ||--o{ role_permissions : granted_to
+
+' Projects and specializations
+projects o|--|| construction_projects : base_of
+projects o|--|| repair_projects : base_of
+
+' Construction
+funding_sources ||--o{ construction_projects : funds
+construction_subcategories ||--o{ construction_projects : classifies
+contractors ||--o{ construction_projects : executes
+construction_projects ||--o{ construction_project_financials : has
+construction_projects ||--o{ construction_project_progress : has
+users ||--o{ construction_project_progress : reported_by
+construction_projects ||--o{ construction_pow_items : has
+construction_pow_items ||--o{ construction_pow_items : parent_of
+
+' Repairs
+repair_types ||--o{ repair_projects : type
+contractors ||--o{ repair_projects : executes
+repair_projects ||--o{ repair_pow_items : has
+
+' Buildings / Rooms
+buildings ||--o{ rooms : contains
+rooms ||--o{ room_assessments : assessed_by
+users ||--o{ room_assessments : assessor
+
+' University operations
+users ||--o{ university_operations : coordinates
+university_operations ||--o{ operation_indicators : has
+university_operations ||--o{ operation_financials : has
+
+' Departments
+users ||--o{ departments : heads
+users ||--o{ user_departments : member
+departments ||--o{ user_departments : includes
+
+'t Attachments & system
+users ||--o{ documents : uploaded
+users ||--o{ media : uploaded
+users ||--o{ notifications : recipient
+users ||--o{ audit_trail : actor
+users ||--o{ departments : head_of
+
+@enduml
