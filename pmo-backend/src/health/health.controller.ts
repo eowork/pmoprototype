@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { HealthService } from './health.service';
+import { Public } from '../auth/decorators';
 
 interface HealthResponse {
   status: 'ok' | 'error';
@@ -11,6 +12,7 @@ interface HealthResponse {
 }
 
 @Controller('health')
+@Public()
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
