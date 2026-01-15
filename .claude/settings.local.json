@@ -5,7 +5,9 @@
       "Bash(npm install:*)",
       "Bash(npm run build:*)",
       "Bash(dir /b \"D:\\\\Programming\\\\pmo-dash\\\\pmo-backend\\\\src\")",
-      "Bash(dir /s /b \"D:\\\\Programming\\\\pmo-dash\\\\pmo-backend\\\\src\")"
+      "Bash(dir /s /b \"D:\\\\Programming\\\\pmo-dash\\\\pmo-backend\\\\src\")",
+      "Bash(dir:*)",
+      "Bash(findstr:*)"
     ]
   }
 }
