@@ -12,6 +12,7 @@ import { ProjectsModule } from './projects/projects.module';
 import { ConstructionProjectsModule } from './construction-projects/construction-projects.module';
 import { RepairProjectsModule } from './repair-projects/repair-projects.module';
 import { GadModule } from './gad/gad.module';
+import { UsersModule } from './users/users.module';
 import { JwtAuthGuard } from './auth/guards';
 
 @Module({
@@ -39,6 +40,8 @@ import { JwtAuthGuard } from './auth/guards';
     ConstructionProjectsModule,
     RepairProjectsModule,
     GadModule,
+    // User administration
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [

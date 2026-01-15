@@ -654,11 +654,79 @@ SELECT id, deleted_at, deleted_by FROM university_operations WHERE id = '{{id}}'
 
 ---
 
-## 9. Validation Failure Tests (400)
+## 9. Users API (Admin Only)
+
+**Base Route:** `/api/users`
+**Auth:** JWT Required | Roles: `Admin` only
+
+### 9.1 CRUD Endpoints
+
+| Endpoint | Method | Status |
+|----------|--------|--------|
+| `/api/users` | `GET` | 200 |
+| `/api/users/roles` | `GET` | 200 |
+| `/api/users/:id` | `GET` | 200/404 |
+| `/api/users` | `POST` | 201 |
+| `/api/users/:id` | `PATCH` | 200 |
+| `/api/users/:id` | `DELETE` | 204 |
+
+**Query Parameters (GET /users):**
+| Param | Type | Values |
+|-------|------|--------|
+| `page` | int | >= 1 |
+| `limit` | int | 1-100 |
+| `is_active` | boolean | true/false |
+| `search` | string | email/name search |
+| `role` | string | role name filter |
+
+**Create User Body:**
+```json
+{
+  "email": "newuser@example.com",
+  "password": "SecurePass123",
+  "first_name": "John",
+  "last_name": "Doe",
+  "phone": "+639171234567",
+  "is_active": true
+}
+```
+
+### 9.2 Role Management
+
+| Endpoint | Method | Status |
+|----------|--------|--------|
+| `/api/users/:id/roles` | `POST` | 200 |
+| `/api/users/:id/roles/:roleId` | `DELETE` | 200 |
+
+**Assign Role Body:**
+```json
+{
+  "role_id": "{{existing_role_uuid}}",
+  "is_superadmin": false
+}
+```
+
+### 9.3 Account Management
+
+| Endpoint | Method | Status |
+|----------|--------|--------|
+| `/api/users/:id/unlock` | `POST` | 200 |
+| `/api/users/:id/reset-password` | `POST` | 204 |
+
+**Reset Password Body:**
+```json
+{
+  "password": "NewSecurePass123"
+}
+```
+
+---
+
+## 10. Validation Failure Tests (400)
 
 Test validation by sending invalid data:
 
-### 9.1 Missing Required Field
+### 10.1 Missing Required Field
 **Request:** `POST /api/projects`
 ```json
 {
@@ -667,7 +735,7 @@ Test validation by sending invalid data:
 ```
 **Expected:** `400 Bad Request` with validation errors for `project_code`, `project_type`, `status`, `campus`
 
-### 9.2 Invalid Enum Value
+### 10.2 Invalid Enum Value
 **Request:** `POST /api/projects`
 ```json
 {
@@ -680,19 +748,19 @@ Test validation by sending invalid data:
 ```
 **Expected:** `400 Bad Request` with enum validation error
 
-### 9.3 Invalid UUID Format
+### 10.3 Invalid UUID Format
 **Request:** `GET /api/projects/not-a-uuid`
 **Expected:** `400 Bad Request` with UUID validation error
 
-### 9.4 Pagination Out of Range
+### 10.4 Pagination Out of Range
 **Request:** `GET /api/projects?limit=500`
 **Expected:** `400 Bad Request` (limit max is 100)
 
 ---
 
-## 10. Soft Delete & Audit Field Verification
+## 11. Soft Delete & Audit Field Verification
 
-### 10.1 Soft Delete Evidence Check
+### 11.1 Soft Delete Evidence Check
 
 After deleting a record, verify in database:
 
@@ -705,7 +773,7 @@ WHERE id = '{{id}}';
 -- Expected: deleted_at IS NOT NULL, deleted_by = JWT user ID
 ```
 
-### 10.2 Record Not Returned in List After Delete
+### 11.2 Record Not Returned in List After Delete
 
 After soft delete, verify record is excluded from list:
 ```sql
@@ -716,7 +784,7 @@ GET /api/{{resource}}
 SELECT * FROM {{table}} WHERE deleted_at IS NULL;
 ```
 
-### 10.3 Audit Fields Evidence
+### 11.3 Audit Fields Evidence
 
 **On Create:**
 ```sql
@@ -738,7 +806,7 @@ SELECT id, deleted_by, deleted_at FROM {{table}} WHERE id = '{{id}}';
 
 ---
 
-## 11. Build Verification
+## 12. Build Verification
 
 ```bash
 cd pmo-backend
@@ -749,7 +817,7 @@ npm run build
 
 ---
 
-## 12. Endpoint Summary Count
+## 13. Endpoint Summary Count
 
 | Module | Endpoints | Nested Resources |
 |--------|-----------|------------------|
@@ -759,11 +827,12 @@ npm run build
 | Construction Projects | 5 | milestones (4), financials (4) |
 | Repair Projects | 5 | pow-items (4), phases (3), team-members (3) |
 | GAD | 27 | - |
-| **Total** | **49** | **26 nested** |
+| Users | 10 | roles (2), account (2) |
+| **Total** | **59** | **30 nested** |
 
 ---
 
-## 13. Mismatch Log
+## 14. Mismatch Log
 
 Use this section to document any plan vs implementation differences found during testing:
 
@@ -777,7 +846,7 @@ Use this section to document any plan vs implementation differences found during
 
 ---
 
-## 14. Test Execution Checklist
+## 15. Test Execution Checklist
 
 - [ ] Server starts successfully (`npm run start:dev`)
 - [ ] Health endpoint returns 200 (`GET /health`)
@@ -799,6 +868,11 @@ Use this section to document any plan vs implementation differences found during
 - [ ] GAD Indigenous Parity CRUD + review works
 - [ ] GAD GPB Accomplishments works
 - [ ] GAD Budget Plans works
+- [ ] Users CRUD works (Admin only)
+- [ ] Users role assignment works
+- [ ] Users account unlock works
+- [ ] Users password reset works
+- [ ] 403 returned for non-Admin accessing /users
 - [ ] Pagination returns correct shape
 - [ ] Validation failures return 400
 - [ ] Soft delete sets deleted_at/deleted_by

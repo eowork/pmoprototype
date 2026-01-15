@@ -17,6 +17,79 @@
 | 2.5.5 | GAD Parity Reports API | DONE | 2026-01-14 | 5 parity tables + GPB + budget plans endpoints |
 | 2.5.X | Build Verification | DONE | 2026-01-14 | `npm run build` succeeds with all modules |
 | 2.5.V | Verification Harness | DONE | 2026-01-14 | Created `docs/test.md` with 75 endpoint tests |
+| AUDIT | Codebase Alignment | DONE | 2026-01-15 | Drift detection complete - see Section 0.1 |
+| 2.5.6 | Users Module API | DONE | 2026-01-15 | Admin CRUD + role assignment + account management |
+
+---
+
+## 0.1 Codebase Alignment Audit (2026-01-15)
+
+### FINDINGS SUMMARY
+
+| # | File/Module | Issue | Classification | Root Cause | Impact |
+|---|-------------|-------|----------------|------------|--------|
+| 1 | `pmo-backend/src/users/` | ~~MISSING~~ **FIXED** in Step 2.5.6 | RESOLVED | Implemented 2026-01-15 | N/A |
+| 2 | `docs/plan_active.md:877` | ~~Lists as CREATED but absent~~ **FIXED** | RESOLVED | Module now exists | N/A |
+
+### VERIFIED SAFE
+
+| # | Component | Status | Notes |
+|---|-----------|--------|-------|
+| 1 | AppModule wiring | SAFE | All 9 modules properly imported |
+| 2 | Global JWT guard | SAFE | JwtAuthGuard applied via APP_GUARD |
+| 3 | ThrottlerGuard | SAFE | Rate limiting active |
+| 4 | Health @Public() | SAFE | Correctly excludes health from JWT |
+| 5 | Schema ↔ API alignment | SAFE | Table names, fields, FKs match |
+| 6 | DTO barrel exports | SAFE | All index.ts files present |
+| 7 | Pagination pattern | SAFE | Consistent across all services |
+| 8 | Soft delete pattern | SAFE | `deleted_at IS NULL` used everywhere |
+| 9 | Audit fields | SAFE | `created_by`/`submitted_by` correct per table |
+
+### MISSING MODULE DETAIL
+
+**Module:** `pmo-backend/src/users/`
+**Expected Contents (per plan_active.md):**
+- Users controller (Admin CRUD)
+- Users service
+- Role assignment endpoints
+- User management DTOs
+
+**Current State:** Directory does not exist. No users module in codebase.
+
+**Impact:**
+- No API endpoints for user administration
+- No way to create/update/delete users via API
+- Role assignment must be done via direct DB access
+- Auth module works (login/profile) but admin functions missing
+
+**Resolution:** UsersModule implemented in Step 2.5.6 (2026-01-15)
+
+### MODULES INVENTORY (ACTUAL - UPDATED 2026-01-15)
+
+```
+pmo-backend/src/
+├── app.module.ts              ✓ SAFE
+├── app.controller.ts          ✓ SAFE
+├── app.service.ts             ✓ SAFE
+├── main.ts                    ✓ SAFE
+├── auth/                      ✓ SAFE (9 files)
+├── common/                    ✓ SAFE (4 files)
+├── database/                  ✓ SAFE (3 files)
+├── health/                    ✓ SAFE (3 files)
+├── university-operations/     ✓ SAFE (8 files)
+├── projects/                  ✓ SAFE (6 files)
+├── construction-projects/     ✓ SAFE (8 files)
+├── repair-projects/           ✓ SAFE (9 files)
+├── gad/                       ✓ SAFE (6 files)
+└── users/                     ✓ CREATED (7 files) - Step 2.5.6
+```
+
+### NO MERGE ARTIFACTS DETECTED
+
+- No duplicate controllers
+- No conflicting DTOs
+- No orphaned files
+- No unused imports
 
 ---
 
@@ -24,8 +97,8 @@
 Phase 2.4 is complete and treated as a stable foundation for Phase 2.5.
 
 **Implemented (authoritative):**
-- Auth module: `pmo-backend/src/auth/*` (JWT login, Google OAuth, guards/decorators)
-- Users/admin module: `pmo-backend/src/users/*` (Admin CRUD + role assignment)
+- Auth module: `pmo-backend/src/auth/*` (JWT login, guards/decorators) ✓
+- Users/admin module: `pmo-backend/src/users/*` ✓ (Admin CRUD + role assignment) - Step 2.5.6
 - Rate limiting: `pmo-backend/src/app.module.ts` (Throttler) + `@Throttle` on auth login
 - Security hardening: auth failure logs redact PII; generic auth errors; SSO-only sentinel for Google accounts
 
