@@ -1,7 +1,10 @@
 # Phase 2.5 API Verification Harness
-**Date:** 2026-01-14
+**Date:** 2026-01-14 (Updated: 2026-01-15)
 **Protocol:** Governed AI Bootstrap v2.4
 **Purpose:** Step-by-step testing instructions for Thunder Client / Postman
+
+> **ENUM FIX (2026-01-15):** All enum values updated to match PostgreSQL schema.
+> See `docs/research_summary.md` Section 9.8 for reference.
 
 ---
 
@@ -127,9 +130,9 @@ If testing with a non-Admin/Staff user:
 | `limit` | int | No | 20 | 1-100 |
 | `sort` | string | No | `created_at` | any column |
 | `order` | string | No | `desc` | `asc`, `desc` |
-| `operation_type` | enum | No | - | `INSTRUCTION`, `RESEARCH`, `EXTENSION`, `PRODUCTION`, `ADMINISTRATIVE` |
-| `status` | enum | No | - | `DRAFT`, `PENDING`, `IN_PROGRESS`, `COMPLETED`, `ON_HOLD`, `CANCELLED` |
-| `campus` | enum | No | - | `MAIN`, `BUTUAN`, `CABADBARAN`, `SAN_FRANCISCO` |
+| `operation_type` | enum | No | - | `HIGHER_EDUCATION`, `ADVANCED_EDUCATION`, `RESEARCH`, `TECHNICAL_ADVISORY` |
+| `status` | enum | No | - | `PLANNING`, `ONGOING`, `COMPLETED`, `ON_HOLD`, `CANCELLED` |
+| `campus` | enum | No | - | `MAIN`, `CABADBARAN`, `BOTH` |
 
 **Expected Response Shape:**
 ```json
@@ -163,9 +166,9 @@ If testing with a non-Admin/Staff user:
 **Minimal Valid Body:**
 ```json
 {
-  "operation_type": "INSTRUCTION",
+  "operation_type": "HIGHER_EDUCATION",
   "title": "Test Operation",
-  "status": "DRAFT",
+  "status": "PLANNING",
   "campus": "MAIN"
 }
 ```
@@ -173,15 +176,15 @@ If testing with a non-Admin/Staff user:
 **Full Body Schema:**
 | Field | Type | Required | Validation |
 |-------|------|----------|------------|
-| `operation_type` | enum | Yes | `INSTRUCTION`, `RESEARCH`, `EXTENSION`, `PRODUCTION`, `ADMINISTRATIVE` |
+| `operation_type` | enum | Yes | `HIGHER_EDUCATION`, `ADVANCED_EDUCATION`, `RESEARCH`, `TECHNICAL_ADVISORY` |
 | `title` | string | Yes | non-empty |
 | `description` | string | No | - |
 | `code` | string | No | - |
 | `start_date` | ISO8601 | No | valid date |
 | `end_date` | ISO8601 | No | valid date |
-| `status` | enum | Yes | `DRAFT`, `PENDING`, `IN_PROGRESS`, `COMPLETED`, `ON_HOLD`, `CANCELLED` |
+| `status` | enum | Yes | `PLANNING`, `ONGOING`, `COMPLETED`, `ON_HOLD`, `CANCELLED` |
 | `budget` | number | No | - |
-| `campus` | enum | Yes | `MAIN`, `BUTUAN`, `CABADBARAN`, `SAN_FRANCISCO` |
+| `campus` | enum | Yes | `MAIN`, `CABADBARAN`, `BOTH` |
 | `coordinator_id` | UUID | No | valid UUID |
 | `metadata` | object | No | - |
 
@@ -204,7 +207,7 @@ WHERE title = 'Test Operation' ORDER BY created_at DESC LIMIT 1;
 ```json
 {
   "title": "Updated Operation Title",
-  "status": "IN_PROGRESS"
+  "status": "ONGOING"
 }
 ```
 
@@ -289,9 +292,9 @@ SELECT id, deleted_at, deleted_by FROM university_operations WHERE id = '{{id}}'
 |-------|------|--------|
 | `page` | int | >= 1 |
 | `limit` | int | 1-100 |
-| `type` | enum | `CONSTRUCTION`, `REPAIR`, `MAINTENANCE`, `RENOVATION` |
-| `status` | enum | `DRAFT`, `PENDING`, `IN_PROGRESS`, `COMPLETED`, `ON_HOLD`, `CANCELLED` |
-| `campus` | enum | `MAIN`, `BUTUAN`, `CABADBARAN`, `SAN_FRANCISCO` |
+| `type` | enum | `CONSTRUCTION`, `REPAIR`, `RESEARCH`, `EXTENSION`, `TRAINING`, `OTHER` |
+| `status` | enum | `PLANNING`, `ONGOING`, `COMPLETED`, `ON_HOLD`, `CANCELLED` |
+| `campus` | enum | `MAIN`, `CABADBARAN`, `BOTH` |
 
 ### 5.2 CRUD Endpoints
 
@@ -309,7 +312,7 @@ SELECT id, deleted_at, deleted_by FROM university_operations WHERE id = '{{id}}'
   "project_code": "PRJ-2026-001",
   "title": "Test Project",
   "project_type": "CONSTRUCTION",
-  "status": "DRAFT",
+  "status": "PLANNING",
   "campus": "MAIN"
 }
 ```
@@ -336,8 +339,8 @@ SELECT id, deleted_at, deleted_by FROM university_operations WHERE id = '{{id}}'
 |-------|------|--------|
 | `page` | int | >= 1 |
 | `limit` | int | 1-100 |
-| `status` | enum | `DRAFT`, `PENDING`, `IN_PROGRESS`, `COMPLETED`, `ON_HOLD`, `CANCELLED` |
-| `campus` | enum | `MAIN`, `BUTUAN`, `CABADBARAN`, `SAN_FRANCISCO` |
+| `status` | enum | `PLANNING`, `ONGOING`, `COMPLETED`, `ON_HOLD`, `CANCELLED` |
+| `campus` | enum | `MAIN`, `CABADBARAN`, `BOTH` |
 
 **Create Construction Project Body (Minimal):**
 ```json
@@ -347,7 +350,7 @@ SELECT id, deleted_at, deleted_by FROM university_operations WHERE id = '{{id}}'
   "title": "New Building Construction",
   "funding_source_id": "{{existing_funding_source_uuid}}",
   "campus": "MAIN",
-  "status": "DRAFT"
+  "status": "PLANNING"
 }
 ```
 
@@ -401,9 +404,9 @@ SELECT id, deleted_at, deleted_by FROM university_operations WHERE id = '{{id}}'
 |-------|------|--------|
 | `page` | int | >= 1 |
 | `limit` | int | 1-100 |
-| `status` | enum | `PENDING`, `APPROVED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED` |
+| `status` | enum | `REPORTED`, `INSPECTED`, `APPROVED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED` |
 | `urgency` | enum | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
-| `campus` | enum | `MAIN`, `BUTUAN`, `CABADBARAN`, `SAN_FRANCISCO` |
+| `campus` | enum | `MAIN`, `CABADBARAN`, `BOTH` |
 
 **Create Repair Project Body (Minimal):**
 ```json
@@ -415,7 +418,7 @@ SELECT id, deleted_at, deleted_by FROM university_operations WHERE id = '{{id}}'
   "repair_type_id": "{{existing_repair_type_uuid}}",
   "urgency_level": "MEDIUM",
   "campus": "MAIN",
-  "status": "PENDING"
+  "status": "REPORTED"
 }
 ```
 
@@ -882,5 +885,91 @@ Use this section to document any plan vs implementation differences found during
 
 ---
 
+## 16. Phase 2.6 Test Preparation (File Uploads)
+
+> **Status:** PENDING IMPLEMENTATION
+> These tests will be enabled after Phase 2.6 modules are implemented.
+
+### 16.1 Upload Infrastructure Tests
+
+| Test | Endpoint | Expected |
+|------|----------|----------|
+| Upload image file | `POST /api/uploads` | 201 + file metadata |
+| Upload document file | `POST /api/uploads` | 201 + file metadata |
+| Upload exceeds size limit | `POST /api/uploads` | 400 (file too large) |
+| Upload invalid MIME type | `POST /api/uploads` | 400 (invalid file type) |
+| Upload without file | `POST /api/uploads` | 400 (no file provided) |
+| Upload without auth | `POST /api/uploads` | 401 Unauthorized |
+
+### 16.2 Documents Module Tests
+
+| Test | Endpoint | Expected |
+|------|----------|----------|
+| List all documents | `GET /api/documents` | 200 + paginated |
+| List entity documents | `GET /api/projects/:id/documents` | 200 |
+| Upload document for entity | `POST /api/projects/:id/documents` | 201 |
+| Get document details | `GET /api/documents/:docId` | 200 |
+| Update document metadata | `PATCH /api/documents/:docId` | 200 |
+| Delete document | `DELETE /api/documents/:docId` | 204 |
+| Download document | `GET /api/documents/:docId/download` | 200 + file |
+| Document not found | `GET /api/documents/:invalid` | 404 |
+| Attach to invalid entity | `POST /api/invalid/:id/documents` | 400/404 |
+
+### 16.3 Media Module Tests
+
+| Test | Endpoint | Expected |
+|------|----------|----------|
+| List all media | `GET /api/media` | 200 + paginated |
+| List entity media | `GET /api/projects/:id/media` | 200 |
+| Upload media for entity | `POST /api/projects/:id/media` | 201 |
+| Get media details | `GET /api/media/:mediaId` | 200 |
+| Update media metadata | `PATCH /api/media/:mediaId` | 200 |
+| Delete media | `DELETE /api/media/:mediaId` | 204 |
+| Toggle featured | `PATCH /api/media/:mediaId/featured` | 200 |
+| Media not found | `GET /api/media/:invalid` | 404 |
+
+### 16.4 Construction Gallery Tests
+
+| Test | Endpoint | Expected |
+|------|----------|----------|
+| List gallery images | `GET /api/construction-projects/:id/gallery` | 200 |
+| Upload gallery image | `POST /api/construction-projects/:id/gallery` | 201 |
+| Update gallery image | `PATCH /api/construction-projects/:id/gallery/:gid` | 200 |
+| Delete gallery image | `DELETE /api/construction-projects/:id/gallery/:gid` | 204 |
+| Gallery for invalid project | `GET /api/construction-projects/:invalid/gallery` | 404 |
+
+### 16.5 File Validation Tests
+
+| Test | File Type | Size | Expected |
+|------|-----------|------|----------|
+| Valid JPEG | image/jpeg | 2MB | 201 |
+| Valid PNG | image/png | 3MB | 201 |
+| Valid PDF | application/pdf | 5MB | 201 |
+| Valid DOCX | application/vnd...docx | 4MB | 201 |
+| Oversized file | any | 15MB | 400 |
+| Executable file | .exe | 1MB | 400 |
+| Script file | .sh/.bat | 1KB | 400 |
+| Invalid extension | .xyz | 1KB | 400 |
+
+### 16.6 Phase 2.6 Test Checklist
+
+- [ ] Multer dependency installed (`npm install multer @types/multer`)
+- [ ] Upload infrastructure endpoint works
+- [ ] Documents CRUD works
+- [ ] Media CRUD works
+- [ ] Construction gallery works
+- [ ] File size limits enforced
+- [ ] MIME type validation works
+- [ ] Filename sanitization works
+- [ ] Soft delete for documents/media works
+- [ ] Audit fields populated (uploaded_by, created_at)
+- [ ] RBAC enforced (Admin/Staff only)
+- [ ] 401 returned without token
+- [ ] 403 returned for wrong role
+- [ ] `npm run build` succeeds
+
+---
+
 *ACE Framework - Phase 2.5 Verification Harness*
 *Governed AI Bootstrap v2.4*
+*Updated: 2026-01-15*

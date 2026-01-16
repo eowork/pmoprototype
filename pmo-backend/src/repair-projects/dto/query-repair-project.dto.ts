@@ -1,7 +1,7 @@
 import { IsOptional, IsEnum, IsUUID, IsBoolean } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { PaginationDto } from '../../common/dto';
-import { RepairStatus, UrgencyLevel, Campus } from './create-repair-project.dto';
+import { RepairStatus, UrgencyLevel, Campus } from '../../common/enums';
 
 export class QueryRepairProjectDto extends PaginationDto {
   @IsOptional()

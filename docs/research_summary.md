@@ -19,6 +19,9 @@
 | 2.5.V | Verification Harness | DONE | 2026-01-14 | Created `docs/test.md` with 75 endpoint tests |
 | AUDIT | Codebase Alignment | DONE | 2026-01-15 | Drift detection complete - see Section 0.1 |
 | 2.5.6 | Users Module API | DONE | 2026-01-15 | Admin CRUD + role assignment + account management |
+| 2.5.7 | ENUM Consistency Audit | DONE | 2026-01-15 | 8 BLOCKING issues identified - see Section 9 |
+| 2.5.8 | Seed Data Compatibility | DONE | 2026-01-15 | Verified seed data uses valid enum values - see Section 9.9 |
+| 2.6.R | Phase 2.6 Research | DONE | 2026-01-15 | File uploads, documents, media - see Section 10 |
 
 ---
 
@@ -337,5 +340,815 @@ src/
 
 ---
 
+## 9. ENUM Consistency Audit (2026-01-15)
+
+### 9.1 PostgreSQL ENUM Definitions (Authoritative Source)
+
+| # | ENUM Name | Values | Used By |
+|---|-----------|--------|---------|
+| 1 | `campus_enum` | `MAIN`, `CABADBARAN`, `BOTH` | university_operations, projects, construction_projects, repair_projects |
+| 2 | `project_status_enum` | `PLANNING`, `ONGOING`, `COMPLETED`, `ON_HOLD`, `CANCELLED` | projects, university_operations |
+| 3 | `repair_status_enum` | `REPORTED`, `INSPECTED`, `APPROVED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED` | repair_projects |
+| 4 | `urgency_level_enum` | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` | repair_projects |
+| 5 | `operation_type_enum` | `HIGHER_EDUCATION`, `ADVANCED_EDUCATION`, `RESEARCH`, `TECHNICAL_ADVISORY` | university_operations |
+| 6 | `project_type_enum` | `CONSTRUCTION`, `REPAIR`, `RESEARCH`, `EXTENSION`, `TRAINING`, `OTHER` | projects |
+| 7 | `building_type_enum` | `ACADEMIC`, `ADMINISTRATIVE`, `RESIDENTIAL`, `OTHER` | buildings |
+| 8 | `building_status_enum` | `OPERATIONAL`, `UNDER_CONSTRUCTION`, `RENOVATION`, `CLOSED` | buildings |
+| 9 | `room_type_enum` | `CLASSROOM`, `LABORATORY`, `OFFICE`, `CONFERENCE`, `AUDITORIUM`, `OTHER` | rooms |
+| 10 | `room_status_enum` | `AVAILABLE`, `OCCUPIED`, `UNDER_MAINTENANCE`, `UNAVAILABLE` | rooms |
+| 11 | `semester_enum` | `FIRST`, `SECOND`, `SUMMER` | academic tables |
+| 12 | `condition_enum` | `POOR`, `FAIR`, `GOOD`, `VERY_GOOD`, `EXCELLENT` | equipment, facilities |
+| 13 | `contractor_status_enum` | `ACTIVE`, `SUSPENDED`, `BLACKLISTED` | contractors |
+| 14 | `media_type_enum` | `IMAGE`, `VIDEO`, `DOCUMENT`, `OTHER` | media/gallery |
+| 15 | `department_status_enum` | `ACTIVE`, `INACTIVE` | departments |
+| 16 | `setting_data_type_enum` | `STRING`, `NUMBER`, `BOOLEAN`, `JSON`, `DATE`, `DATETIME` | system_settings |
+
+### 9.2 DTO ENUM Inventory
+
+| # | DTO Enum | File Location | Values |
+|---|----------|---------------|--------|
+| 1 | `Campus` | construction-projects/dto/create-construction-project.dto.ts | `MAIN`, `BUTUAN`, `CABADBARAN`, `SAN_FRANCISCO` |
+| 2 | `Campus` | repair-projects/dto/create-repair-project.dto.ts | `MAIN`, `BUTUAN`, `CABADBARAN`, `SAN_FRANCISCO` |
+| 3 | `Campus` | projects/dto/create-project.dto.ts | `MAIN`, `BUTUAN`, `CABADBARAN`, `SAN_FRANCISCO` |
+| 4 | `Campus` | university-operations/dto/create-operation.dto.ts | `MAIN`, `BUTUAN`, `CABADBARAN`, `SAN_FRANCISCO` |
+| 5 | `ProjectStatus` | construction-projects/dto/create-construction-project.dto.ts | `DRAFT`, `PENDING`, `IN_PROGRESS`, `COMPLETED`, `ON_HOLD`, `CANCELLED` |
+| 6 | `ProjectStatus` | projects/dto/create-project.dto.ts | `DRAFT`, `PENDING`, `IN_PROGRESS`, `COMPLETED`, `ON_HOLD`, `CANCELLED` |
+| 7 | `ProjectStatus` | university-operations/dto/create-operation.dto.ts | `DRAFT`, `PENDING`, `IN_PROGRESS`, `COMPLETED`, `ON_HOLD`, `CANCELLED` |
+| 8 | `RepairStatus` | repair-projects/dto/create-repair-project.dto.ts | `PENDING`, `APPROVED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED` |
+| 9 | `UrgencyLevel` | repair-projects/dto/create-repair-project.dto.ts | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
+| 10 | `OperationType` | university-operations/dto/create-operation.dto.ts | `INSTRUCTION`, `RESEARCH`, `EXTENSION`, `PRODUCTION`, `ADMINISTRATIVE` |
+| 11 | `ProjectType` | projects/dto/create-project.dto.ts | `CONSTRUCTION`, `REPAIR`, `MAINTENANCE`, `RENOVATION` |
+| 12 | `ParityStatus` | gad/dto/parity-data.dto.ts | `pending`, `approved`, `rejected` |
+| 13 | `IndicatorStatus` | university-operations/dto/create-indicator.dto.ts | `pending`, `approved`, `rejected` |
+
+### 9.3 Gap Analysis
+
+| DTO Enum | Schema ENUM | DTO Values | Schema Values | Severity | Issue |
+|----------|-------------|------------|---------------|----------|-------|
+| `Campus` | `campus_enum` | MAIN, BUTUAN, CABADBARAN, SAN_FRANCISCO | MAIN, CABADBARAN, BOTH | **BLOCKING** | `BUTUAN`, `SAN_FRANCISCO` invalid; `BOTH` missing |
+| `ProjectStatus` | `project_status_enum` | DRAFT, PENDING, IN_PROGRESS, COMPLETED, ON_HOLD, CANCELLED | PLANNING, ONGOING, COMPLETED, ON_HOLD, CANCELLED | **BLOCKING** | `DRAFT`, `PENDING`, `IN_PROGRESS` invalid; `PLANNING`, `ONGOING` missing |
+| `RepairStatus` | `repair_status_enum` | PENDING, APPROVED, IN_PROGRESS, COMPLETED, CANCELLED | REPORTED, INSPECTED, APPROVED, IN_PROGRESS, COMPLETED, CANCELLED | **BLOCKING** | `PENDING` invalid; `REPORTED`, `INSPECTED` missing |
+| `UrgencyLevel` | `urgency_level_enum` | LOW, MEDIUM, HIGH, CRITICAL | LOW, MEDIUM, HIGH, CRITICAL | OK | **MATCH** |
+| `OperationType` | `operation_type_enum` | INSTRUCTION, RESEARCH, EXTENSION, PRODUCTION, ADMINISTRATIVE | HIGHER_EDUCATION, ADVANCED_EDUCATION, RESEARCH, TECHNICAL_ADVISORY | **BLOCKING** | Only `RESEARCH` matches; all others invalid |
+| `ProjectType` | `project_type_enum` | CONSTRUCTION, REPAIR, MAINTENANCE, RENOVATION | CONSTRUCTION, REPAIR, RESEARCH, EXTENSION, TRAINING, OTHER | **BLOCKING** | `MAINTENANCE`, `RENOVATION` invalid; `RESEARCH`, `EXTENSION`, `TRAINING`, `OTHER` missing |
+| `ParityStatus` | (none) | pending, approved, rejected | N/A | WARNING | Custom enum not in schema; lowercase casing |
+| `IndicatorStatus` | (none) | pending, approved, rejected | N/A | WARNING | Custom enum not in schema; lowercase casing |
+
+### 9.4 BLOCKING Issues Summary
+
+| # | Issue | Impact | Affected Modules |
+|---|-------|--------|------------------|
+| 1 | Campus: `BUTUAN`, `SAN_FRANCISCO` not in schema | INSERT fails with invalid enum value | All domain modules |
+| 2 | Campus: `BOTH` missing from DTO | Cannot select `BOTH` campus option | All domain modules |
+| 3 | ProjectStatus: `DRAFT`, `PENDING`, `IN_PROGRESS` not in schema | INSERT fails | projects, construction, uni-ops |
+| 4 | ProjectStatus: `PLANNING`, `ONGOING` missing from DTO | Cannot use schema values | projects, construction, uni-ops |
+| 5 | RepairStatus: `PENDING` not in schema | INSERT fails | repair-projects |
+| 6 | RepairStatus: `REPORTED`, `INSPECTED` missing | Cannot use schema values | repair-projects |
+| 7 | OperationType: 4/5 values invalid | INSERT fails | university-operations |
+| 8 | ProjectType: 2/4 values invalid | INSERT fails | projects |
+
+### 9.5 Remediation Strategy (NO IMPLEMENTATION)
+
+**Authoritative Source:** PostgreSQL schema is the single source of truth.
+
+| DTO Enum | Remediation | Direction | Justification |
+|----------|-------------|-----------|---------------|
+| `Campus` | Update DTO to match schema | DTO → Schema | Schema defines physical campuses |
+| `ProjectStatus` | Update DTO to match schema | DTO → Schema | Schema defines business workflow |
+| `RepairStatus` | Update DTO to match schema | DTO → Schema | Schema defines repair workflow |
+| `OperationType` | Update DTO to match schema | DTO → Schema | Schema defines SUC operations |
+| `ProjectType` | Update DTO to match schema | DTO → Schema | Schema defines project categories |
+| `ParityStatus` | Add to schema OR justify | Evaluate | Custom status not modeled |
+| `IndicatorStatus` | Add to schema OR justify | Evaluate | Custom status not modeled |
+
+### 9.6 Recommended ENUM Corrections
+
+**Campus (4 files):**
+```
+FROM: MAIN, BUTUAN, CABADBARAN, SAN_FRANCISCO
+TO:   MAIN, CABADBARAN, BOTH
+```
+
+**ProjectStatus (3 files):**
+```
+FROM: DRAFT, PENDING, IN_PROGRESS, COMPLETED, ON_HOLD, CANCELLED
+TO:   PLANNING, ONGOING, COMPLETED, ON_HOLD, CANCELLED
+```
+
+**RepairStatus (1 file):**
+```
+FROM: PENDING, APPROVED, IN_PROGRESS, COMPLETED, CANCELLED
+TO:   REPORTED, INSPECTED, APPROVED, IN_PROGRESS, COMPLETED, CANCELLED
+```
+
+**OperationType (1 file):**
+```
+FROM: INSTRUCTION, RESEARCH, EXTENSION, PRODUCTION, ADMINISTRATIVE
+TO:   HIGHER_EDUCATION, ADVANCED_EDUCATION, RESEARCH, TECHNICAL_ADVISORY
+```
+
+**ProjectType (1 file):**
+```
+FROM: CONSTRUCTION, REPAIR, MAINTENANCE, RENOVATION
+TO:   CONSTRUCTION, REPAIR, RESEARCH, EXTENSION, TRAINING, OTHER
+```
+
+### 9.7 DRY Recommendation
+
+Create shared enum definitions in `src/common/enums/` to avoid duplication:
+- `src/common/enums/campus.enum.ts`
+- `src/common/enums/project-status.enum.ts`
+- `src/common/enums/project-type.enum.ts`
+- `src/common/enums/repair-status.enum.ts`
+- `src/common/enums/operation-type.enum.ts`
+- `src/common/enums/urgency-level.enum.ts`
+
+Import from common location in all DTOs.
+
+### 9.8 ENUM Implementation Status (RESOLVED)
+
+**Date:** 2026-01-15
+
+All 8 BLOCKING issues have been resolved. Shared enums created in `src/common/enums/`:
+
+| # | ENUM File | Values | Match Schema |
+|---|-----------|--------|--------------|
+| 1 | `campus.enum.ts` | MAIN, CABADBARAN, BOTH | ✓ |
+| 2 | `project-status.enum.ts` | PLANNING, ONGOING, COMPLETED, ON_HOLD, CANCELLED | ✓ |
+| 3 | `repair-status.enum.ts` | REPORTED, INSPECTED, APPROVED, IN_PROGRESS, COMPLETED, CANCELLED | ✓ |
+| 4 | `urgency-level.enum.ts` | LOW, MEDIUM, HIGH, CRITICAL | ✓ |
+| 5 | `operation-type.enum.ts` | HIGHER_EDUCATION, ADVANCED_EDUCATION, RESEARCH, TECHNICAL_ADVISORY | ✓ |
+| 6 | `project-type.enum.ts` | CONSTRUCTION, REPAIR, RESEARCH, EXTENSION, TRAINING, OTHER | ✓ |
+
+**Build Status:** `npm run build` succeeds ✓
+
+### 9.9 Seed Data Compatibility Verification
+
+**Date:** 2026-01-15
+**Reference:** `database/database draft/2026_01_12/pmo_seed_data.sql`
+
+#### Seed Data ENUM Usage
+
+| Table | Column | Value(s) Used | Schema ENUM | Compatibility |
+|-------|--------|---------------|-------------|---------------|
+| contractors | status | `'ACTIVE'` | contractor_status_enum (ACTIVE, SUSPENDED, BLACKLISTED) | ✓ VALID |
+| departments | status | `'ACTIVE'` | department_status_enum (ACTIVE, INACTIVE) | ✓ VALID |
+| system_settings | data_type | `'STRING'`, `'NUMBER'` | setting_data_type_enum | ✓ VALID |
+| system_settings | campus_default (value) | `'MAIN'` | campus_enum (MAIN, CABADBARAN, BOTH) | ✓ VALID |
+
+#### Seed Data Scope Analysis
+
+The seed data seeds **reference/lookup tables only** (no domain records):
+
+| Table | Record Count | Uses ENUMs |
+|-------|--------------|------------|
+| roles | 3 | No |
+| funding_sources | 5 | No |
+| repair_types | 9 | No |
+| construction_subcategories | 7 | No |
+| contractors | 3 | Yes (contractor_status_enum) |
+| departments | 7 | Yes (department_status_enum) |
+| system_settings | 6 | Yes (setting_data_type_enum, campus value) |
+
+**Domain tables NOT seeded:**
+- `projects` (would use project_status_enum, project_type_enum, campus_enum)
+- `university_operations` (would use operation_type_enum, project_status_enum, campus_enum)
+- `construction_projects` (would use project_status_enum, campus_enum)
+- `repair_projects` (would use repair_status_enum, urgency_level_enum, campus_enum)
+
+#### Verification Result
+
+| Verification | Status |
+|--------------|--------|
+| All 6 DTO enums match PostgreSQL schema | ✓ VERIFIED |
+| Seed data uses valid enum values | ✓ VERIFIED |
+| No invalid enum values in seed data | ✓ VERIFIED |
+| DTO enums compatible for domain INSERT | ✓ VERIFIED |
+
+**Conclusion:** DTO enums are fully compatible with both:
+1. PostgreSQL schema ENUM definitions (16 total)
+2. Seed data reference values (contractor_status, department_status, campus, setting_data_type)
+
+---
+
+## 10. Phase 2.6 Research (2026-01-15)
+
+### 10.1 Backend Directory Structure Analysis
+
+**Current Modules (85 TypeScript files):**
+
+| Module | Files | Purpose | Status |
+|--------|-------|---------|--------|
+| app/ | 3 | Core application | COMPLETE |
+| auth/ | 16 | JWT, guards, decorators, strategies | COMPLETE |
+| common/ | 9 | DTOs, enums, interfaces | COMPLETE |
+| construction-projects/ | 8 | CRUD + milestones + financials | COMPLETE |
+| database/ | 3 | PostgreSQL connection | COMPLETE |
+| gad/ | 7 | Parity reports (5 tables + planning) | COMPLETE |
+| health/ | 3 | Health checks | COMPLETE |
+| projects/ | 7 | Core project CRUD | COMPLETE |
+| repair-projects/ | 10 | CRUD + POW + phases + team | COMPLETE |
+| university-operations/ | 9 | CRUD + indicators + financials | COMPLETE |
+| users/ | 8 | Admin CRUD + role management | COMPLETE |
+
+**Missing Modules for Phase 2.6:**
+
+| Module | Purpose | Priority |
+|--------|---------|----------|
+| uploads/ | File upload infrastructure (Multer) | HIGH |
+| documents/ | Document CRUD with file handling | HIGH |
+| media/ | Media/gallery CRUD with image handling | HIGH |
+| storage/ | Storage abstraction (local/S3) | MEDIUM |
+
+### 10.2 DTO Directory Analysis
+
+**Current DTO Coverage:**
+
+| Module | DTOs | Status |
+|--------|------|--------|
+| auth/dto | login.dto.ts | COMPLETE |
+| common/dto | pagination.dto.ts | COMPLETE |
+| construction-projects/dto | create, update, query, milestone, financial (6) | COMPLETE |
+| gad/dto | parity-data, planning, query (3) | COMPLETE |
+| projects/dto | create, update, query (4) | COMPLETE |
+| repair-projects/dto | create, update, query, phase, pow-item, team-member (7) | COMPLETE |
+| university-operations/dto | create, update, query, indicator, financial (6) | COMPLETE |
+| users/dto | create, update, query, assign-role (5) | COMPLETE |
+
+**Missing DTOs for Phase 2.6:**
+
+| DTO | Purpose | Fields |
+|-----|---------|--------|
+| UploadFileDto | File upload validation | file, entity_type, entity_id |
+| CreateDocumentDto | Document creation | document_type, description, category, file |
+| UpdateDocumentDto | Document update | description, category, version |
+| QueryDocumentDto | Document filtering | documentable_type, document_type, category |
+| CreateMediaDto | Media creation | media_type, title, description, is_featured, file |
+| UpdateMediaDto | Media update | title, description, alt_text, is_featured, display_order |
+| QueryMediaDto | Media filtering | mediable_type, media_type, is_featured |
+
+### 10.3 File Upload Infrastructure Research
+
+**Schema Tables (Section 12 of pmo_schema_pg.sql):**
+
+#### documents table (lines 1069-1091)
+```
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| id | UUID | NO | Primary key |
+| documentable_type | VARCHAR(100) | NO | Entity type (polymorphic) |
+| documentable_id | UUID | NO | Entity ID (polymorphic) |
+| document_type | VARCHAR(100) | NO | Contract, Report, etc. |
+| file_name | VARCHAR(255) | NO | Original filename |
+| file_path | VARCHAR(255) | NO | Storage path |
+| file_size | INTEGER | NO | Size in bytes |
+| mime_type | VARCHAR(100) | NO | MIME type |
+| description | TEXT | YES | User description |
+| version | INTEGER | YES | Version number (default 1) |
+| category | VARCHAR(50) | YES | Category for grouping |
+| extracted_text | TEXT | YES | OCR/text extraction (future) |
+| chunks | JSONB | YES | Text chunks for search (future) |
+| processed_at | TIMESTAMPTZ | YES | Processing timestamp |
+| status | VARCHAR(50) | YES | ready, processing, error |
+| uploaded_by | UUID | NO | FK to users |
+```
+
+#### media table (lines 1097-1123)
+```
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| id | UUID | NO | Primary key |
+| mediable_type | VARCHAR(100) | NO | Entity type (polymorphic) |
+| mediable_id | UUID | NO | Entity ID (polymorphic) |
+| media_type | media_type_enum | NO | IMAGE, VIDEO, DOCUMENT, OTHER |
+| file_name | VARCHAR(255) | NO | Original filename |
+| file_path | VARCHAR(255) | NO | Storage path |
+| file_size | INTEGER | NO | Size in bytes |
+| mime_type | VARCHAR(100) | NO | MIME type |
+| title | VARCHAR(255) | YES | Display title |
+| description | TEXT | YES | Description |
+| alt_text | VARCHAR(255) | YES | Accessibility text |
+| is_featured | BOOLEAN | YES | Featured flag |
+| thumbnail_url | VARCHAR(255) | YES | Thumbnail path |
+| dimensions | JSONB | YES | Width/height |
+| tags | JSONB | YES | Tag array |
+| capture_date | DATE | YES | Photo date |
+| display_order | INTEGER | YES | Sort order |
+| location | JSONB | YES | Geo coordinates |
+| project_type | VARCHAR(50) | YES | Project classification |
+| uploaded_by | UUID | NO | FK to users |
+```
+
+#### construction_gallery table (lines 551-559)
+```
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| id | UUID | NO | Primary key |
+| project_id | UUID | NO | FK to construction_projects |
+| image_url | VARCHAR(500) | NO | Image URL/path |
+| caption | VARCHAR(255) | YES | Image caption |
+| category | VARCHAR(50) | YES | PROGRESS, BEFORE, AFTER, etc. |
+| is_featured | BOOLEAN | YES | Featured flag |
+| uploaded_at | TIMESTAMPTZ | NO | Upload timestamp |
+```
+
+### 10.4 Upload Infrastructure Requirements
+
+**Multer Configuration:**
+```typescript
+// Required config for pmo-backend
+{
+  storage: diskStorage or S3,
+  limits: {
+    fileSize: 10 * 1024 * 1024,  // 10MB default
+    files: 5                      // Max files per request
+  },
+  fileFilter: allowedMimeTypes   // Whitelist approach
+}
+```
+
+**Allowed File Types:**
+
+| Category | Extensions | MIME Types |
+|----------|------------|------------|
+| Images | jpg, jpeg, png, gif, webp | image/* |
+| Documents | pdf, doc, docx, xls, xlsx | application/pdf, application/msword, etc. |
+| Spreadsheets | csv, xls, xlsx | text/csv, application/vnd.ms-excel |
+
+**Storage Strategy:**
+
+| Phase | Storage | Path Pattern |
+|-------|---------|--------------|
+| 2.6 (MVP) | Local disk | ./uploads/{entity_type}/{entity_id}/{filename} |
+| Future | S3/MinIO | Same pattern, configurable via env |
+
+**Security Requirements:**
+- File size limits (configurable)
+- MIME type validation (whitelist)
+- Filename sanitization (remove special chars)
+- No executable files (.exe, .sh, .bat, etc.)
+- Virus scanning (future consideration)
+
+### 10.5 test.md Analysis
+
+**Current Coverage:**
+- 59 direct endpoints
+- 30 nested endpoints
+- Total: 89 endpoint tests documented
+
+**Issues Found:**
+
+| Issue | Location | Severity |
+|-------|----------|----------|
+| Outdated enum: `INSTRUCTION` | Section 4.1, 4.3 | HIGH |
+| Outdated enum: `DRAFT`, `PENDING` | Multiple sections | HIGH |
+| Outdated enum: `BUTUAN`, `SAN_FRANCISCO` | Multiple sections | HIGH |
+| Missing upload tests | Not present | MEDIUM |
+| Missing documents module tests | Not present | MEDIUM |
+| Missing media module tests | Not present | MEDIUM |
+
+**Required Updates:**
+1. Fix all enum values to match schema (Section 9.8 values)
+2. Add file upload test section
+3. Add documents CRUD tests
+4. Add media CRUD tests
+5. Add construction gallery tests
+6. Add file validation failure tests
+
+### 10.6 Phase 2.6 Candidate Definition
+
+#### Phase 2.6 IS (In Scope):
+
+| # | Component | Description | Priority |
+|---|-----------|-------------|----------|
+| 1 | Upload Infrastructure | Multer config, storage service, validation | HIGH |
+| 2 | Documents Module | CRUD with file handling, polymorphic attachment | HIGH |
+| 3 | Media Module | CRUD with image handling, thumbnails | HIGH |
+| 4 | Construction Gallery | Gallery upload endpoints for construction projects | MEDIUM |
+| 5 | Test Harness Update | Fix enums, add upload/document/media tests | HIGH |
+| 6 | System Hardening | File size limits, MIME validation, security | HIGH |
+
+#### Phase 2.6 IS NOT (Out of Scope):
+
+| Component | Reason | Deferred To |
+|-----------|--------|-------------|
+| Frontend/UI | Separate phase | Phase 3.0 |
+| Analytics/Reporting | Non-core functionality | Phase 3.1 |
+| Performance Optimization | Premature optimization | As needed |
+| DevOps/Deployment | Separate concern | Phase 3.2 |
+| Email/Notifications | Not essential for MVP | Phase 3.1 |
+| AI/Text Extraction | Advanced feature | Phase 4.0 |
+| Virus Scanning | Requires external service | Phase 3.x |
+
+### 10.7 Proposed Phase 2.6 Module Structure
+
+```
+src/
+├── uploads/
+│   ├── uploads.module.ts
+│   ├── uploads.controller.ts
+│   ├── uploads.service.ts
+│   ├── storage/
+│   │   ├── storage.service.ts
+│   │   └── local-storage.strategy.ts
+│   ├── validators/
+│   │   ├── file-size.validator.ts
+│   │   └── mime-type.validator.ts
+│   └── dto/
+│       └── upload-file.dto.ts
+├── documents/
+│   ├── documents.module.ts
+│   ├── documents.controller.ts
+│   ├── documents.service.ts
+│   └── dto/
+│       ├── create-document.dto.ts
+│       ├── update-document.dto.ts
+│       └── query-document.dto.ts
+├── media/
+│   ├── media.module.ts
+│   ├── media.controller.ts
+│   ├── media.service.ts
+│   └── dto/
+│       ├── create-media.dto.ts
+│       ├── update-media.dto.ts
+│       └── query-media.dto.ts
+```
+
+### 10.8 Proposed Phase 2.6 Endpoints
+
+**Upload Infrastructure:**
+```
+POST /api/uploads                    → Generic file upload
+```
+
+**Documents Module:**
+```
+GET    /api/documents                → List all documents (admin)
+GET    /api/{entity}/{id}/documents  → List entity documents
+POST   /api/{entity}/{id}/documents  → Upload document for entity
+GET    /api/documents/:docId         → Get document details
+PATCH  /api/documents/:docId         → Update document metadata
+DELETE /api/documents/:docId         → Soft delete document
+GET    /api/documents/:docId/download → Download file
+```
+
+**Media Module:**
+```
+GET    /api/media                    → List all media (admin)
+GET    /api/{entity}/{id}/media      → List entity media
+POST   /api/{entity}/{id}/media      → Upload media for entity
+GET    /api/media/:mediaId           → Get media details
+PATCH  /api/media/:mediaId           → Update media metadata
+DELETE /api/media/:mediaId           → Soft delete media
+PATCH  /api/media/:mediaId/featured  → Toggle featured
+```
+
+**Construction Gallery (enhancement):**
+```
+GET    /api/construction-projects/:id/gallery  → List gallery images
+POST   /api/construction-projects/:id/gallery  → Upload gallery image
+PATCH  /api/construction-projects/:id/gallery/:gid → Update image
+DELETE /api/construction-projects/:id/gallery/:gid → Remove image
+```
+
+### 10.9 Dependencies & Prerequisites
+
+| Dependency | Purpose | Install Command |
+|------------|---------|-----------------|
+| multer | File upload handling | `npm install multer @types/multer` |
+| uuid | Unique filename generation | Already installed (via pg) |
+| sharp | Image processing/thumbnails | `npm install sharp` (optional) |
+| file-type | MIME type detection | `npm install file-type` (optional) |
+
+### 10.10 MIS Compliance Considerations
+
+| Requirement | Implementation |
+|-------------|----------------|
+| Audit Trail | All uploads logged with uploaded_by, created_at |
+| Access Control | RBAC via existing guards (Admin/Staff only) |
+| Data Integrity | Soft delete pattern, version tracking |
+| File Security | MIME validation, size limits, sanitization |
+| Traceability | Polymorphic linking to parent entities |
+
+---
+
+## 11. Phase 2.7 Research (2026-01-16)
+
+### 11.1 Phase 2.6 Completion Status
+
+**Phase 2.6 (File Uploads & Documents) is COMPLETE:**
+
+| Module | Files Created | Status |
+|--------|---------------|--------|
+| uploads/ | 6 files (service, controller, module, storage, dto) | DONE |
+| documents/ | 5 files (service, controller, module, DTOs) | DONE |
+| media/ | 5 files (service, controller, module, DTOs) | DONE |
+| construction gallery | Enhanced existing module with 5 endpoints | DONE |
+| common/enums | 3 new enums (media-type, document-type, gallery-category) | DONE |
+
+**Build Verification:** `npm run build` succeeds ✓
+
+### 11.2 Schema Tables Inventory
+
+**Total Schema Tables:** 53
+
+**Currently Implemented (via API):**
+
+| # | Table | Module | Status |
+|---|-------|--------|--------|
+| 1 | users | users/ | DONE |
+| 2 | roles | auth/ | DONE |
+| 3 | permissions | auth/ | DONE |
+| 4 | role_permissions | auth/ | DONE |
+| 5 | user_roles | users/ | DONE |
+| 6 | user_page_permissions | auth/ (partial) | DONE |
+| 7 | projects | projects/ | DONE |
+| 8 | construction_projects | construction-projects/ | DONE |
+| 9 | construction_milestones | construction-projects/ | DONE |
+| 10 | construction_gallery | construction-projects/ | DONE |
+| 11 | construction_project_financials | construction-projects/ | DONE |
+| 12 | repair_projects | repair-projects/ | DONE |
+| 13 | repair_pow_items | repair-projects/ | DONE |
+| 14 | repair_project_phases | repair-projects/ | DONE |
+| 15 | repair_project_team_members | repair-projects/ | DONE |
+| 16 | repair_project_milestones | repair-projects/ | DONE |
+| 17 | university_operations | university-operations/ | DONE |
+| 18 | operation_organizational_info | university-operations/ | DONE |
+| 19 | operation_indicators | university-operations/ | DONE |
+| 20 | operation_financials | university-operations/ | DONE |
+| 21 | documents | documents/ | DONE |
+| 22 | media | media/ | DONE |
+| 23-30 | gad_* (8 tables) | gad/ | DONE |
+
+**NOT Implemented - Reference/Lookup Tables (Phase 2.7 Candidates):**
+
+| # | Table | Purpose | FK Dependencies | Priority |
+|---|-------|---------|-----------------|----------|
+| 1 | contractors | Contractor management | Referenced by construction_projects | HIGH |
+| 2 | funding_sources | Funding source lookup | Referenced by construction_projects | HIGH |
+| 3 | departments | Department hierarchy | Referenced by multiple tables | HIGH |
+| 4 | user_departments | User-department junction | FK to users, departments | MEDIUM |
+| 5 | repair_types | Repair type lookup | Referenced by repair_projects | HIGH |
+| 6 | construction_subcategories | Construction category lookup | Referenced by construction_projects | HIGH |
+
+**NOT Implemented - Facilities Management (Phase 2.8+ Candidates):**
+
+| # | Table | Purpose | Priority |
+|---|-------|---------|----------|
+| 1 | buildings | Building inventory | MEDIUM |
+| 2 | rooms | Room inventory | MEDIUM |
+| 3 | facilities | Facility tracking | MEDIUM |
+| 4 | room_assessments | Room assessment history | LOW |
+
+**NOT Implemented - System Administration (Phase 2.7 Candidates):**
+
+| # | Table | Purpose | Priority |
+|---|-------|---------|----------|
+| 1 | system_settings | Application configuration | HIGH |
+| 2 | notifications | User notifications | MEDIUM |
+| 3 | audit_trail | Audit logging (read-only) | LOW |
+
+**NOT Implemented - Extended Project Tables (Deferred):**
+
+| # | Table | Purpose | Notes |
+|---|-------|---------|-------|
+| 1 | construction_project_progress | Progress tracking | Complex, deferred |
+| 2 | construction_pow_items | Program of Work | Complex, deferred |
+| 3 | construction_project_accomplishment_records | Accomplishments | Complex, deferred |
+| 4 | repair_project_financial_reports | Financial reports | Complex, deferred |
+| 5 | repair_project_accomplishment_records | Accomplishments | Complex, deferred |
+| 6 | university_statistics | Statistics | Complex, deferred |
+| 7 | policies | Policy documents | Deferred |
+| 8 | forms_inventory | Forms management | Deferred |
+| 9 | downloadable_forms | Form downloads | Deferred |
+
+### 11.3 Phase 2.7 Scope Recommendation
+
+**Recommended Focus: Reference Data Management + System Administration**
+
+**Rationale:**
+1. Reference tables are FK-required by domain tables (already seeded but no API)
+2. Admin users need to manage contractors, funding sources, departments, etc.
+3. System settings enable application configuration
+4. Lower complexity than facilities or extended project management
+5. Foundation data that supports existing domain APIs
+
+### 11.4 Reference Table Schema Analysis
+
+#### contractors table (lines 318-334)
+```
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| id | UUID | NO | Primary key |
+| name | VARCHAR(255) | NO | Company name |
+| contact_person | VARCHAR(255) | YES | Contact person |
+| email | VARCHAR(255) | YES | Email |
+| phone | VARCHAR(20) | YES | Phone |
+| address | TEXT | YES | Address |
+| tin_number | VARCHAR(50) | YES | Tax ID |
+| registration_number | VARCHAR(100) | YES | Business registration |
+| validity_date | DATE | YES | Registration validity |
+| status | contractor_status_enum | NO | ACTIVE, SUSPENDED, BLACKLISTED |
+```
+
+#### funding_sources table (lines 282-291)
+```
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| id | UUID | NO | Primary key |
+| name | VARCHAR(100) | NO | Funding source name (unique) |
+| description | TEXT | YES | Description |
+```
+
+#### departments table (lines 246-261)
+```
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| id | UUID | NO | Primary key |
+| name | VARCHAR(255) | NO | Department name |
+| code | VARCHAR(50) | YES | Short code (unique) |
+| description | TEXT | YES | Description |
+| parent_id | UUID | YES | FK to departments (hierarchy) |
+| head_id | UUID | YES | FK to users |
+| email | VARCHAR(255) | YES | Department email |
+| phone | VARCHAR(20) | YES | Phone |
+| status | department_status_enum | NO | ACTIVE, INACTIVE |
+```
+
+#### repair_types table (lines 306-315)
+```
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| id | UUID | NO | Primary key |
+| name | VARCHAR(100) | NO | Repair type name (unique) |
+| description | TEXT | YES | Description |
+```
+
+#### construction_subcategories table (lines 294-303)
+```
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| id | UUID | NO | Primary key |
+| name | VARCHAR(100) | NO | Subcategory name (unique) |
+| description | TEXT | YES | Description |
+```
+
+#### system_settings table (lines 1376-1390)
+```
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| id | UUID | NO | Primary key |
+| setting_key | VARCHAR(100) | NO | Setting key (unique) |
+| setting_value | TEXT | YES | Value |
+| setting_group | VARCHAR(50) | NO | Grouping |
+| data_type | setting_data_type_enum | NO | STRING, NUMBER, BOOLEAN, JSON, DATE, DATETIME |
+| is_public | BOOLEAN | YES | Public visibility |
+| description | TEXT | YES | Description |
+```
+
+### 11.5 Proposed Phase 2.7 Module Structure
+
+```
+src/
+├── contractors/
+│   ├── contractors.module.ts
+│   ├── contractors.controller.ts
+│   ├── contractors.service.ts
+│   └── dto/
+│       ├── create-contractor.dto.ts
+│       ├── update-contractor.dto.ts
+│       ├── query-contractor.dto.ts
+│       └── index.ts
+├── funding-sources/
+│   ├── funding-sources.module.ts
+│   ├── funding-sources.controller.ts
+│   ├── funding-sources.service.ts
+│   └── dto/
+│       └── ...
+├── departments/
+│   ├── departments.module.ts
+│   ├── departments.controller.ts
+│   ├── departments.service.ts
+│   └── dto/
+│       └── ...
+├── repair-types/
+│   ├── repair-types.module.ts
+│   ├── repair-types.controller.ts
+│   ├── repair-types.service.ts
+│   └── dto/
+│       └── ...
+├── construction-subcategories/
+│   ├── construction-subcategories.module.ts
+│   ├── construction-subcategories.controller.ts
+│   ├── construction-subcategories.service.ts
+│   └── dto/
+│       └── ...
+├── settings/
+│   ├── settings.module.ts
+│   ├── settings.controller.ts
+│   ├── settings.service.ts
+│   └── dto/
+│       └── ...
+```
+
+### 11.6 Proposed Phase 2.7 Endpoints
+
+**Contractors:**
+```
+GET    /api/contractors              → List contractors (paginated, filtered)
+GET    /api/contractors/:id          → Get contractor details
+POST   /api/contractors              → Create contractor (Admin)
+PATCH  /api/contractors/:id          → Update contractor (Admin)
+DELETE /api/contractors/:id          → Soft delete (Admin)
+PATCH  /api/contractors/:id/status   → Update status (Admin)
+```
+
+**Funding Sources:**
+```
+GET    /api/funding-sources          → List funding sources
+GET    /api/funding-sources/:id      → Get funding source
+POST   /api/funding-sources          → Create (Admin)
+PATCH  /api/funding-sources/:id      → Update (Admin)
+DELETE /api/funding-sources/:id      → Soft delete (Admin)
+```
+
+**Departments:**
+```
+GET    /api/departments              → List departments (tree structure optional)
+GET    /api/departments/:id          → Get department with head info
+POST   /api/departments              → Create department (Admin)
+PATCH  /api/departments/:id          → Update department (Admin)
+DELETE /api/departments/:id          → Soft delete (Admin)
+GET    /api/departments/:id/users    → List users in department
+POST   /api/departments/:id/users    → Assign user to department
+DELETE /api/departments/:id/users/:uid → Remove user from department
+```
+
+**Repair Types:**
+```
+GET    /api/repair-types             → List repair types
+GET    /api/repair-types/:id         → Get repair type
+POST   /api/repair-types             → Create (Admin)
+PATCH  /api/repair-types/:id         → Update (Admin)
+DELETE /api/repair-types/:id         → Soft delete (Admin)
+```
+
+**Construction Subcategories:**
+```
+GET    /api/construction-subcategories     → List subcategories
+GET    /api/construction-subcategories/:id → Get subcategory
+POST   /api/construction-subcategories     → Create (Admin)
+PATCH  /api/construction-subcategories/:id → Update (Admin)
+DELETE /api/construction-subcategories/:id → Soft delete (Admin)
+```
+
+**System Settings:**
+```
+GET    /api/settings                 → List settings (Admin: all, Staff: public only)
+GET    /api/settings/:key            → Get setting by key
+GET    /api/settings/group/:group    → Get settings by group
+PATCH  /api/settings/:key            → Update setting (Admin)
+```
+
+### 11.7 New ENUMs Required
+
+| ENUM | Values | File |
+|------|--------|------|
+| `ContractorStatus` | ACTIVE, SUSPENDED, BLACKLISTED | `contractor-status.enum.ts` |
+| `DepartmentStatus` | ACTIVE, INACTIVE | `department-status.enum.ts` |
+| `SettingDataType` | STRING, NUMBER, BOOLEAN, JSON, DATE, DATETIME | `setting-data-type.enum.ts` |
+
+### 11.8 Phase 2.7 Security Model
+
+| Module | View | Create | Update | Delete |
+|--------|------|--------|--------|--------|
+| contractors | Admin, Staff | Admin | Admin | Admin |
+| funding_sources | Admin, Staff | Admin | Admin | Admin |
+| departments | Admin, Staff | Admin | Admin | Admin |
+| repair_types | Admin, Staff | Admin | Admin | Admin |
+| construction_subcategories | Admin, Staff | Admin | Admin | Admin |
+| system_settings (public) | Admin, Staff | - | Admin | - |
+| system_settings (private) | Admin | - | Admin | - |
+
+### 11.9 Phase 2.7 Definition of Done (Proposed)
+
+| # | Criterion | Status |
+|---|-----------|--------|
+| 1 | Contractors CRUD works | PENDING |
+| 2 | Funding Sources CRUD works | PENDING |
+| 3 | Departments CRUD works | PENDING |
+| 4 | Repair Types CRUD works | PENDING |
+| 5 | Construction Subcategories CRUD works | PENDING |
+| 6 | System Settings CRUD works | PENDING |
+| 7 | User-Department assignment works | PENDING |
+| 8 | Contractor status management works | PENDING |
+| 9 | All routes require JWT (401 without) | PENDING |
+| 10 | Role checks work (403 if denied) | PENDING |
+| 11 | Soft delete pattern implemented | PENDING |
+| 12 | Pagination for list endpoints | PENDING |
+| 13 | `npm run build` succeeds | PENDING |
+
+---
+
 *ACE Framework — Research Summary*
-*Updated: 2026-01-14*
+*Updated: 2026-01-16*

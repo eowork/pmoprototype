@@ -7,30 +7,7 @@ import {
   IsNumber,
   IsDateString,
 } from 'class-validator';
-
-export enum OperationType {
-  INSTRUCTION = 'INSTRUCTION',
-  RESEARCH = 'RESEARCH',
-  EXTENSION = 'EXTENSION',
-  PRODUCTION = 'PRODUCTION',
-  ADMINISTRATIVE = 'ADMINISTRATIVE',
-}
-
-export enum ProjectStatus {
-  DRAFT = 'DRAFT',
-  PENDING = 'PENDING',
-  IN_PROGRESS = 'IN_PROGRESS',
-  COMPLETED = 'COMPLETED',
-  ON_HOLD = 'ON_HOLD',
-  CANCELLED = 'CANCELLED',
-}
-
-export enum Campus {
-  MAIN = 'MAIN',
-  BUTUAN = 'BUTUAN',
-  CABADBARAN = 'CABADBARAN',
-  SAN_FRANCISCO = 'SAN_FRANCISCO',
-}
+import { OperationType, ProjectStatus, Campus } from '../../common/enums';
 
 export class CreateOperationDto {
   @IsEnum(OperationType)

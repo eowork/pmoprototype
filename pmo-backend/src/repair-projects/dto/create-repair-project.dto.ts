@@ -8,28 +8,7 @@ import {
   IsDateString,
   IsBoolean,
 } from 'class-validator';
-
-export enum RepairStatus {
-  PENDING = 'PENDING',
-  APPROVED = 'APPROVED',
-  IN_PROGRESS = 'IN_PROGRESS',
-  COMPLETED = 'COMPLETED',
-  CANCELLED = 'CANCELLED',
-}
-
-export enum UrgencyLevel {
-  LOW = 'LOW',
-  MEDIUM = 'MEDIUM',
-  HIGH = 'HIGH',
-  CRITICAL = 'CRITICAL',
-}
-
-export enum Campus {
-  MAIN = 'MAIN',
-  BUTUAN = 'BUTUAN',
-  CABADBARAN = 'CABADBARAN',
-  SAN_FRANCISCO = 'SAN_FRANCISCO',
-}
+import { RepairStatus, UrgencyLevel, Campus } from '../../common/enums';
 
 export class CreateRepairProjectDto {
   @IsUUID()

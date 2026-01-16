@@ -1,6 +1,6 @@
 import { IsOptional, IsEnum, IsUUID } from 'class-validator';
 import { PaginationDto } from '../../common/dto';
-import { ProjectStatus, Campus } from './create-construction-project.dto';
+import { ProjectStatus, Campus } from '../../common/enums';
 
 export class QueryConstructionProjectDto extends PaginationDto {
   @IsOptional()
