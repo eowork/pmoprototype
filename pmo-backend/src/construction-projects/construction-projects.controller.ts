@@ -11,7 +11,10 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ConstructionProjectsService } from './construction-projects.service';
 import {
   CreateConstructionProjectDto,
@@ -19,6 +22,8 @@ import {
   QueryConstructionProjectDto,
   CreateMilestoneDto,
   CreateConstructionFinancialDto,
+  CreateGalleryDto,
+  QueryGalleryDto,
 } from './dto';
 import { JwtAuthGuard, RolesGuard } from '../auth/guards';
 import { Roles, CurrentUser } from '../auth/decorators';
@@ -131,5 +136,60 @@ export class ConstructionProjectsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.removeFinancial(id, financialId, user.sub);
+  }
+
+  // --- Gallery ---
+  @Get(':id/gallery')
+  findGallery(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: QueryGalleryDto,
+  ) {
+    return this.service.findGallery(id, query);
+  }
+
+  @Get(':id/gallery/:galleryId')
+  findGalleryItem(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('galleryId', ParseUUIDPipe) galleryId: string,
+  ) {
+    return this.service.findGalleryItem(id, galleryId);
+  }
+
+  @Post(':id/gallery')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB
+      },
+    }),
+  )
+  createGalleryItem(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: CreateGalleryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.createGalleryItem(id, file, dto, user.sub);
+  }
+
+  @Patch(':id/gallery/:galleryId')
+  updateGalleryItem(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('galleryId', ParseUUIDPipe) galleryId: string,
+    @Body() dto: Partial<CreateGalleryDto>,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.updateGalleryItem(id, galleryId, dto, user.sub);
+  }
+
+  @Delete(':id/gallery/:galleryId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  removeGalleryItem(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('galleryId', ParseUUIDPipe) galleryId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.removeGalleryItem(id, galleryId, user.sub);
   }
 }

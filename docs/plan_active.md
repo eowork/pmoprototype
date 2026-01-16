@@ -1,13 +1,15 @@
-# Plan: Phase 2.5 - Domain API Development
+# Plan: Phase 2.7 - Reference Data Management
 **Status:** ACTIVE | Single Source of Truth
-**Date:** 2026-01-13
-**Reference:** `docs/research_summary.md`
+**Date:** 2026-01-16
+**Reference:** `docs/research_summary.md` Section 11
 
 ## Status Log
 - [x] Phase 2.2: Database Configuration — DONE
 - [x] Phase 2.3: Backend Initialization — DONE
 - [x] Phase 2.4: Auth & RBAC — DONE
 - [x] Phase 2.5: Domain API Development — DONE
+- [x] Phase 2.6: File Uploads & Documents — DONE
+- [ ] Phase 2.7: Reference Data Management — PENDING
 
 ## Phase 2.5 Plan (VALUE-FIRST Ordering)
 
@@ -193,6 +195,91 @@ PATCH  /gad/budget-plans/:id        → Update
 
 ---
 
+---
+
+### Step 2.5.7: ENUM Consistency Fix (BLOCKING)
+| Attribute | Value |
+|-----------|-------|
+| **Status** | DONE |
+| **Severity** | RESOLVED |
+| **Reference** | `docs/research_summary.md` Section 9 |
+
+**Problem:** DTO enums did not match PostgreSQL ENUM definitions, causing INSERT failures.
+
+**Resolution:** Created shared enums in `src/common/enums/` and refactored all DTOs.
+
+**Files Created:**
+- `src/common/enums/campus.enum.ts` - `MAIN`, `CABADBARAN`, `BOTH`
+- `src/common/enums/project-status.enum.ts` - `PLANNING`, `ONGOING`, `COMPLETED`, `ON_HOLD`, `CANCELLED`
+- `src/common/enums/repair-status.enum.ts` - `REPORTED`, `INSPECTED`, `APPROVED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`
+- `src/common/enums/operation-type.enum.ts` - `HIGHER_EDUCATION`, `ADVANCED_EDUCATION`, `RESEARCH`, `TECHNICAL_ADVISORY`
+- `src/common/enums/project-type.enum.ts` - `CONSTRUCTION`, `REPAIR`, `RESEARCH`, `EXTENSION`, `TRAINING`, `OTHER`
+- `src/common/enums/urgency-level.enum.ts` - `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`
+- `src/common/enums/index.ts` - Barrel export
+
+**Files Refactored:**
+- `university-operations/dto/create-operation.dto.ts` - Removed local enums, imports from common
+- `university-operations/dto/query-operation.dto.ts` - Updated import
+- `projects/dto/create-project.dto.ts` - Removed local enums, imports from common
+- `projects/dto/query-project.dto.ts` - Updated import
+- `construction-projects/dto/create-construction-project.dto.ts` - Removed local enums, imports from common
+- `construction-projects/dto/query-construction-project.dto.ts` - Updated import
+- `repair-projects/dto/create-repair-project.dto.ts` - Removed local enums, imports from common
+- `repair-projects/dto/query-repair-project.dto.ts` - Updated import
+
+**Remediation Tasks:**
+1. [x] Create shared enums in `src/common/enums/`
+2. [x] Update Campus enum: `MAIN`, `CABADBARAN`, `BOTH`
+3. [x] Update ProjectStatus enum: `PLANNING`, `ONGOING`, `COMPLETED`, `ON_HOLD`, `CANCELLED`
+4. [x] Update RepairStatus enum: `REPORTED`, `INSPECTED`, `APPROVED`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`
+5. [x] Update OperationType enum: `HIGHER_EDUCATION`, `ADVANCED_EDUCATION`, `RESEARCH`, `TECHNICAL_ADVISORY`
+6. [x] Update ProjectType enum: `CONSTRUCTION`, `REPAIR`, `RESEARCH`, `EXTENSION`, `TRAINING`, `OTHER`
+7. [x] Verify `npm run build` succeeds
+8. [x] Seed data compatibility verified (see 9.8)
+
+### Step 2.5.8: Seed Data Compatibility Verification
+| Attribute | Value |
+|-----------|-------|
+| **Status** | DONE |
+| **Date** | 2026-01-15 |
+| **Reference** | `database/database draft/2026_01_12/pmo_seed_data.sql` |
+
+**Objective:** Verify DTO enums are compatible with both schema AND seed data values.
+
+**Seed Data ENUM Usage Analysis:**
+
+| Table | ENUM Column | Value Used | Schema ENUM | Status |
+|-------|-------------|------------|-------------|--------|
+| contractors | status | `'ACTIVE'` | contractor_status_enum | VALID |
+| departments | status | `'ACTIVE'` | department_status_enum | VALID |
+| system_settings | data_type | `'STRING'`, `'NUMBER'` | setting_data_type_enum | VALID |
+| system_settings | campus_default | `'MAIN'` | campus_enum | VALID |
+
+**Finding:** All enum values in seed data are schema-compliant.
+
+**Seed Data Scope (No Domain Records):**
+The seed data ONLY seeds reference/lookup tables:
+- `roles` (3 records)
+- `funding_sources` (5 records)
+- `repair_types` (9 records)
+- `construction_subcategories` (7 records)
+- `contractors` (3 records)
+- `departments` (7 records)
+- `system_settings` (6 records)
+
+The seed data does NOT insert domain records that would use:
+- `project_status_enum` (no projects)
+- `repair_status_enum` (no repair_projects)
+- `operation_type_enum` (no university_operations)
+- `project_type_enum` (no projects)
+- `urgency_level_enum` (no repair_projects)
+
+**Conclusion:** DTO enums are fully compatible with both:
+1. PostgreSQL schema definitions (16 ENUMs)
+2. Seed data reference values (all valid per schema)
+
+---
+
 ### Definition of Done (Phase 2.5)
 
 | # | Criterion | Status |
@@ -208,6 +295,8 @@ PATCH  /gad/budget-plans/:id        → Update
 | 9 | Soft delete sets deleted_at/by | DONE |
 | 10 | Audit fields populated from JWT | DONE |
 | 11 | `npm run build` succeeds | DONE |
+| 12 | DTO enums match PostgreSQL schema | DONE |
+| 13 | Seed data enum values verified | DONE |
 
 ## Out Of Scope
 - UI/frontend, analytics/reporting, optimization, DevOps/deployment.
@@ -852,15 +941,17 @@ All Phase 2.4 DoD items (1–17) VERIFIED. Phase 2.4 is DONE. Ready to advance t
 
 ---
 
-## Out of Scope (Deferred to Phase 2.6+)
+## Out of Scope (Deferred to Phase 2.7+)
 
-- [ ] Business-domain API endpoint implementation (projects, repairs, reports)
+- [x] Business-domain API endpoint implementation — DONE (Phase 2.5)
+- [x] File uploads and media pipelines — IN PROGRESS (Phase 2.6)
 - [ ] Frontend integration
-- [ ] File uploads and media pipelines
 - [ ] Email/notifications
 - [ ] Advanced reporting/analytics
 - [ ] Deployment (PM2/Nginx)
 - [ ] Schema migrations tooling (Drizzle Kit) or ORM setup (optional)
+- [ ] AI/Text extraction for documents
+- [ ] Virus scanning for uploads
 
 ---
 
@@ -870,27 +961,591 @@ All Phase 2.4 DoD items (1–17) VERIFIED. Phase 2.4 is DONE. Ready to advance t
 |------|---------|--------|
 | `docs/plan_active.md` | This plan (source of truth) | ACTIVE |
 | `docs/research_summary.md` | Phase transition research | COMPLETE |
+| `docs/test.md` | API verification harness | COMPLETE |
 | `pmo-backend/src/database/research.md` | Backend DB/RBAC patterns | COMPLETE |
 | `database/database draft/2026_01_12/pmo_schema_pg.sql` | Normalized PostgreSQL schema | READY |
 | `database/database draft/2026_01_12/pmo_seed_data.sql` | Reference data seed script | READY |
 | `pmo-backend/src/auth/` | Auth module (JWT, Google OAuth, guards, decorators) | CREATED |
 | `pmo-backend/src/users/` | Users module (admin CRUD, roles) | CREATED |
-| `database/.../pmo_migration_google_oauth.sql` | Migration: google_id column | CREATED |
 | `pmo-backend/src/common/dto/` | Shared pagination, response helpers | CREATED |
+| `pmo-backend/src/common/enums/` | Shared enums (schema-aligned) | CREATED |
 | `pmo-backend/src/common/interfaces/` | Shared interfaces (JwtPayload) | CREATED |
 | `pmo-backend/src/university-operations/` | University Operations module (CRUD + nested) | CREATED |
 | `pmo-backend/src/projects/` | Projects Core module (base CRUD) | CREATED |
 | `pmo-backend/src/construction-projects/` | Construction Projects module (CRUD + nested) | CREATED |
 | `pmo-backend/src/repair-projects/` | Repair Projects module (CRUD + nested) | CREATED |
 | `pmo-backend/src/gad/` | GAD Parity Reports module (5 parity + planning) | CREATED |
+| `pmo-backend/src/uploads/` | Upload infrastructure (Multer) | PENDING |
+| `pmo-backend/src/documents/` | Documents module (CRUD + files) | PENDING |
+| `pmo-backend/src/media/` | Media module (CRUD + images) | PENDING |
 
 ---
 
 ## Phase 2.5 Transition Gate (to Phase 2.6)
 
-All Phase 2.5 DoD items (1–11) VERIFIED. Phase 2.5 is DONE. Ready to advance to Phase 2.6 (Frontend Integration / Testing).
+All Phase 2.5 DoD items (1–13) VERIFIED. Phase 2.5 is DONE. Ready to advance to Phase 2.6 (File Uploads & Documents).
 
 ---
 
-*ACE Framework - Phase 2.5 Plan*
+# Phase 2.6 Plan: File Uploads & Documents
+
+**Objective:** Implement file upload infrastructure and document/media management APIs.
+**Reference:** `docs/research_summary.md` Section 10
+**Sequencing:** Upload Infrastructure → Documents → Media → Gallery
+
+---
+
+## Step 2.6.0: Dependencies & Configuration (Do First)
+
+| Task | Module | Status |
+|------|--------|--------|
+| Install Multer dependencies | `npm install multer @types/multer` | PENDING |
+| Create uploads directory structure | `./uploads/` | PENDING |
+| Add upload config to .env | `UPLOAD_DIR`, `MAX_FILE_SIZE` | PENDING |
+
+**Environment Variables:**
+```
+UPLOAD_DIR=./uploads
+MAX_FILE_SIZE=10485760
+ALLOWED_MIME_TYPES=image/jpeg,image/png,image/gif,image/webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document
+```
+
+---
+
+## Step 2.6.1: Upload Infrastructure
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | PENDING |
+| **Module** | `pmo-backend/src/uploads/` |
+| **Purpose** | Centralized file upload handling with Multer |
+
+**Files to Create:**
+```
+src/uploads/
+├── uploads.module.ts
+├── uploads.controller.ts
+├── uploads.service.ts
+├── storage/
+│   ├── storage.service.ts
+│   └── local-storage.strategy.ts
+├── validators/
+│   ├── file-size.validator.ts
+│   └── mime-type.validator.ts
+├── dto/
+│   └── upload-file.dto.ts
+└── index.ts
+```
+
+**Endpoints:**
+```
+POST /api/uploads                    → Upload file (returns file metadata)
+```
+
+**Upload Response Shape:**
+```typescript
+{
+  id: string;           // Generated UUID
+  originalName: string; // Original filename
+  fileName: string;     // Stored filename (sanitized)
+  filePath: string;     // Storage path
+  fileSize: number;     // Size in bytes
+  mimeType: string;     // MIME type
+  uploadedBy: string;   // User ID from JWT
+  uploadedAt: string;   // ISO timestamp
+}
+```
+
+**Security:**
+- File size limit: 10MB (configurable)
+- MIME type whitelist validation
+- Filename sanitization (remove special chars)
+- No executable files (.exe, .sh, .bat, .cmd)
+
+---
+
+## Step 2.6.2: Documents Module
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | PENDING |
+| **Module** | `pmo-backend/src/documents/` |
+| **Tables** | `documents` (polymorphic) |
+
+**Files to Create:**
+```
+src/documents/
+├── documents.module.ts
+├── documents.controller.ts
+├── documents.service.ts
+└── dto/
+    ├── create-document.dto.ts
+    ├── update-document.dto.ts
+    ├── query-document.dto.ts
+    └── index.ts
+```
+
+**Endpoints:**
+```
+GET    /api/documents                        → List all documents (Admin)
+GET    /api/documents/:id                    → Get document details
+GET    /api/documents/:id/download           → Download file
+PATCH  /api/documents/:id                    → Update metadata
+DELETE /api/documents/:id                    → Soft delete
+
+--- Polymorphic attachment ---
+GET    /api/projects/:id/documents           → List project documents
+POST   /api/projects/:id/documents           → Upload document for project
+GET    /api/construction-projects/:id/documents
+POST   /api/construction-projects/:id/documents
+GET    /api/repair-projects/:id/documents
+POST   /api/repair-projects/:id/documents
+GET    /api/university-operations/:id/documents
+POST   /api/university-operations/:id/documents
+```
+
+**Create Document DTO:**
+```typescript
+{
+  document_type: string;    // 'CONTRACT', 'REPORT', 'POLICY', etc.
+  description?: string;
+  category?: string;
+  // file: Express.Multer.File (from multipart)
+}
+```
+
+**Filters:** `?document_type=CONTRACT&category=LEGAL`
+
+---
+
+## Step 2.6.3: Media Module
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | PENDING |
+| **Module** | `pmo-backend/src/media/` |
+| **Tables** | `media` (polymorphic) |
+
+**Files to Create:**
+```
+src/media/
+├── media.module.ts
+├── media.controller.ts
+├── media.service.ts
+└── dto/
+    ├── create-media.dto.ts
+    ├── update-media.dto.ts
+    ├── query-media.dto.ts
+    └── index.ts
+```
+
+**Endpoints:**
+```
+GET    /api/media                            → List all media (Admin)
+GET    /api/media/:id                        → Get media details
+PATCH  /api/media/:id                        → Update metadata
+DELETE /api/media/:id                        → Soft delete
+PATCH  /api/media/:id/featured               → Toggle featured flag
+
+--- Polymorphic attachment ---
+GET    /api/projects/:id/media               → List project media
+POST   /api/projects/:id/media               → Upload media for project
+GET    /api/construction-projects/:id/media
+POST   /api/construction-projects/:id/media
+GET    /api/repair-projects/:id/media
+POST   /api/repair-projects/:id/media
+```
+
+**Create Media DTO:**
+```typescript
+{
+  media_type: 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'OTHER';
+  title?: string;
+  description?: string;
+  alt_text?: string;
+  is_featured?: boolean;
+  capture_date?: Date;
+  tags?: string[];
+  // file: Express.Multer.File (from multipart)
+}
+```
+
+**Filters:** `?media_type=IMAGE&is_featured=true`
+
+---
+
+## Step 2.6.4: Construction Gallery Enhancement
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | PENDING |
+| **Module** | `pmo-backend/src/construction-projects/` (enhancement) |
+| **Tables** | `construction_gallery` |
+
+**Endpoints to Add:**
+```
+GET    /api/construction-projects/:id/gallery          → List gallery images
+POST   /api/construction-projects/:id/gallery          → Upload gallery image
+PATCH  /api/construction-projects/:id/gallery/:gid     → Update image metadata
+DELETE /api/construction-projects/:id/gallery/:gid     → Remove image
+```
+
+**Create Gallery DTO:**
+```typescript
+{
+  caption?: string;
+  category?: 'PROGRESS' | 'BEFORE' | 'AFTER' | 'AERIAL' | 'DETAIL';
+  is_featured?: boolean;
+  // file: Express.Multer.File (from multipart)
+}
+```
+
+---
+
+## Step 2.6.5: Common Enums Addition
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | PENDING |
+| **Module** | `pmo-backend/src/common/enums/` |
+
+**Files to Create:**
+```
+src/common/enums/
+├── media-type.enum.ts     → IMAGE, VIDEO, DOCUMENT, OTHER
+├── document-type.enum.ts  → CONTRACT, REPORT, POLICY, SPECIFICATION, OTHER
+├── gallery-category.enum.ts → PROGRESS, BEFORE, AFTER, AERIAL, DETAIL
+└── index.ts (update)
+```
+
+---
+
+## API Security (All Upload Endpoints)
+
+| Decorator | Purpose |
+|-----------|---------|
+| `@UseGuards(JwtAuthGuard)` | Require valid JWT |
+| `@UseGuards(RolesGuard)` | Check role permissions |
+| `@Roles('Admin', 'Staff')` | Allowed roles |
+| `@UseInterceptors(FileInterceptor('file'))` | Multer file handling |
+| `@CurrentUser()` | Extract user for uploaded_by |
+
+---
+
+## Definition of Done (Phase 2.6)
+
+| # | Criterion | Status |
+|---|-----------|--------|
+| 1 | Multer dependencies installed | DONE |
+| 2 | Upload infrastructure works | DONE |
+| 3 | Documents CRUD works | DONE |
+| 4 | Media CRUD works | DONE |
+| 5 | Construction gallery works | DONE |
+| 6 | Polymorphic document attachment works | DONE |
+| 7 | Polymorphic media attachment works | DONE |
+| 8 | File size limits enforced | DONE |
+| 9 | MIME type validation works | DONE |
+| 10 | Filename sanitization works | DONE |
+| 11 | Soft delete for documents/media works | DONE |
+| 12 | Audit fields populated (uploaded_by) | DONE |
+| 13 | All routes require JWT (401 without) | DONE |
+| 14 | Role checks work (403 if denied) | DONE |
+| 15 | `npm run build` succeeds | DONE |
+
+---
+
+## Phase 2.6 Risks & Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| Large file uploads timeout | Increase timeout, add progress indicator |
+| Disk space exhaustion | Implement size quotas, monitoring |
+| Invalid file types | Whitelist MIME types, validate extensions |
+| Filename injection | Sanitize filenames, use UUID for storage |
+| Orphaned files | Link files to entities, cleanup job |
+
+---
+
+## Phase 2.6 Transition Gate (to Phase 2.7)
+
+All Phase 2.6 DoD items (1–15) VERIFIED. Phase 2.6 is DONE. Ready to advance to Phase 2.7 (Reference Data Management).
+
+---
+
+# Phase 2.7 Plan: Reference Data Management
+
+**Objective:** Implement API endpoints for reference/lookup tables and system administration.
+**Reference:** `docs/research_summary.md` Section 11
+**Sequencing:** Contractors → Funding Sources → Departments → Repair Types → Construction Subcategories → Settings
+
+---
+
+## Step 2.7.0: New ENUMs (Do First)
+
+| Task | File | Status |
+|------|------|--------|
+| Create ContractorStatus enum | `src/common/enums/contractor-status.enum.ts` | PENDING |
+| Create DepartmentStatus enum | `src/common/enums/department-status.enum.ts` | PENDING |
+| Create SettingDataType enum | `src/common/enums/setting-data-type.enum.ts` | PENDING |
+| Update index.ts barrel export | `src/common/enums/index.ts` | PENDING |
+
+**ENUM Values:**
+```typescript
+// ContractorStatus (matches contractor_status_enum)
+ACTIVE, SUSPENDED, BLACKLISTED
+
+// DepartmentStatus (matches department_status_enum)
+ACTIVE, INACTIVE
+
+// SettingDataType (matches setting_data_type_enum)
+STRING, NUMBER, BOOLEAN, JSON, DATE, DATETIME
+```
+
+---
+
+## Step 2.7.1: Contractors API
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | PENDING |
+| **Module** | `pmo-backend/src/contractors/` |
+| **Tables** | `contractors` |
+
+**Endpoints:**
+```
+GET    /contractors              → List (paginated, filtered by status)
+GET    /contractors/:id          → Get details
+POST   /contractors              → Create (Admin)
+PATCH  /contractors/:id          → Update (Admin)
+DELETE /contractors/:id          → Soft delete (Admin)
+PATCH  /contractors/:id/status   → Update status (Admin)
+```
+
+**Create DTO Fields:**
+- name (required)
+- contact_person
+- email
+- phone
+- address
+- tin_number
+- registration_number
+- validity_date
+- status (required)
+
+**Filters:** `?status=ACTIVE&name=keyword`
+
+---
+
+## Step 2.7.2: Funding Sources API
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | PENDING |
+| **Module** | `pmo-backend/src/funding-sources/` |
+| **Tables** | `funding_sources` |
+
+**Endpoints:**
+```
+GET    /funding-sources          → List all
+GET    /funding-sources/:id      → Get details
+POST   /funding-sources          → Create (Admin)
+PATCH  /funding-sources/:id      → Update (Admin)
+DELETE /funding-sources/:id      → Soft delete (Admin)
+```
+
+**Create DTO Fields:**
+- name (required, unique)
+- description
+
+---
+
+## Step 2.7.3: Departments API
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | PENDING |
+| **Module** | `pmo-backend/src/departments/` |
+| **Tables** | `departments`, `user_departments` |
+
+**Endpoints:**
+```
+GET    /departments              → List (optional tree structure)
+GET    /departments/:id          → Get with head user info
+POST   /departments              → Create (Admin)
+PATCH  /departments/:id          → Update (Admin)
+DELETE /departments/:id          → Soft delete (Admin)
+
+--- User Assignment ---
+GET    /departments/:id/users    → List users in department
+POST   /departments/:id/users    → Assign user { user_id, is_primary }
+DELETE /departments/:id/users/:uid → Remove user
+```
+
+**Create DTO Fields:**
+- name (required)
+- code (unique)
+- description
+- parent_id (FK to departments)
+- head_id (FK to users)
+- email
+- phone
+- status (required)
+
+**Filters:** `?status=ACTIVE&parent_id=uuid`
+
+---
+
+## Step 2.7.4: Repair Types API
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | PENDING |
+| **Module** | `pmo-backend/src/repair-types/` |
+| **Tables** | `repair_types` |
+
+**Endpoints:**
+```
+GET    /repair-types             → List all
+GET    /repair-types/:id         → Get details
+POST   /repair-types             → Create (Admin)
+PATCH  /repair-types/:id         → Update (Admin)
+DELETE /repair-types/:id         → Soft delete (Admin)
+```
+
+**Create DTO Fields:**
+- name (required, unique)
+- description
+
+---
+
+## Step 2.7.5: Construction Subcategories API
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | PENDING |
+| **Module** | `pmo-backend/src/construction-subcategories/` |
+| **Tables** | `construction_subcategories` |
+
+**Endpoints:**
+```
+GET    /construction-subcategories     → List all
+GET    /construction-subcategories/:id → Get details
+POST   /construction-subcategories     → Create (Admin)
+PATCH  /construction-subcategories/:id → Update (Admin)
+DELETE /construction-subcategories/:id → Soft delete (Admin)
+```
+
+**Create DTO Fields:**
+- name (required, unique)
+- description
+
+---
+
+## Step 2.7.6: System Settings API
+
+| Attribute | Value |
+|-----------|-------|
+| **Status** | PENDING |
+| **Module** | `pmo-backend/src/settings/` |
+| **Tables** | `system_settings` |
+
+**Endpoints:**
+```
+GET    /settings                 → List settings (Admin: all, Staff: public only)
+GET    /settings/:key            → Get by key
+GET    /settings/group/:group    → Get by group
+PATCH  /settings/:key            → Update value (Admin)
+```
+
+**Query DTO Fields:**
+- group
+- is_public
+
+**Security:**
+- Staff can only view settings where `is_public = true`
+- Admin can view and update all settings
+
+---
+
+## API Security (All Phase 2.7 Endpoints)
+
+| Decorator | Purpose |
+|-----------|---------|
+| `@UseGuards(JwtAuthGuard)` | Require valid JWT |
+| `@UseGuards(RolesGuard)` | Check role permissions |
+| `@Roles('Admin')` | Write operations (POST/PATCH/DELETE) |
+| `@Roles('Admin', 'Staff')` | Read operations (GET) |
+| `@CurrentUser()` | Extract user for audit fields |
+
+---
+
+## Definition of Done (Phase 2.7)
+
+| # | Criterion | Status |
+|---|-----------|--------|
+| 1 | Contractors CRUD works | PENDING |
+| 2 | Funding Sources CRUD works | PENDING |
+| 3 | Departments CRUD works | PENDING |
+| 4 | Repair Types CRUD works | PENDING |
+| 5 | Construction Subcategories CRUD works | PENDING |
+| 6 | System Settings CRUD works | PENDING |
+| 7 | User-Department assignment works | PENDING |
+| 8 | Contractor status management works | PENDING |
+| 9 | All routes require JWT (401 without) | PENDING |
+| 10 | Role checks work (403 if denied) | PENDING |
+| 11 | Soft delete pattern implemented | PENDING |
+| 12 | Pagination for list endpoints | PENDING |
+| 13 | `npm run build` succeeds | PENDING |
+
+---
+
+## Phase 2.7 Risks & Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| FK constraints on delete | Check for references before soft delete |
+| Unique constraint violations | Return 409 Conflict with clear message |
+| Circular department hierarchy | Validate parent_id doesn't create cycles |
+| Settings type validation | Validate value matches data_type |
+
+---
+
+## Phase 2.7 Transition Gate (to Phase 2.8)
+
+All Phase 2.7 DoD items (1–13) must be VERIFIED before advancing to Phase 2.8 (Facilities Management or Frontend Integration).
+
+---
+
+## Files (Updated)
+
+| File | Purpose | Status |
+|------|---------|--------|
+| `docs/plan_active.md` | This plan (source of truth) | ACTIVE |
+| `docs/research_summary.md` | Phase transition research | Section 11 added |
+| `docs/test.md` | API verification harness | Needs Phase 2.7 tests |
+| `pmo-backend/src/uploads/` | Upload infrastructure | CREATED (Phase 2.6) |
+| `pmo-backend/src/documents/` | Documents module | CREATED (Phase 2.6) |
+| `pmo-backend/src/media/` | Media module | CREATED (Phase 2.6) |
+| `pmo-backend/src/contractors/` | Contractors module | PENDING (Phase 2.7) |
+| `pmo-backend/src/funding-sources/` | Funding sources module | PENDING (Phase 2.7) |
+| `pmo-backend/src/departments/` | Departments module | PENDING (Phase 2.7) |
+| `pmo-backend/src/repair-types/` | Repair types module | PENDING (Phase 2.7) |
+| `pmo-backend/src/construction-subcategories/` | Subcategories module | PENDING (Phase 2.7) |
+| `pmo-backend/src/settings/` | System settings module | PENDING (Phase 2.7) |
+
+---
+
+## Out of Scope (Deferred to Phase 2.8+)
+
+- [ ] Facilities Management (buildings, rooms)
+- [ ] Notifications module
+- [ ] Audit trail viewing
+- [ ] Frontend integration
+- [ ] Email/notifications
+- [ ] Advanced reporting/analytics
+- [ ] Deployment (PM2/Nginx)
+
+---
+
+*ACE Framework - Phase 2.7 Plan*
 *Governed AI Bootstrap v2.4*

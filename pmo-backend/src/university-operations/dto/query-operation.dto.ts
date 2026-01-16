@@ -1,7 +1,7 @@
 import { IsOptional, IsEnum, IsUUID, IsInt } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaginationDto } from '../../common/dto';
-import { OperationType, ProjectStatus, Campus } from './create-operation.dto';
+import { OperationType, ProjectStatus, Campus } from '../../common/enums';
 
 export class QueryOperationDto extends PaginationDto {
   @IsOptional()

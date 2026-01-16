@@ -13,6 +13,9 @@ import { ConstructionProjectsModule } from './construction-projects/construction
 import { RepairProjectsModule } from './repair-projects/repair-projects.module';
 import { GadModule } from './gad/gad.module';
 import { UsersModule } from './users/users.module';
+import { UploadsModule } from './uploads/uploads.module';
+import { DocumentsModule } from './documents/documents.module';
+import { MediaModule } from './media/media.module';
 import { JwtAuthGuard } from './auth/guards';
 
 @Module({
@@ -42,6 +45,12 @@ import { JwtAuthGuard } from './auth/guards';
     GadModule,
     // User administration
     UsersModule,
+    // File uploads
+    UploadsModule,
+    // Document attachments
+    DocumentsModule,
+    // Media attachments
+    MediaModule,
   ],
   controllers: [AppController],
   providers: [

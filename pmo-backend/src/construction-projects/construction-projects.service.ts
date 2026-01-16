@@ -13,14 +13,20 @@ import {
   QueryConstructionProjectDto,
   CreateMilestoneDto,
   CreateConstructionFinancialDto,
+  CreateGalleryDto,
+  QueryGalleryDto,
 } from './dto';
+import { UploadsService } from '../uploads/uploads.service';
 
 @Injectable()
 export class ConstructionProjectsService {
   private readonly logger = new Logger(ConstructionProjectsService.name);
   private readonly ALLOWED_SORTS = ['created_at', 'title', 'status', 'start_date', 'target_completion_date', 'physical_progress'];
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly uploadsService: UploadsService,
+  ) {}
 
   async findAll(query: QueryConstructionProjectDto): Promise<PaginatedResponse<any>> {
     const { page = 1, limit = 20, sort = 'created_at', order = 'desc' } = query;
@@ -364,5 +370,144 @@ export class ConstructionProjectsService {
     }
 
     this.logger.log(`CONSTRUCTION_FINANCIAL_DELETED: id=${financialId}, by=${userId}`);
+  }
+
+  // --- Gallery ---
+  async findGallery(projectId: string, query: QueryGalleryDto): Promise<PaginatedResponse<any>> {
+    await this.findOne(projectId);
+
+    const { page = 1, limit = 20, sort = 'created_at', order = 'desc' } = query;
+    const offset = (page - 1) * limit;
+
+    const sortColumn = ['created_at', 'category', 'captured_at'].includes(sort) ? sort : 'created_at';
+    const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    const conditions: string[] = ['deleted_at IS NULL', 'project_id = $1'];
+    const params: any[] = [projectId];
+    let paramIndex = 2;
+
+    if (query.category) {
+      conditions.push(`category = $${paramIndex++}`);
+      params.push(query.category);
+    }
+
+    const whereClause = conditions.join(' AND ');
+
+    const countResult = await this.db.query(
+      `SELECT COUNT(*) FROM construction_gallery WHERE ${whereClause}`,
+      params,
+    );
+    const total = parseInt(countResult.rows[0].count, 10);
+
+    const dataResult = await this.db.query(
+      `SELECT id, project_id, category, file_name, file_path, file_size, mime_type,
+              title, description, captured_at, created_at
+       FROM construction_gallery
+       WHERE ${whereClause}
+       ORDER BY ${sortColumn} ${sortOrder}
+       LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
+      [...params, limit, offset],
+    );
+
+    return createPaginatedResponse(dataResult.rows, total, page, limit);
+  }
+
+  async findGalleryItem(projectId: string, galleryId: string): Promise<any> {
+    await this.findOne(projectId);
+
+    const result = await this.db.query(
+      `SELECT * FROM construction_gallery WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL`,
+      [galleryId, projectId],
+    );
+
+    if (result.rows.length === 0) {
+      throw new NotFoundException(`Gallery item ${galleryId} not found`);
+    }
+
+    return result.rows[0];
+  }
+
+  async createGalleryItem(
+    projectId: string,
+    file: Express.Multer.File,
+    dto: CreateGalleryDto,
+    userId: string,
+  ): Promise<any> {
+    await this.findOne(projectId);
+
+    if (!file) {
+      throw new BadRequestException('Image file is required');
+    }
+
+    // Upload file using uploads service
+    const uploadResult = await this.uploadsService.uploadFile(
+      file,
+      userId,
+      'construction_gallery',
+      projectId,
+    );
+
+    const result = await this.db.query(
+      `INSERT INTO construction_gallery
+       (project_id, category, file_name, file_path, file_size, mime_type, title, description, captured_at, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING *`,
+      [
+        projectId,
+        dto.category,
+        uploadResult.originalName,
+        uploadResult.filePath,
+        uploadResult.fileSize,
+        uploadResult.mimeType,
+        dto.title || null,
+        dto.description || null,
+        dto.captured_at || null,
+        userId,
+      ],
+    );
+
+    this.logger.log(`GALLERY_CREATED: id=${result.rows[0].id}, project=${projectId}, by=${userId}`);
+    return result.rows[0];
+  }
+
+  async updateGalleryItem(
+    projectId: string,
+    galleryId: string,
+    dto: Partial<CreateGalleryDto>,
+    userId: string,
+  ): Promise<any> {
+    await this.findGalleryItem(projectId, galleryId);
+
+    const fields = Object.keys(dto).filter((k) => dto[k] !== undefined);
+    if (fields.length === 0) {
+      return this.findGalleryItem(projectId, galleryId);
+    }
+
+    const setClause = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
+    const values = fields.map((f) => dto[f]);
+
+    const result = await this.db.query(
+      `UPDATE construction_gallery SET ${setClause}, updated_at = NOW() WHERE id = $${fields.length + 1} RETURNING *`,
+      [...values, galleryId],
+    );
+
+    this.logger.log(`GALLERY_UPDATED: id=${galleryId}, by=${userId}`);
+    return result.rows[0];
+  }
+
+  async removeGalleryItem(projectId: string, galleryId: string, userId: string): Promise<void> {
+    const gallery = await this.findGalleryItem(projectId, galleryId);
+
+    // Delete the file from storage
+    if (gallery.file_path) {
+      await this.uploadsService.deleteFile(gallery.file_path);
+    }
+
+    await this.db.query(
+      `UPDATE construction_gallery SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
+      [userId, galleryId],
+    );
+
+    this.logger.log(`GALLERY_DELETED: id=${galleryId}, by=${userId}`);
   }
 }
