@@ -83,7 +83,7 @@ export class ConstructionProjectsService {
     const result = await this.db.query(
       `SELECT cp.*,
               p.title as project_title, p.project_type,
-              c.company_name as contractor_name,
+              c.name as contractor_name,
               fs.name as funding_source_name
        FROM construction_projects cp
        LEFT JOIN projects p ON cp.project_id = p.id
@@ -376,13 +376,14 @@ export class ConstructionProjectsService {
   async findGallery(projectId: string, query: QueryGalleryDto): Promise<PaginatedResponse<any>> {
     await this.findOne(projectId);
 
-    const { page = 1, limit = 20, sort = 'created_at', order = 'desc' } = query;
+    const { page = 1, limit = 20, sort = 'uploaded_at', order = 'desc' } = query;
     const offset = (page - 1) * limit;
 
-    const sortColumn = ['created_at', 'category', 'captured_at'].includes(sort) ? sort : 'created_at';
+    // Schema columns: id, project_id, image_url, caption, category, is_featured, uploaded_at
+    const sortColumn = ['uploaded_at', 'category'].includes(sort) ? sort : 'uploaded_at';
     const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 
-    const conditions: string[] = ['deleted_at IS NULL', 'project_id = $1'];
+    const conditions: string[] = ['project_id = $1'];
     const params: any[] = [projectId];
     let paramIndex = 2;
 
@@ -400,8 +401,7 @@ export class ConstructionProjectsService {
     const total = parseInt(countResult.rows[0].count, 10);
 
     const dataResult = await this.db.query(
-      `SELECT id, project_id, category, file_name, file_path, file_size, mime_type,
-              title, description, captured_at, created_at
+      `SELECT id, project_id, image_url, caption, category, is_featured, uploaded_at
        FROM construction_gallery
        WHERE ${whereClause}
        ORDER BY ${sortColumn} ${sortOrder}
@@ -416,7 +416,8 @@ export class ConstructionProjectsService {
     await this.findOne(projectId);
 
     const result = await this.db.query(
-      `SELECT * FROM construction_gallery WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL`,
+      `SELECT id, project_id, image_url, caption, category, is_featured, uploaded_at
+       FROM construction_gallery WHERE id = $1 AND project_id = $2`,
       [galleryId, projectId],
     );
 
@@ -447,22 +448,19 @@ export class ConstructionProjectsService {
       projectId,
     );
 
+    // Schema columns: project_id, image_url, caption, category, is_featured
+    // image_url is populated from upload file path
     const result = await this.db.query(
       `INSERT INTO construction_gallery
-       (project_id, category, file_name, file_path, file_size, mime_type, title, description, captured_at, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
+       (project_id, image_url, caption, category, is_featured)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, project_id, image_url, caption, category, is_featured, uploaded_at`,
       [
         projectId,
-        dto.category,
-        uploadResult.originalName,
         uploadResult.filePath,
-        uploadResult.fileSize,
-        uploadResult.mimeType,
-        dto.title || null,
-        dto.description || null,
-        dto.captured_at || null,
-        userId,
+        dto.caption || null,
+        dto.category || 'PROGRESS',
+        dto.is_featured || false,
       ],
     );
 
@@ -478,7 +476,10 @@ export class ConstructionProjectsService {
   ): Promise<any> {
     await this.findGalleryItem(projectId, galleryId);
 
-    const fields = Object.keys(dto).filter((k) => dto[k] !== undefined);
+    // Schema updatable columns: caption, category, is_featured
+    const allowedFields = ['caption', 'category', 'is_featured'];
+    const fields = Object.keys(dto).filter((k) => allowedFields.includes(k) && dto[k] !== undefined);
+
     if (fields.length === 0) {
       return this.findGalleryItem(projectId, galleryId);
     }
@@ -487,7 +488,8 @@ export class ConstructionProjectsService {
     const values = fields.map((f) => dto[f]);
 
     const result = await this.db.query(
-      `UPDATE construction_gallery SET ${setClause}, updated_at = NOW() WHERE id = $${fields.length + 1} RETURNING *`,
+      `UPDATE construction_gallery SET ${setClause} WHERE id = $${fields.length + 1}
+       RETURNING id, project_id, image_url, caption, category, is_featured, uploaded_at`,
       [...values, galleryId],
     );
 
@@ -498,14 +500,15 @@ export class ConstructionProjectsService {
   async removeGalleryItem(projectId: string, galleryId: string, userId: string): Promise<void> {
     const gallery = await this.findGalleryItem(projectId, galleryId);
 
-    // Delete the file from storage
-    if (gallery.file_path) {
-      await this.uploadsService.deleteFile(gallery.file_path);
+    // Delete the file from storage (image_url contains file path)
+    if (gallery.image_url) {
+      await this.uploadsService.deleteFile(gallery.image_url);
     }
 
+    // Hard delete - schema has no soft delete columns for construction_gallery
     await this.db.query(
-      `UPDATE construction_gallery SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
-      [userId, galleryId],
+      `DELETE FROM construction_gallery WHERE id = $1`,
+      [galleryId],
     );
 
     this.logger.log(`GALLERY_DELETED: id=${galleryId}, by=${userId}`);

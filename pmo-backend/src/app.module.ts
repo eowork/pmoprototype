@@ -16,6 +16,12 @@ import { UsersModule } from './users/users.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { DocumentsModule } from './documents/documents.module';
 import { MediaModule } from './media/media.module';
+import { ContractorsModule } from './contractors/contractors.module';
+import { FundingSourcesModule } from './funding-sources/funding-sources.module';
+import { DepartmentsModule } from './departments/departments.module';
+import { RepairTypesModule } from './repair-types/repair-types.module';
+import { ConstructionSubcategoriesModule } from './construction-subcategories/construction-subcategories.module';
+import { SettingsModule } from './settings/settings.module';
 import { JwtAuthGuard } from './auth/guards';
 
 @Module({
@@ -51,6 +57,14 @@ import { JwtAuthGuard } from './auth/guards';
     DocumentsModule,
     // Media attachments
     MediaModule,
+    // Reference data
+    ContractorsModule,
+    FundingSourcesModule,
+    DepartmentsModule,
+    RepairTypesModule,
+    ConstructionSubcategoriesModule,
+    // System settings
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [
