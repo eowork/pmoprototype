@@ -2,6 +2,7 @@ import {
   Controller, Get, Post, Patch, Delete, Body, Param, Query,
   ParseUUIDPipe, HttpCode, HttpStatus, UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { RepairProjectsService } from './repair-projects.service';
 import {
   CreateRepairProjectDto, UpdateRepairProjectDto, QueryRepairProjectDto,
@@ -11,6 +12,8 @@ import { JwtAuthGuard, RolesGuard } from '../auth/guards';
 import { Roles, CurrentUser } from '../auth/decorators';
 import { JwtPayload } from '../common/interfaces';
 
+@ApiTags('Repair Projects')
+@ApiBearerAuth('JWT-auth')
 @Controller('repair-projects')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('Admin', 'Staff')

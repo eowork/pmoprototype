@@ -14,6 +14,7 @@ import {
   UseInterceptors,
   UploadedFile,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { DocumentsService } from './documents.service';
 import { CreateDocumentDto, UpdateDocumentDto, QueryDocumentDto } from './dto';
@@ -21,6 +22,8 @@ import { JwtAuthGuard, RolesGuard } from '../auth/guards';
 import { Roles, CurrentUser } from '../auth/decorators';
 import { JwtPayload } from '../common/interfaces';
 
+@ApiTags('Documents')
+@ApiBearerAuth('JWT-auth')
 @Controller('documents')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('Admin', 'Staff')

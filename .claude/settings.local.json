@@ -7,7 +7,11 @@
       "Bash(dir /b \"D:\\\\Programming\\\\pmo-dash\\\\pmo-backend\\\\src\")",
       "Bash(dir /s /b \"D:\\\\Programming\\\\pmo-dash\\\\pmo-backend\\\\src\")",
       "Bash(dir:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(find:*)",
+      "Bash(xargs:*)",
+      "Bash(git -C \"D:\\\\Programming\\\\pmo-dash\" diff --name-only HEAD pmo-backend/src)",
+      "Bash(npm run test:*)"
     ]
   }
 }

@@ -158,4 +158,8 @@ export class AuthService {
       permissions: permsResult.rows.map((p) => p.name),
     };
   }
+
+  async logout(userId: string): Promise<void> {
+    this.logger.log(`LOGOUT: user_id=${userId}`);
+  }
 }

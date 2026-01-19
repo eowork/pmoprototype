@@ -1,13 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import * as os from 'os';
+
+interface HealthCheck {
+  status: 'healthy' | 'unhealthy';
+  latency?: number;
+  message?: string;
+}
 
 interface HealthResponse {
-  status: 'ok' | 'error';
-  database: 'connected' | 'disconnected';
-  serverTime: string;
-  tableCount?: number;
-  version?: string;
+  status: 'ok' | 'degraded' | 'error';
+  timestamp: string;
   uptime: number;
+  version: string;
+  checks: {
+    database: HealthCheck;
+    memory: HealthCheck;
+    disk?: HealthCheck;
+  };
 }
 
 interface DatabaseInfo {
@@ -26,42 +36,99 @@ export class HealthService {
   constructor(private readonly databaseService: DatabaseService) {}
 
   /**
-   * Get overall system health status
+   * Get overall system health status with detailed checks
    */
   async getHealthStatus(): Promise<HealthResponse> {
     const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+    const timestamp = new Date().toISOString();
+
+    // Check database health with latency measurement
+    const dbCheck = await this.checkDatabase();
+
+    // Check memory health
+    const memoryCheck = this.checkMemory();
+
+    // Determine overall status
+    let status: 'ok' | 'degraded' | 'error' = 'ok';
+    if (dbCheck.status === 'unhealthy') {
+      status = 'error';
+    } else if (memoryCheck.status === 'unhealthy') {
+      status = 'degraded';
+    }
+
+    return {
+      status,
+      timestamp,
+      uptime,
+      version: '2.8.0',
+      checks: {
+        database: dbCheck,
+        memory: memoryCheck,
+      },
+    };
+  }
+
+  /**
+   * Check database connectivity with latency measurement
+   */
+  private async checkDatabase(): Promise<HealthCheck> {
+    const startTime = Date.now();
 
     try {
       const isConnected = await this.databaseService.isConnected();
+      const latency = Date.now() - startTime;
 
       if (!isConnected) {
         return {
-          status: 'error',
-          database: 'disconnected',
-          serverTime: new Date().toISOString(),
-          uptime,
+          status: 'unhealthy',
+          latency,
+          message: 'Database connection failed',
         };
       }
 
-      const serverTime = await this.databaseService.getServerTime();
-      const tableCount = await this.databaseService.getTableCount();
+      // Consider slow if over 1000ms
+      if (latency > 1000) {
+        return {
+          status: 'unhealthy',
+          latency,
+          message: 'Database response slow',
+        };
+      }
 
       return {
-        status: 'ok',
-        database: 'connected',
-        serverTime: serverTime.toISOString(),
-        tableCount,
-        uptime,
+        status: 'healthy',
+        latency,
       };
     } catch (error) {
-      this.logger.error('Health check failed:', error.message);
       return {
-        status: 'error',
-        database: 'disconnected',
-        serverTime: new Date().toISOString(),
-        uptime,
+        status: 'unhealthy',
+        latency: Date.now() - startTime,
+        message: error.message,
       };
     }
+  }
+
+  /**
+   * Check memory usage
+   */
+  private checkMemory(): HealthCheck {
+    const totalMemory = os.totalmem();
+    const freeMemory = os.freemem();
+    const usedMemory = totalMemory - freeMemory;
+    const usagePercent = Math.round((usedMemory / totalMemory) * 100);
+
+    // Consider unhealthy if memory usage is above 90%
+    if (usagePercent > 90) {
+      return {
+        status: 'unhealthy',
+        message: `Memory usage: ${usagePercent}%`,
+      };
+    }
+
+    return {
+      status: 'healthy',
+      message: `Memory usage: ${usagePercent}%`,
+    };
   }
 
   /**

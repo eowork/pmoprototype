@@ -2,6 +2,7 @@ import {
   Controller, Get, Post, Patch, Delete, Body, Param, Query,
   ParseUUIDPipe, HttpCode, HttpStatus, UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { GadService } from './gad.service';
 import {
   CreateStudentParityDto, CreateFacultyParityDto, CreateStaffParityDto,
@@ -13,6 +14,8 @@ import { JwtAuthGuard, RolesGuard } from '../auth/guards';
 import { Roles, CurrentUser } from '../auth/decorators';
 import { JwtPayload } from '../common/interfaces';
 
+@ApiTags('GAD Parity')
+@ApiBearerAuth('JWT-auth')
 @Controller('gad')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('Admin', 'Staff')

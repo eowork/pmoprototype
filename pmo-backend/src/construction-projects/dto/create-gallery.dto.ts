@@ -1,19 +1,26 @@
-import { IsString, IsOptional, IsEnum, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsBoolean } from 'class-validator';
 import { GalleryCategory } from '../../common/enums';
 
+/**
+ * CreateGalleryDto - Aligned with schema `construction_gallery`
+ *
+ * Schema columns:
+ * - image_url VARCHAR(500) NOT NULL (populated from upload file path)
+ * - caption VARCHAR(255)
+ * - category VARCHAR(50) DEFAULT 'PROGRESS'
+ * - is_featured BOOLEAN DEFAULT FALSE
+ * - uploaded_at TIMESTAMPTZ DEFAULT NOW() (auto)
+ */
 export class CreateGalleryDto {
+  @IsOptional()
   @IsEnum(GalleryCategory)
-  category: GalleryCategory;
+  category?: GalleryCategory;
 
   @IsOptional()
   @IsString()
-  title?: string;
+  caption?: string;
 
   @IsOptional()
-  @IsString()
-  description?: string;
-
-  @IsOptional()
-  @IsDateString()
-  captured_at?: string;
+  @IsBoolean()
+  is_featured?: boolean;
 }

@@ -68,6 +68,10 @@ export class CreateConstructionProjectDto {
   target_completion_date?: string;
 
   @IsOptional()
+  @IsDateString()
+  actual_completion_date?: string;
+
+  @IsOptional()
   @IsString()
   project_duration?: string;
 

@@ -5,6 +5,7 @@ import {
   UseInterceptors,
   UploadedFile,
 } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiConsumes } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard, RolesGuard } from '../auth/guards';
 import { Roles, CurrentUser } from '../auth/decorators';
@@ -12,6 +13,8 @@ import { JwtPayload } from '../common/interfaces';
 import { UploadsService } from './uploads.service';
 import { UploadResponseDto } from './dto';
 
+@ApiTags('File Uploads')
+@ApiBearerAuth('JWT-auth')
 @Controller('uploads')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UploadsController {
