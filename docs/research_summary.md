@@ -34,6 +34,15 @@
 | 2.8.4 | Global Exception Filter | DONE | 2026-01-19 | Consistent error responses |
 | 2.8.5 | Logging Interceptor | DONE | 2026-01-19 | Structured JSON logging |
 | 2.8.6 | Health Check Enhancement | DONE | 2026-01-19 | DB latency + memory checks |
+| 2.9.0 | Test Dependencies | DONE | 2026-01-20 | jest, ts-jest, @nestjs/testing, supertest |
+| 2.9.1 | Jest Configuration | DONE | 2026-01-20 | jest.config.js + test/jest-e2e.json |
+| 2.9.2 | Auth Unit Tests | DONE | 2026-01-20 | 8 tests: validateUser, login, getProfile, logout |
+| 2.9.3 | Contractors E2E Tests | DONE | 2026-01-20 | 8 tests: auth check, CRUD cycle, 404 handling |
+| 2.9.V | Full Verification | DONE | 2026-01-20 | npm run build && npm run test passes |
+| 2.9.D | Test Documentation | DONE | 2026-01-20 | docs/test_doc.md created (beginner usage guide) |
+| 3.0.R | Phase 3.0 Research (Initial) | DONE | 2026-01-20 | Vue 3 + Vuetify 3 frontend setup - see Section 14 |
+| 3.0.P | Prototype UI Analysis | DONE | 2026-01-20 | Backend-UI alignment, CSU branding - see Section 15 |
+| 3.0.G | Gap Re-Classification | DONE | 2026-01-20 | Startup kick-off priorities, deferred features - see Section 16 |
 
 ---
 
@@ -1596,5 +1605,710 @@ remarks TEXT
 
 ---
 
+## 14. Phase 3.0 Research: Frontend Configuration & Setup (2026-01-20)
+
+### 14.1 Technology Decision
+
+**Selected Stack:** Vue 3 + Vuetify 3 + TypeScript
+
+**Rationale:**
+- Vuetify provides Material Design components optimized for admin dashboards
+- Vue 3 Composition API aligns with modern TypeScript patterns
+- Complete UI kit: forms, tables, navigation, dialogs out-of-box
+- Lower learning curve for data-driven CRUD applications
+
+**Prototype Status:** Existing React/Vite prototype in `prototype/` folder is REFERENCE ONLY.
+New frontend will be built with Vue + Vuetify per project requirements.
+
+### 14.2 Frontend Role and Boundaries
+
+**Frontend IS Responsible For:**
+
+| Responsibility | Description |
+|----------------|-------------|
+| UI Rendering | Display data received from backend |
+| Form Input | Collect and validate user input (client-side) |
+| Token Storage | Store JWT securely for authenticated requests |
+| API Calls | Send requests to backend endpoints |
+| UI State | Manage loading, error, and success states |
+| Navigation Guards | Redirect unauthenticated users to login |
+| Role-Based Visibility | Show/hide UI elements based on user roles |
+
+**Frontend IS NOT Responsible For:**
+
+| Exclusion | Reason | Owner |
+|-----------|--------|-------|
+| Business Rules | TDA violation | Backend |
+| Authorization Decisions | Security risk if client-side | Backend guards |
+| Data Validation (authoritative) | Can be bypassed | Backend DTOs |
+| Password Hashing | Security concern | Backend |
+| Token Generation | JWT signing key on server | Backend |
+| Database Access | Architecture violation | Backend |
+
+**TDA Principle:** Frontend delegates all decisions to backend. UI role checks are for visibility only, not security.
+
+### 14.3 Backend Auth Analysis
+
+**Endpoints Available:**
+
+| Endpoint | Method | Auth | Purpose |
+|----------|--------|------|---------|
+| `/api/auth/login` | POST | Public | Returns `{ access_token, user }` |
+| `/api/auth/me` | GET | JWT | Returns full profile with roles/permissions |
+| `/api/auth/logout` | POST | JWT | Audit trail only (token remains valid) |
+
+**Login Response Structure:**
+```typescript
+{
+  access_token: string,  // JWT token
+  user: {
+    id: string,
+    email: string,
+    first_name: string,
+    last_name: string,
+    roles: string[]
+  }
+}
+```
+
+**JWT Payload (decoded):**
+```typescript
+{
+  sub: string,        // user id
+  email: string,
+  roles: string[],    // ['Admin', 'Staff']
+  is_superadmin: boolean,
+  iat: number,
+  exp: number
+}
+```
+
+**Profile Response (GET /api/auth/me):**
+```typescript
+{
+  id: string,
+  email: string,
+  first_name: string,
+  last_name: string,
+  avatar_url: string | null,
+  roles: { id: string, name: string }[],
+  is_superadmin: boolean,
+  permissions: string[]
+}
+```
+
+**Security Features:**
+- Rate limiting: 5 login attempts per minute (ThrottlerGuard)
+- Account lockout: 15 minutes after 5 failed attempts
+- SSO-only sentinel: Blocks password login for Google-linked accounts
+- Generic error messages: No user enumeration
+
+### 14.4 Auth Integration Requirements
+
+**Token Storage Strategy:**
+
+| Option | Security | Persistence | Recommendation |
+|--------|----------|-------------|----------------|
+| localStorage | LOW (XSS vulnerable) | Persists | Acceptable for internal admin tool |
+| sessionStorage | LOW (XSS vulnerable) | Session only | Alternative if persistence not needed |
+| HttpOnly Cookie | HIGH | Persists | Requires backend cookie support (not implemented) |
+| Memory + Refresh | HIGH | None | Complex, overkill for MVP |
+
+**Recommendation:** Use `localStorage` for MVP with plan to migrate to HttpOnly cookies.
+
+**Auth Flow:**
+1. User submits email/password to `/api/auth/login`
+2. On success: store `access_token` in localStorage, store `user` in Pinia
+3. On failure: display error message (generic: "Invalid credentials")
+4. All subsequent API calls: attach `Authorization: Bearer <token>` header
+5. On 401 response: clear token, redirect to login
+6. Logout: call `/api/auth/logout`, clear localStorage, redirect to login
+
+**Route Protection:**
+```typescript
+// Vue Router navigation guard
+router.beforeEach((to, from, next) => {
+  const token = localStorage.getItem('access_token');
+  if (to.meta.requiresAuth && !token) {
+    next('/login');
+  } else {
+    next();
+  }
+});
+```
+
+### 14.5 Vuetify Configuration Research
+
+**Minimal Setup Requirements:**
+
+| Component | Purpose | Priority |
+|-----------|---------|----------|
+| VApp | Root wrapper | REQUIRED |
+| VMain | Content area | REQUIRED |
+| VNavigationDrawer | Sidebar navigation | HIGH |
+| VAppBar | Top bar with user menu | HIGH |
+| VForm + VTextField | Login form | HIGH |
+| VDataTable | Data lists | HIGH |
+| VDialog | Modals/confirmations | MEDIUM |
+| VCard | Content containers | MEDIUM |
+| VBtn | Actions | MEDIUM |
+| VSnackbar | Notifications | MEDIUM |
+
+**Avoid Premature Configuration (YAGNI):**
+- Custom themes: Use default Material Design
+- Icon packs: Use mdi (included by default)
+- Locale/i18n: English only for MVP
+- Dark mode: Not required initially
+
+**Recommended Structure:**
+```
+pmo-frontend/
+├── src/
+│   ├── main.ts              # Vue + Vuetify initialization
+│   ├── App.vue              # Root component
+│   ├── router/
+│   │   └── index.ts         # Vue Router with guards
+│   ├── stores/
+│   │   └── auth.ts          # Pinia auth store
+│   ├── composables/
+│   │   └── useApi.ts        # API client composable
+│   ├── layouts/
+│   │   ├── DefaultLayout.vue # Authenticated layout
+│   │   └── AuthLayout.vue    # Login/public layout
+│   ├── views/
+│   │   ├── LoginView.vue
+│   │   ├── DashboardView.vue
+│   │   └── projects/
+│   │       └── ProjectsListView.vue
+│   └── types/
+│       └── api.ts           # TypeScript interfaces
+├── .env                      # VITE_API_BASE_URL
+└── package.json
+```
+
+### 14.6 Software Engineering Principles Check
+
+| Principle | Application | Status |
+|-----------|-------------|--------|
+| **KISS** | Simple auth flow, standard Vuetify components, no custom CSS | ✓ |
+| **YAGNI** | No state management beyond Pinia auth store initially | ✓ |
+| **SOLID** | Auth store separate from API client separate from views | ✓ |
+| **DRY** | Single API client composable, shared layout components | ✓ |
+| **TDA** | UI never enforces business rules, only displays backend results | ✓ |
+
+**State Management Decision:**
+- Use Pinia for auth state only
+- No global store for domain data (fetch on component mount)
+- Avoid Vuex complexity (YAGNI)
+
+### 14.7 MIS Compliance Review
+
+| Requirement | Implementation | Status |
+|-------------|----------------|--------|
+| Auditability | Login/logout calls backend (logged server-side) | ✓ |
+| Deterministic UI | All data from backend, no client-side business logic | ✓ |
+| No Data Leakage | Token in localStorage (acceptable for internal tool), no PII in console logs | ✓ |
+| Predictable Behavior | Standard Vue Router guards, consistent error handling | ✓ |
+| Role Visibility | UI elements hidden based on `user.roles` from backend | ✓ |
+
+**Security Considerations:**
+- Never log tokens or passwords to console
+- Clear sensitive data on logout
+- Handle 401/403 consistently
+- No sensitive data in URL parameters
+
+### 14.8 Plan Alignment Notes
+
+**Current Phase Status:**
+- Phase 2.9 (Testing Infrastructure): COMPLETE
+- Phase 3.0 (Frontend Integration): NEXT
+
+**Recommended Phase 3.0 Naming:** "Frontend Initialization"
+
+**Scope for Phase 3.0:**
+
+| Step | Description | Outcome |
+|------|-------------|---------|
+| 3.0.0 | Project scaffolding | Vue 3 + Vuetify + TypeScript + Vite |
+| 3.0.1 | API client setup | `useApi` composable with JWT injection |
+| 3.0.2 | Auth store | Pinia store with login/logout/user state |
+| 3.0.3 | Router setup | Vue Router with auth guards |
+| 3.0.4 | Login page | Form → backend auth → redirect |
+| 3.0.5 | Dashboard layout | AppBar + Drawer + Main content |
+| 3.0.V | Build verification | `npm run build` succeeds |
+
+**Out of Scope for Phase 3.0:**
+- Domain CRUD pages (Phase 3.1+)
+- Advanced theming
+- Unit tests for frontend
+- Mobile responsiveness optimization
+
+### 14.9 Entry Criteria for Phase 3.0
+
+| # | Criterion | Status |
+|---|-----------|--------|
+| 1 | Backend build passing | ✓ DONE |
+| 2 | Backend tests passing | ✓ DONE |
+| 3 | OpenAPI docs available | ✓ DONE |
+| 4 | Auth endpoints functional | ✓ DONE |
+| 5 | CORS enabled | ✓ DONE |
+
+### 14.10 Exit Criteria for Phase 3.0 (Proposed)
+
+| # | Criterion | Verification |
+|---|-----------|--------------|
+| 1 | Login works with valid credentials | Manual test |
+| 2 | Invalid login shows error | Manual test |
+| 3 | Authenticated routes protected | Redirect to login without token |
+| 4 | Dashboard displays user info | Shows name/roles from `/api/auth/me` |
+| 5 | Logout clears state | Token removed, redirect to login |
+| 6 | Build succeeds | `npm run build` exit 0 |
+
+---
+
+## 15. Prototype UI Analysis & Backend Alignment (2026-01-20)
+
+### 15.1 Prototype UI Structure Analysis
+
+**Prototype Location:** `prototype/Admin Side/` and `prototype/General User Side/`
+
+**Technology Stack:** React + Vite + Radix UI + shadcn/ui + Tailwind CSS
+
+**Key Findings:**
+- Prototype uses React/TypeScript (NOT Vue/Vuetify)
+- Extensive use of Radix UI headless components
+- shadcn/ui component library for consistent design
+- Supabase integration (will be replaced with NestJS backend)
+
+### 15.2 Page Inventory
+
+**Admin Side Pages:**
+
+| Category | Pages | Backend API Expected |
+|----------|-------|----------------------|
+| Dashboard | Overview with analytics | GET `/api/dashboard/analytics` |
+| About Us | Personnel, Objectives, Contact | Static content |
+| University Operations | Higher Ed, Advanced Ed, Research, Technical Advisory | GET `/api/university-operations` |
+| Facilities Assessment | Classroom/Lab/Office Assessments, Prioritization Matrix | GET `/api/assessments/*` ⚠ MISSING |
+| Construction | GAA/Local/Special Grants Projects | GET `/api/construction-projects` |
+| Repairs | Classroom/Office Repairs | GET `/api/repair-projects` |
+| GAD Parity | Gender Reports, GPB, Budget Plans | GET `/api/gad/*` |
+| Forms | Downloadable Forms Inventory | GET `/api/forms` ⚠ MISSING |
+| Policies | MOA, MOU | GET `/api/policies` ⚠ MISSING |
+| User Management | RBAC Configuration | GET `/api/users` |
+| Settings | User Profile, Preferences | GET `/api/settings` |
+
+**General User Side (Public-Facing):**
+
+| Page | Purpose | Backend API |
+|------|---------|-------------|
+| HomePage | Public landing with announcements | GET `/api/announcements` ⚠ MISSING |
+| AboutUsPageEnhanced | Organization information | Static content |
+| UniversityOperationsPage | Public operations view | GET `/api/university-operations?public=true` |
+| ConstructionInfrastructurePage | Public construction projects | GET `/api/construction-projects?public=true` |
+| RepairsPageRestored | Public repairs overview | GET `/api/repair-projects?public=true` |
+| GADParityKnowledgeManagementPage | Public parity data | GET `/api/gad/*?public=true` |
+| ClientDownloadableFormsPage | Public forms library | GET `/api/forms?public=true` ⚠ MISSING |
+| ClientPoliciesPage | Public policies | GET `/api/policies?public=true` ⚠ MISSING |
+
+### 15.3 Backend ↔ UI Alignment Check
+
+**Fully Aligned (Backend Exists):**
+
+| # | UI Expectation | Backend Module | Status |
+|---|----------------|----------------|--------|
+| 1 | Project CRUD | `projects/` | ✓ ALIGNED |
+| 2 | Construction Projects | `construction-projects/` | ✓ ALIGNED |
+| 3 | Repair Projects | `repair-projects/` | ✓ ALIGNED |
+| 4 | University Operations | `university-operations/` | ✓ ALIGNED |
+| 5 | GAD Parity Data | `gad/` | ✓ ALIGNED |
+| 6 | User Management | `users/` | ✓ ALIGNED |
+| 7 | Auth (Login/Logout) | `auth/` | ✓ ALIGNED |
+| 8 | Contractors | `contractors/` | ✓ ALIGNED |
+| 9 | Funding Sources | `funding-sources/` | ✓ ALIGNED |
+| 10 | Departments | `departments/` | ✓ ALIGNED |
+| 11 | Document Uploads | `documents/`, `media/`, `uploads/` | ✓ ALIGNED |
+| 12 | System Settings | `settings/` | ✓ ALIGNED |
+
+**Partially Aligned (Mismatch or Incomplete):**
+
+| # | UI Expectation | Backend Status | Gap Description |
+|---|----------------|----------------|-----------------|
+| 1 | Dashboard Analytics | ❌ MISSING | No `/api/dashboard/analytics` endpoint |
+| 2 | Public vs. Admin Views | ⚠ PARTIAL | No `?public=true` filter support |
+| 3 | Project Gallery Tab | ✓ EXISTS | `construction_gallery` table exists, API implemented |
+| 4 | Prioritization Matrix | ❌ MISSING | UI calculates urgency×impact matrix, no backend |
+
+**Missing Modules (UI Expects, Backend Absent):**
+
+| # | UI Feature | Expected API | Priority | Impact |
+|---|------------|--------------|----------|--------|
+| 1 | Facilities Assessment | GET `/api/assessments/classrooms` | HIGH | Cannot manage classroom/office assessments |
+| 2 | Facilities Assessment | GET `/api/assessments/offices` | HIGH | Cannot manage office assessments |
+| 3 | Downloadable Forms | GET `/api/forms` | MEDIUM | No forms management API |
+| 4 | Policies | GET `/api/policies` | MEDIUM | No MOA/MOU management |
+| 5 | Announcements | GET `/api/announcements` | LOW | Public homepage empty |
+| 6 | Dashboard Metrics | GET `/api/dashboard/analytics` | HIGH | No summary statistics |
+
+### 15.4 Data Shape Comparison
+
+**Prototype Project Interface vs. Backend DTO:**
+
+| Field | Prototype Expects | Backend Provides | Match |
+|-------|-------------------|------------------|-------|
+| `id` | string (UUID) | UUID | ✓ |
+| `projectName` | string | `title` ⚠ | Field name mismatch |
+| `totalContractAmount` | number | ❌ MISSING | Not in schema |
+| `physicalAccomplishment` | number (0-100) | ❌ MISSING | Not in schema |
+| `powStatus` | enum | ❌ MISSING | Not in schema |
+| `location` | string | `campus` enum only ⚠ | Insufficient granularity |
+| `contractor` | string | `contractor_id` FK | ✓ |
+| `status` | `Planning\|Ongoing\|Completed\|On Hold\|Cancelled` | `project_status_enum` | ✓ |
+| `progress` | number | ❌ MISSING | Not in schema |
+
+**BLOCKING Issues:**
+
+1. **Field Name Mismatch**: UI uses `projectName`, backend uses `title`
+2. **Missing Financial Fields**: No `totalContractAmount`, `budgetUtilized` in schema
+3. **Missing Progress Tracking**: No `physicalAccomplishment`, `progress` fields
+4. **Missing POW Status**: UI expects program-of-work approval status
+
+**Recommendation:** Either:
+- Option A: Update backend DTOs to match prototype expectations (breaking change)
+- Option B: Create frontend data adapters to map backend → prototype shape (RECOMMENDED)
+
+### 15.5 RBAC Implementation Comparison
+
+**Prototype RBAC Model:**
+```typescript
+interface User {
+  role: 'Admin' | 'Director' | 'Staff' | 'Editor' | 'Client';
+  allowedPages: string[]; // Page-level access control
+  assignedProjects?: {
+    construction?: string[];
+    repairs?: string[];
+  };
+}
+```
+
+**Backend RBAC Model:**
+```typescript
+// From auth/ module
+interface User {
+  roles: { id: string, name: string }[]; // Multi-role support
+  is_superadmin: boolean;
+  permissions: string[]; // Permission-based (not page-based)
+}
+```
+
+**Alignment Gap:**
+- Prototype uses **page-based access** (`allowedPages`)
+- Backend uses **permission-based access** (`permissions`)
+- Frontend must translate permissions → page visibility
+
+**Resolution:** Frontend navigation guard maps permissions to routes.
+
+### 15.6 CSU Branding & Styling Compliance
+
+**Authoritative Source:** https://www.carsu.edu.ph/ovpeo/pico/university-branding/
+
+**Mandatory Color Palette:**
+
+| Color | Hex Code | Usage | Priority |
+|-------|----------|-------|----------|
+| Green | `#009900` | Primary (productivity, fertility) | REQUIRED |
+| Gold Yellow | `#f9dc07` | Secondary (wisdom, intellect) | REQUIRED |
+| Orange | `#ff9900` | Accent (strength, fortitude) | REQUIRED |
+| White | `#ffffff` | Backgrounds, purity | REQUIRED |
+| Emerald | `#003300` | Tertiary (peace, balance) | OPTIONAL |
+| Gray | `#4d4d4d` | Neutral (formality, practicality) | OPTIONAL |
+
+**Typography Requirements:**
+
+| Element | Font Family | Notes |
+|---------|-------------|-------|
+| Body Text | Poppins | Official university font |
+| Headings | Poppins | Consistent with body |
+
+**Logo Usage Rules (NON-NEGOTIABLE):**
+- ❌ **PROHIBITED**: Skewing, warping, cropping, rotating, color alterations
+- ✓ **ALLOWED**: SVG format available at official URL
+- ✓ **PLACEMENT**: Header/footer, login page, public-facing pages
+- Two versions: Single-line (documents) vs. Two-line (events/banners)
+
+**Logo Asset:**
+```
+https://www.carsu.edu.ph/wp-content/uploads/2024/10/CSU-Official-Seal_1216-x-2009-1.svg
+```
+
+**Design Tone:**
+- Professional, academic, institutional
+- Material Design alignment acceptable
+- Emphasize values: Competence, Service, Uprightness
+
+**Vuetify Theme Configuration:**
+```javascript
+// Recommended Vuetify theme matching CSU branding
+{
+  theme: {
+    themes: {
+      light: {
+        primary: '#009900',    // CSU Green
+        secondary: '#f9dc07',  // CSU Gold
+        accent: '#ff9900',     // CSU Orange
+        error: '#ff4444',
+        info: '#003300',       // CSU Emerald
+        success: '#009900',
+        warning: '#ff9900',
+      },
+    },
+  },
+}
+```
+
+### 15.7 Frontend Integration Risks
+
+| # | Risk | Impact | Mitigation |
+|---|------|--------|------------|
+| 1 | Prototype is React, plan specifies Vue | HIGH | Accept Vue stack, use prototype as UX reference only |
+| 2 | Backend DTOs don't match prototype data shapes | HIGH | Create frontend data adapters/transformers |
+| 3 | Missing backend modules (Forms, Policies, Assessments) | MEDIUM | Defer to Phase 3.1+ or prioritize MVP features |
+| 4 | RBAC model mismatch (pages vs. permissions) | MEDIUM | Map permissions to route access in frontend |
+| 5 | CSU branding non-compliance | LOW | Apply mandatory color palette from day 1 |
+| 6 | No dashboard analytics endpoint | MEDIUM | Build aggregation endpoint or calculate client-side |
+
+### 15.8 Software Engineering Principles Validation
+
+| Principle | Prototype Status | Frontend Plan Compliance |
+|-----------|------------------|--------------------------|
+| **KISS** | ✓ Simple component structure | ✓ Vue + Vuetify equally simple |
+| **YAGNI** | ⚠ Some unused admin features | ✓ MVP focuses on core modules |
+| **SOLID** | ✓ Clear page/component separation | ✓ Maintain with Vue architecture |
+| **DRY** | ✓ Reusable UI components (shadcn) | ✓ Vuetify provides equivalent |
+| **TDA** | ✓ UI delegates to Supabase backend | ✓ UI will delegate to NestJS backend |
+
+**Assessment:** Prototype demonstrates good engineering practices. Vue migration must preserve these patterns.
+
+### 15.9 MIS Compliance Validation
+
+| Requirement | Prototype Implementation | Status |
+|-------------|--------------------------|--------|
+| Auditability | Login/logout tracked via Supabase auth | ✓ Backend auth provides same |
+| Deterministic UI | All data from backend (Supabase) | ✓ Will use NestJS backend |
+| No Data Leakage | Supabase RLS policies enforce access | ✓ Backend guards provide equivalent |
+| Predictable Behavior | RBAC controls page access | ✓ Frontend guards will enforce |
+| Role Visibility | UI elements conditional on `allowedPages` | ✓ Map to permissions-based visibility |
+
+**Assessment:** Prototype MIS compliance is adequate. Frontend must maintain same standards with NestJS backend.
+
+### 15.10 Plan Alignment & Prerequisites
+
+**Current Status (from plan_active.md):**
+- Phase 2.9 (Testing): COMPLETE
+- Phase 3.0 (Frontend): NEXT
+
+**Prerequisites for Frontend Start:**
+
+| # | Prerequisite | Status | Blocker |
+|---|--------------|--------|---------|
+| 1 | Backend build passing | ✓ DONE | No |
+| 2 | Backend tests passing | ✓ DONE | No |
+| 3 | OpenAPI docs available | ✓ DONE | No |
+| 4 | Auth endpoints functional | ✓ DONE | No |
+| 5 | CORS enabled | ✓ DONE | No |
+| 6 | Dashboard analytics endpoint | ❌ MISSING | Yes (can defer) |
+| 7 | Data adapter strategy defined | ⚠ PENDING | Yes |
+| 8 | CSU branding assets downloaded | ❌ MISSING | No (can fetch) |
+
+**Recommended Actions Before Phase 3.0 Implementation:**
+
+| Priority | Action | Rationale |
+|----------|--------|-----------|
+| 1 | Define data adapter pattern | Resolve DTO mismatch (`projectName` vs. `title`) |
+| 2 | Download CSU logo SVG | Required for compliant header/footer |
+| 3 | Create dashboard analytics endpoint | OR calculate metrics client-side |
+| 4 | Document permission → page mapping | RBAC translation layer |
+
+### 15.11 Recommended Phase 3.0 Scope Revision
+
+**Based on prototype analysis, revise Phase 3.0 scope:**
+
+| Step | Original Plan | Revised Plan | Change Rationale |
+|------|---------------|--------------|------------------|
+| 3.0.0 | Scaffolding | Same | No change |
+| 3.0.1 | API client | **+ Data adapters** | Handle DTO mismatch |
+| 3.0.2 | Auth store | Same | No change |
+| 3.0.3 | Router | **+ Permission guards** | RBAC translation |
+| 3.0.4 | Login page | **+ CSU branding** | Apply color palette, logo |
+| 3.0.5 | Dashboard | **Defer analytics** OR **client-side calc** | Missing backend endpoint |
+| 3.0.V | Build verify | Same | No change |
+
+**Out of Scope (Defer to Phase 3.1+):**
+- Facilities Assessment module (missing backend)
+- Forms/Policies modules (missing backend)
+- Public-facing General User Side (focus on Admin Side MVP)
+
+---
+
+## 16. Gap Re-Classification for Startup Kick-Off (2026-01-20)
+
+### 16.1 Startup-Critical Features (Authoritative)
+
+| # | Feature | Status | Rationale |
+|---|---------|--------|-----------|
+| 1 | Construction of Infrastructure | CORE | Primary PMO deliverable |
+| 2 | University Operations | CORE | Required for institutional reporting |
+| 3 | Repairs | CORE | Facility maintenance tracking |
+| 4 | GAD Parity Reporting | CORE | Compliance requirement |
+
+**Non-Critical Features (Incremental):**
+- Facilities Assessment (future enhancement)
+- Downloadable Forms (content management)
+- Policies (document management)
+- Announcements (public relations)
+
+### 16.2 Gap Re-Classification
+
+**MUST FIX (Blocking Kick-Off):**
+
+| # | Gap | Impact | Resolution | Priority |
+|---|-----|--------|------------|----------|
+| 1 | Data adapter pattern undefined | All project APIs return `title` not `projectName` | Define frontend transformer pattern | P0 |
+| 2 | Permission → page mapping undefined | Cannot implement route guards | Document mapping rules | P0 |
+| 3 | CSU branding assets not downloaded | UI will be non-compliant | Download logo SVG | P0 |
+
+**SHOULD FIX (Important but Deferrable):**
+
+| # | Gap | Impact | Workaround | Priority |
+|---|-----|--------|------------|----------|
+| 1 | Dashboard analytics endpoint missing | No summary metrics | Calculate client-side from existing APIs | P1 |
+| 2 | Public vs. admin view filtering | Cannot distinguish public endpoints | Use frontend filtering initially | P2 |
+
+**DEFER (Non-Blocking for Kick-Off):**
+
+| # | Gap | Feature Affected | Deferral Rationale | Target Phase |
+|---|-----|------------------|-------------------|--------------|
+| 1 | Facilities Assessment module | Classroom/office assessments | Not in startup-critical list | 3.1 |
+| 2 | Facilities Assessment module | Office assessments | Not in startup-critical list | 3.1 |
+| 3 | Forms module | Downloadable forms management | Content management, not core workflow | 3.2 |
+| 4 | Policies module | MOA/MOU management | Document management, not core workflow | 3.2 |
+| 5 | Announcements module | Public homepage content | Public relations, not admin workflow | 3.2 |
+| 6 | Missing financial fields | `totalContractAmount`, `budgetUtilized` | Can launch with basic project data first | 3.1 |
+| 7 | Missing progress fields | `physicalAccomplishment`, `progress` | Can launch with status-based tracking | 3.1 |
+| 8 | Missing POW status field | Program-of-work approval tracking | Nice-to-have, not blocking CRUD | 3.1 |
+| 9 | Prioritization matrix | Urgency × impact calculation | UI can calculate without backend | 3.1 |
+
+### 16.3 Feature Impact Validation
+
+**Construction of Infrastructure (CORE):**
+
+| Backend Module | Status | Blocking Gaps | Safe to Proceed |
+|----------------|--------|---------------|-----------------|
+| `construction-projects/` | ✓ EXISTS | Field name mismatch (use adapter) | ✓ YES |
+| `construction_milestones` | ✓ EXISTS | None | ✓ YES |
+| `construction_gallery` | ✓ EXISTS | None | ✓ YES |
+| `construction_project_financials` | ✓ EXISTS | None | ✓ YES |
+
+**Deferral Safety:** Missing financial/progress fields do not block basic CRUD. Can display projects with available data, add enhanced fields in Phase 3.1.
+
+**University Operations (CORE):**
+
+| Backend Module | Status | Blocking Gaps | Safe to Proceed |
+|----------------|--------|---------------|-----------------|
+| `university-operations/` | ✓ EXISTS | Field name mismatch (use adapter) | ✓ YES |
+| `operation_indicators` | ✓ EXISTS | None | ✓ YES |
+| `operation_financials` | ✓ EXISTS | None | ✓ YES |
+
+**Deferral Safety:** All tables exist. Missing `status` field in indicators is optional, not blocking.
+
+**Repairs (CORE):**
+
+| Backend Module | Status | Blocking Gaps | Safe to Proceed |
+|----------------|--------|---------------|-----------------|
+| `repair-projects/` | ✓ EXISTS | Field name mismatch (use adapter) | ✓ YES |
+| `repair_pow_items` | ✓ EXISTS | Missing workflow fields (optional) | ✓ YES |
+| `repair_project_phases` | ✓ EXISTS | None | ✓ YES |
+| `repair_project_team_members` | ✓ EXISTS | None | ✓ YES |
+
+**Deferral Safety:** POW status and variation tracking are enhancements, not blockers for repair request CRUD.
+
+**GAD Parity Reporting (CORE):**
+
+| Backend Module | Status | Blocking Gaps | Safe to Proceed |
+|----------------|--------|---------------|-----------------|
+| `gad/` (8 tables) | ✓ EXISTS | None | ✓ YES |
+
+**Deferral Safety:** No blocking gaps. Fully aligned with prototype expectations.
+
+### 16.4 Optimal Next Step Analysis
+
+**Candidate Next Steps:**
+
+| Option | Pros | Cons | Recommendation |
+|--------|------|------|----------------|
+| Stabilization / Validation | Backend is stable, tests pass | Nothing to stabilize | ❌ NOT NEEDED |
+| Frontend Integration | All core APIs ready, auth works | 3 MUST FIX items | ✓ OPTIMAL |
+| Testing & Quality | Good practice | Delays user-facing value | ⚠ PREMATURE |
+| Documentation | Important for handoff | No users to hand off to yet | ⚠ PREMATURE |
+
+**Selected Next Step:** **Phase 3.0 Implementation (Frontend Integration)**
+
+**Justification:**
+1. All 4 startup-critical backend modules exist and functional
+2. Auth, RBAC, file uploads operational
+3. 3 MUST FIX items are frontend preparatory tasks (define patterns, download assets)
+4. Missing modules are all deferred features, safe to skip
+5. Fastest path to demonstrable value (working UI)
+
+**Prerequisites Resolution:**
+
+| Must Fix | Resolution Strategy | Effort | Blocking |
+|----------|---------------------|--------|----------|
+| Data adapter pattern | Define `transformProject(backend) → prototype` mapper | 1 hour | No (define in step 3.0.1) |
+| Permission → page mapping | Document `permissions[]` → route visibility rules | 1 hour | No (define in step 3.0.3) |
+| CSU logo download | Fetch SVG from official URL | 5 minutes | No (step 3.0.4) |
+
+**None of the MUST FIX items require backend changes.** All are frontend-only preparatory tasks.
+
+### 16.5 Software Engineering & MIS Validation
+
+| Principle | Validation | Status |
+|-----------|------------|--------|
+| **KISS** | Proceed with MVP, defer enhancements | ✓ Simple path |
+| **YAGNI** | Do not build Facilities/Forms/Policies yet | ✓ Avoided over-engineering |
+| **SOLID** | Data adapters maintain separation (backend ↔ UI) | ✓ Boundary preserved |
+| **DRY** | Reuse backend APIs, avoid duplication | ✓ No redundant work |
+| **TDA** | Frontend delegates to backend, uses adapters for shape | ✓ Backend authoritative |
+| **MIS** | Core audit/compliance features operational | ✓ Compliant |
+
+**Assessment:** Proceeding to frontend integration adheres to all governance principles.
+
+### 16.6 Exclusive Summary Logs
+
+**DONE (Phase 2.9 Complete):**
+- Backend: 17 modules, 129+ endpoints, 100% build/test passing
+- Auth: JWT, RBAC, guards, rate limiting
+- Testing: 8 unit tests, 8 E2E tests
+- Documentation: OpenAPI, test guide, research summaries
+
+**ACCEPTED AS DEFERRED (Safe for Post-Kick-Off):**
+- Facilities Assessment module (Phase 3.1)
+- Forms module (Phase 3.2)
+- Policies module (Phase 3.2)
+- Announcements module (Phase 3.2)
+- Enhanced financial fields (Phase 3.1)
+- Enhanced progress tracking (Phase 3.1)
+- POW approval status (Phase 3.1)
+- Public vs. admin view filtering (Phase 3.2)
+
+**MUST FIX BEFORE NEXT STEP:**
+- ❌ Define data adapter pattern (`title` → `projectName` transformation)
+- ❌ Document permission → page mapping (RBAC translation rules)
+- ❌ Download CSU logo SVG (branding compliance)
+
+**All MUST FIX items are frontend preparatory tasks, not backend blockers.**
+
+---
+
 *ACE Framework — Research Summary*
-*Updated: 2026-01-19*
+*Updated: 2026-01-20 (Startup Kick-Off Gap Re-Classification)*

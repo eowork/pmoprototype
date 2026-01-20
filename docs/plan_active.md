@@ -1,188 +1,282 @@
-# Plan: Phase 2.9 - Testing Infrastructure
-**Status:** ACTIVE | Single Source of Truth
-**Date:** 2026-01-19
-**Reference:** `docs/research_summary.md` (Completed Phases 2.4–2.8)
+# Phase 3.0: Frontend Integration (Startup Kick-Off MVP)
+**Status:** READY TO IMPLEMENT
+**Updated:** 2026-01-20
+**Authority:** `docs/research_summary.md` Section 16 (Gap Re-Classification)
 
 ---
 
-## Completed Phases Summary
+## Executive Summary
 
-| Phase | Description | Status | Reference |
-|-------|-------------|--------|-----------|
-| 2.4 | Auth & RBAC | DONE | research_summary.md Section 1 |
-| 2.5 | Domain APIs | DONE | research_summary.md Section 0 |
-| 2.6 | File Uploads & Documents | DONE | research_summary.md Section 10 |
-| 2.7 | Reference Data Management | DONE | research_summary.md Section 11-12 |
-| 2.8 | Quality Assurance & API Documentation | DONE | research_summary.md Section 13 |
-
-**Backend Maturity:** 17 modules, 129+ endpoints, 56 DTOs, 100% schema alignment, build passing.
+| Metric | Value |
+|--------|-------|
+| **Backend** | ✅ Production-ready (17 modules, 129+ endpoints, tests passing) |
+| **Next Action** | Frontend scaffolding → Auth → Core CRUD |
+| **Scope** | 4 startup-critical modules (Construction, Uni Ops, Repairs, GAD) |
+| **Blocking Issues** | NONE — All resolved per Section 16.4 |
 
 ---
 
-## Phase 2.9: Testing Infrastructure
+## Status Logs
 
-### Goal
-Establish a minimal, working test framework that validates auth flow and one CRUD cycle.
+### Completed Phases
 
-### Action
-Configure Jest with TypeScript support; write 2 focused test suites (auth, one domain).
+| Phase | Description | Date | Status |
+|-------|-------------|------|--------|
+| 2.5.0-2.5.8 | Shared Infrastructure + Domain APIs | 2026-01-14 | ✅ DONE |
+| 2.6.R | File Uploads, Documents, Media | 2026-01-15 | ✅ DONE |
+| 2.7.0-2.7.6 | Reference Data APIs (7 modules) | 2026-01-19 | ✅ DONE |
+| 2.8.0-2.8.6 | OpenAPI, Exception Filter, Logging | 2026-01-19 | ✅ DONE |
+| 2.9.0-2.9.D | Testing Infrastructure | 2026-01-20 | ✅ DONE |
+| 3.0.R | Phase 3.0 Research | 2026-01-20 | ✅ DONE |
+| AUDIT-2 | Gap Re-Classification | 2026-01-20 | ✅ DONE |
 
-### Output
-- Working `npm run test` command
-- Auth service test file (login success/failure)
-- One domain E2E test (contractors CRUD cycle)
+### Current Phase
+
+| Step | Description | Status |
+|------|-------------|--------|
+| 3.0.0 | Project Scaffolding | ⏳ PENDING |
+| 3.0.1 | API Client + Data Adapters | ⏳ PENDING |
+| 3.0.2 | Auth Store (Pinia) | ⏳ PENDING |
+| 3.0.3 | Router + Permission Guards | ⏳ PENDING |
+| 3.0.4 | Login Page + CSU Branding | ⏳ PENDING |
+| 3.0.5 | Dashboard Layout | ⏳ PENDING |
+| 3.0.6 | Projects List Page | ⏳ PENDING |
+| 3.0.V | Build Verification | ⏳ PENDING |
+
+### Deferred Items
+
+| Item | Reason | Target Phase |
+|------|--------|--------------|
+| Dashboard Analytics endpoint | Client-side calculation viable | 3.1 |
+| Facilities Assessment | Not startup-critical | 3.2+ |
+| Forms/Policies modules | Content management | 3.2+ |
+| Announcements | Public-facing only | 3.2+ |
+| Public view filters | Admin MVP first | 3.1 |
 
 ---
 
-### Required Tasks
+## Scope Control (LOCKED)
 
-| # | Task | Verification | Pass Criteria |
-|---|------|--------------|---------------|
-| 2.9.0 | Install test dependencies | `npm ls @nestjs/testing jest supertest ts-jest` | All 4 packages listed, no errors |
-| 2.9.1 | Create `jest.config.js` with ts-jest preset | `cat pmo-backend/jest.config.js` | File exists, contains `preset: 'ts-jest'` |
-| 2.9.2 | Create `pmo-backend/test/jest-e2e.json` | `cat pmo-backend/test/jest-e2e.json` | File exists, valid JSON |
-| 2.9.3 | Add test scripts to `package.json` | `npm run test --help` | Command recognized, no "missing script" error |
-| 2.9.4 | Create `auth.service.spec.ts` | `npm run test -- --testPathPattern=auth` | Exit code 0, ≥1 test passes |
-| 2.9.5 | Create `contractors.e2e-spec.ts` | `npm run test:e2e -- --testPathPattern=contractors` | Exit code 0, ≥1 test passes |
-| 2.9.V | Full verification | `npm run build && npm run test` | Both commands exit code 0 |
+### IN SCOPE (Phase 3.0)
+
+| # | Feature | Backend | UI Priority |
+|---|---------|---------|-------------|
+| 1 | Construction Projects | ✅ Ready | **Phase 3.0** |
+| 2 | University Operations | ✅ Ready | Phase 3.1 (nav only) |
+| 3 | Repair Projects | ✅ Ready | Phase 3.1 (nav only) |
+| 4 | GAD Parity Reports | ✅ Ready | Phase 3.1 (nav only) |
+
+### DEFERRED (Accepted per Section 16.2)
+
+| Gap | Classification | Target |
+|-----|----------------|--------|
+| Dashboard Analytics endpoint | DEFER | Phase 3.1 (client-side calc) |
+| Facilities Assessment | DEFER | Phase 3.2+ (needs backend) |
+| Forms/Policies modules | DEFER | Phase 3.2+ |
+| Announcements module | DEFER | Phase 3.2+ |
+| Public view filters | DEFER | Phase 3.1 |
+
+### SHOULD FIX (During Phase 3.0)
+
+| Issue | Resolution |
+|-------|------------|
+| Data adapters (`title` → `projectName`) | Step 3.0.1 |
+| CSU Branding | Step 3.0.4 |
+| Permission→Page mapping | Step 3.0.3 |
 
 ---
 
-### Test Database Strategy (KISS)
+## Technology Stack
 
-**Approach:** Use existing development database with deterministic test data.
+```
+Frontend:  Vue 3 + Vuetify 3 + TypeScript + Vite
+State:     Pinia (auth store only)
+HTTP:      Native fetch (wrapped)
+Branding:  CSU (#009900, #f9dc07, #ff9900) + Poppins
+```
 
-| Aspect | Decision | Rationale |
-|--------|----------|-----------|
-| Separate test DB | NO | Adds infrastructure complexity; dev DB sufficient for MVP |
-| Transaction rollback | NO | Requires test harness changes; violates KISS |
-| Test fixtures | YES | Create/delete test records within each test |
-| Isolation | Per-test cleanup via `afterEach()` | Simple, no external dependencies |
+---
 
-**Test data pattern:**
+## Implementation Steps
+
+### Step 3.0.0: Project Scaffolding
+
+```bash
+npm create vuetify@latest pmo-frontend
+# Select: TypeScript, Vite, Pinia, Vue Router
+cd pmo-frontend && npm install
+```
+
+**Exit Criteria:** `npm run dev` shows Vuetify welcome page
+
+---
+
+### Step 3.0.1: API Client + Data Adapters
+
+**Create:**
+- `src/composables/useApi.ts` — HTTP client with JWT injection
+- `src/utils/adapters.ts` — Backend→UI field transformation
+
+**Key Pattern (SHOULD FIX resolution):**
 ```typescript
-// Create test record with unique identifier
-const testContractor = { name: `TEST_${Date.now()}`, ... };
-// Cleanup in afterEach
-await service.remove(testContractor.id);
-```
-
----
-
-### TypeScript/Jest Configuration (Explicit)
-
-**jest.config.js:**
-```javascript
-module.exports = {
-  moduleFileExtensions: ['js', 'json', 'ts'],
-  rootDir: 'src',
-  testRegex: '.*\\.spec\\.ts$',
-  transform: { '^.+\\.(t|j)s$': 'ts-jest' },
-  collectCoverageFrom: ['**/*.(t|j)s'],
-  coverageDirectory: '../coverage',
-  testEnvironment: 'node',
-  moduleNameMapper: {
-    '^src/(.*)$': '<rootDir>/$1',
-  },
-};
-```
-
-**test/jest-e2e.json:**
-```json
-{
-  "moduleFileExtensions": ["js", "json", "ts"],
-  "rootDir": ".",
-  "testEnvironment": "node",
-  "testRegex": ".e2e-spec.ts$",
-  "transform": { "^.+\\.(t|j)s$": "ts-jest" }
+export function adaptProject(backend: any) {
+  return {
+    id: backend.id,
+    projectName: backend.title,  // Field mapping
+    campus: backend.campus,
+    status: backend.status,
+  };
 }
 ```
 
----
-
-### Constraints (Corrected)
-
-| Principle | Application |
-|-----------|-------------|
-| **YAGNI** | 2 test files only (auth + 1 domain); no coverage thresholds |
-| **KISS** | No test DB, no transactions, no mocking framework beyond Jest built-ins |
-| **SOLID (SRP)** | One test file tests one service/controller |
+**Exit Criteria:** API client calls `/api/auth/me` with token successfully
 
 ---
 
-### Definition of Done (Phase 2.9)
+### Step 3.0.2: Auth Store (Pinia)
 
-| # | Criterion | Command | Expected Output |
-|---|-----------|---------|-----------------|
-| 1 | Jest installed | `npm ls jest` | `jest@x.x.x` (no error) |
-| 2 | ts-jest installed | `npm ls ts-jest` | `ts-jest@x.x.x` (no error) |
-| 3 | Config exists | `test -f pmo-backend/jest.config.js && echo OK` | `OK` |
-| 4 | Test script works | `npm run test 2>&1 \| head -1` | No "missing script" error |
-| 5 | Auth tests pass | `npm run test -- --testPathPattern=auth --passWithNoTests` | Exit 0 |
-| 6 | E2E tests pass | `npm run test:e2e -- --testPathPattern=contractors --passWithNoTests` | Exit 0 |
-| 7 | Build still passes | `npm run build` | Exit 0 |
+**Create:** `src/stores/auth.ts`
 
-**All 7 criteria are binary (pass/fail) and verifiable via single commands.**
+**Features:**
+- `login(email, password)` → stores token + user
+- `logout()` → clears state, calls backend
+- `hasPermission(perm)` → role-based visibility
+- `isAuthenticated` computed property
+
+**Exit Criteria:** Login stores token, logout clears it
 
 ---
 
-### Risks & Mitigations (Simplified)
+### Step 3.0.3: Router + Permission Guards
 
-| Risk | Mitigation |
-|------|------------|
-| Test data left in DB | Use timestamped unique names; cleanup in `afterEach` |
-| Tests fail on CI (no DB) | Document: tests require local DB connection |
-| Flaky tests | Avoid `setTimeout`; use deterministic assertions |
+**Create:** `src/router/index.ts`
 
----
+**Guard Logic:**
+- Unauthenticated → `/login`
+- Authenticated at `/login` → `/dashboard`
 
-## Out of Scope (Deferred)
+**Permission Mapping:**
 
-| Item | Phase | Reason |
-|------|-------|--------|
-| Separate test database | Future | KISS: dev DB sufficient for MVP |
-| Coverage thresholds | Future | YAGNI: not required for MVP |
-| Mocking frameworks (sinon, etc.) | Future | KISS: Jest built-ins sufficient |
-| CI/CD integration | Phase 3.2 | Separate concern |
-| Frontend integration | Phase 3.0 | Separate phase |
-| Performance/load testing | Phase 3.x | Premature optimization |
+| Permission | Route |
+|------------|-------|
+| `projects:read` | `/projects` |
+| `users:manage` | `/admin/users` |
+| SuperAdmin | All routes |
+
+**Exit Criteria:** Protected routes redirect without token
 
 ---
 
-## Phase Transition Gate (to Phase 3.0)
+### Step 3.0.4: Login Page + CSU Branding
 
-All 7 DoD commands must return expected output before advancing to Phase 3.0.
+**Create:**
+- `src/views/LoginView.vue`
+- `src/plugins/vuetify.ts` (CSU theme)
 
----
+**CSU Theme:**
+```typescript
+primary: '#009900',    // CSU Green
+secondary: '#f9dc07',  // CSU Gold
+accent: '#ff9900',     // CSU Orange
+```
 
-## Files Reference
-
-| File | Purpose | Status |
-|------|---------|--------|
-| `docs/plan_active.md` | This plan | ACTIVE |
-| `docs/research_summary.md` | Completed phases | REFERENCE |
-| `pmo-backend/jest.config.js` | Jest config | PENDING |
-| `pmo-backend/test/jest-e2e.json` | E2E Jest config | PENDING |
-| `pmo-backend/src/auth/auth.service.spec.ts` | Auth unit tests | PENDING |
-| `pmo-backend/test/contractors.e2e-spec.ts` | Contractors E2E | PENDING |
-| `pmo-backend/package.json` | Test scripts | UPDATE PENDING |
+**Exit Criteria:** Login page with CSU branding, authentication works
 
 ---
 
-## Package.json Scripts (Target State)
+### Step 3.0.5: Dashboard Layout
 
-```json
-{
-  "scripts": {
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
-  }
-}
+**Create:**
+- `src/layouts/DefaultLayout.vue` (AppBar + Drawer)
+- `src/views/DashboardView.vue`
+
+**Navigation:** Dashboard, Construction, Repairs, Uni Ops, GAD
+
+**Exit Criteria:** Dashboard shows user name, logout works
+
+---
+
+### Step 3.0.6: Projects List Page
+
+**Create:** `src/views/ProjectsView.vue`
+
+**Features:**
+- Fetch `/api/construction-projects`
+- VDataTable with status chips
+- Uses data adapter
+
+**Exit Criteria:** Construction projects display from backend
+
+---
+
+### Step 3.0.V: Build Verification
+
+```bash
+npm run build
+```
+
+**Smoke Tests:**
+1. Login with valid credentials ✓
+2. Dashboard displays user info ✓
+3. Projects list shows data ✓
+4. Logout clears state ✓
+5. Protected routes redirect ✓
+
+**Exit Criteria:** Build succeeds, all smoke tests pass
+
+---
+
+## Definition of Done
+
+| # | Criterion | Verification |
+|---|-----------|--------------|
+| 1 | Login works | Manual test |
+| 2 | Protected routes redirect | Access `/dashboard` without token |
+| 3 | Dashboard displays user info | Name from `/api/auth/me` |
+| 4 | CSU branding applied | Visual: green/gold/orange, Poppins |
+| 5 | Projects list displays data | ≥1 project visible |
+| 6 | Logout clears state | Token removed, redirect |
+| 7 | Build succeeds | `npm run build` exit 0 |
+
+---
+
+## Engineering Compliance
+
+| Principle | Implementation |
+|-----------|----------------|
+| **KISS** | Standard Vuetify, no custom CSS |
+| **YAGNI** | 1 list page only, defer analytics |
+| **SOLID** | Layers: API → Store → Router → Views |
+| **DRY** | Single API client, shared data adapters |
+| **TDA** | UI displays backend data, no client-side business logic |
+| **MIS** | Server-side auth logging, no PII in localStorage |
+
+---
+
+## Development Commands
+
+**Backend (Port 3000):**
+```bash
+cd pmo-backend && npm run start:dev
+```
+
+**Frontend (Port 5173):**
+```bash
+cd pmo-frontend && npm run dev
 ```
 
 ---
 
-*ACE Framework — Phase 2.9 Plan (Revised)*
-*Updated: 2026-01-19*
+## Phase Roadmap
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| 3.0 | Scaffolding + Auth + Projects List | **NEXT** |
+| 3.1 | Uni Ops, Repairs, GAD pages + Dashboard metrics | Planned |
+| 3.2 | CRUD forms (create/edit dialogs) | Planned |
+| 3.3 | Facilities Assessment (needs backend) | Deferred |
+
+---
+
+*ACE Framework — Phase 3.0 Implementation Plan*
+*Updated: 2026-01-20 (Gap Re-Classification Applied)*

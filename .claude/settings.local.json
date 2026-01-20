@@ -11,7 +11,16 @@
       "Bash(find:*)",
       "Bash(xargs:*)",
       "Bash(git -C \"D:\\\\Programming\\\\pmo-dash\" diff --name-only HEAD pmo-backend/src)",
-      "Bash(npm run test:*)"
+      "Bash(npm run test:*)",
+      "Bash(npm run test:e2e:*)",
+      "Bash(npm ls:*)",
+      "Bash(test:*)",
+      "Bash(git -C \"D:\\\\Programming\\\\pmo-dash\" log --oneline -20)",
+      "Bash(git -C \"D:\\\\Programming\\\\pmo-dash\" branch -a)",
+      "Bash(git -C:*)",
+      "Bash(npx create-next-app:*)",
+      "WebFetch(domain:www.carsu.edu.ph)",
+      "WebFetch(domain:myadmission.carsu.edu.ph)"
     ]
   }
 }
