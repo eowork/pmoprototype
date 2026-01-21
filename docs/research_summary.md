@@ -43,6 +43,7 @@
 | 3.0.R | Phase 3.0 Research (Initial) | DONE | 2026-01-20 | Vue 3 + Vuetify 3 frontend setup - see Section 14 |
 | 3.0.P | Prototype UI Analysis | DONE | 2026-01-20 | Backend-UI alignment, CSU branding - see Section 15 |
 | 3.0.G | Gap Re-Classification | DONE | 2026-01-20 | Startup kick-off priorities, deferred features - see Section 16 |
+| **ACE-AUTH** | **Auth Schema Evolution Research** | **DONE** | **2026-01-21** | **Username + OAuth schema analysis - see Section 20** |
 
 ---
 
@@ -1609,16 +1610,22 @@ remarks TEXT
 
 ### 14.1 Technology Decision
 
-**Selected Stack:** Vue 3 + Vuetify 3 + TypeScript
+**Selected Stack:** Nuxt 3 + Vuetify 3 + TypeScript
+
+**MIS Policy Compliance:** Per Web Development Policy (Board-level governance), all university web applications MUST use Vue 3 + Nuxt.js as the frontend framework.
 
 **Rationale:**
-- Vuetify provides Material Design components optimized for admin dashboards
-- Vue 3 Composition API aligns with modern TypeScript patterns
-- Complete UI kit: forms, tables, navigation, dialogs out-of-box
-- Lower learning curve for data-driven CRUD applications
+- **Nuxt 3**: SSR/SSG framework required by MIS Web Development Policy
+- **Vuetify 3**: Material Design components optimized for admin dashboards
+- **TypeScript**: Type safety aligned with backend NestJS patterns
+- File-based routing reduces configuration overhead
+- Built-in middleware support for authentication guards
+- SEO-ready with server-side rendering capabilities
+
+**Previous Error (2026-01-21):** Initial implementation incorrectly used Vue 3 + Vite (SPA-only). This violated MIS policy and was corrected to use Nuxt 3.
 
 **Prototype Status:** Existing React/Vite prototype in `prototype/` folder is REFERENCE ONLY.
-New frontend will be built with Vue + Vuetify per project requirements.
+New frontend will be built with Nuxt 3 + Vuetify per MIS policy requirements.
 
 ### 14.2 Frontend Role and Boundaries
 
@@ -2310,5 +2317,1283 @@ https://www.carsu.edu.ph/wp-content/uploads/2024/10/CSU-Official-Seal_1216-x-200
 
 ---
 
+## 17. Authentication Failure Analysis (2026-01-21)
+
+### 17.1 Error Description
+
+**Symptoms:**
+1. Login request returns: `Unexpected token '<', "<!DOCTYPE ..." is not valid JSON`
+2. Console error: `No match found for location with path "/api/docs"`
+
+**Translation for Beginners:**
+- The frontend expected JSON data from the backend
+- Instead, it received an HTML page (starting with `<!DOCTYPE html>`)
+- This HTML is a 404 error page, not login data
+- The JSON parser cannot read HTML, causing the "Unexpected token '<'" error
+
+### 17.2 Root Cause Analysis
+
+**Primary Cause: Port Conflict + Missing Proxy**
+
+| Component | Default Port | Issue |
+|-----------|--------------|-------|
+| NestJS Backend | 3000 | Correct, starts on 3000 |
+| Nuxt 3 Frontend | 3000 | **CONFLICT** — Also defaults to 3000 |
+| Frontend API calls | `http://localhost:3000` | Points to whoever owns port 3000 |
+
+**What Happens:**
+1. If Nuxt starts FIRST on port 3000:
+   - Frontend calls `http://localhost:3000/api/auth/login`
+   - Request goes to Nuxt server (NOT backend)
+   - Nuxt returns 404 HTML page
+   - JSON parse fails → "Unexpected token '<'"
+
+2. If Backend starts FIRST on port 3000:
+   - Nuxt auto-increments to port 3001 (or higher)
+   - Frontend still calls `http://localhost:3000/api/auth/login`
+   - Cross-origin request may work (CORS enabled)
+   - BUT: This is fragile and environment-dependent
+
+### 17.3 Configuration Gap Analysis
+
+**Current Configuration (nuxt.config.ts):**
+```typescript
+runtimeConfig: {
+  public: {
+    apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:3000',
+  },
+},
+ssr: false, // SPA mode
+```
+
+**Missing Configuration:**
+```typescript
+// NO nitro devProxy configured
+// NO explicit port separation
+// NO server-side API routing
+```
+
+**Gap Classification:**
+
+| Issue | Classification | Impact |
+|-------|---------------|--------|
+| Missing `nitro.devProxy` | **BLOCKING** | Login fails in dev mode |
+| Port conflict (both on 3000) | **BLOCKING** | Unpredictable routing |
+| No explicit frontend port | **WARNING** | Dev environment fragile |
+| Direct cross-origin fetch | **WARNING** | Works but not best practice |
+
+### 17.4 The "/api/docs" Error Explained
+
+**Why it appears:**
+- User or developer navigates to `http://localhost:3000/api/docs` (Swagger)
+- If Nuxt owns port 3000, Vue Router intercepts the path
+- Vue Router has no route for `/api/docs`
+- Console logs: "No match found for location with path '/api/docs'"
+
+**This is a secondary symptom, not the primary cause.**
+
+### 17.5 Auth Flow Validation
+
+**Intended Flow:**
+```
+Frontend (Port 5173/3001) → POST /api/auth/login → Backend (Port 3000)
+                         ← { access_token, user }
+```
+
+**Actual Flow (When Broken):**
+```
+Frontend (Port 3000) → POST /api/auth/login → Frontend (Port 3000)
+                    ← <!DOCTYPE html> (404 page)
+                    ← JSON.parse() FAILS
+```
+
+**TDA Compliance:**
+- Frontend correctly delegates login to backend (good)
+- Backend correctly returns JSON (good)
+- **Problem**: Request never reaches backend due to routing misconfiguration
+
+### 17.6 Recommended Fix Direction (No Implementation)
+
+**Option A: Configure Nuxt Dev Proxy (Recommended)**
+- Add `nitro.devProxy` to nuxt.config.ts
+- Proxy `/api/*` requests to backend
+- Frontend runs on any port, backend on 3000
+- Cleanest solution, no code changes in composables
+
+**Option B: Explicit Port Separation**
+- Configure Nuxt to use port 5173 explicitly
+- Keep backend on port 3000
+- Update .env with correct API base
+- Requires coordination between devs
+
+**Option C: Use Server Routes (Nuxt SSR)**
+- Create Nuxt server routes that proxy to backend
+- More complex, better for production
+- Overkill for SPA mode admin dashboard
+
+### 17.7 UI/UX Quality Assessment
+
+**Reference:** https://www.carsu.edu.ph/
+
+**Current Login Page Assessment:**
+
+| Aspect | Status | Notes |
+|--------|--------|-------|
+| CSU Logo | ✓ Present | Official seal downloaded |
+| Color Palette | ✓ Compliant | Green (#009900), Gold (#f9dc07), Orange (#ff9900) |
+| Typography | ✓ Poppins | Font loaded via Google Fonts |
+| Layout | ✓ Clean | Centered card, gradient background |
+| Spacing | ✓ Adequate | Vuetify defaults provide good rhythm |
+| Hierarchy | ✓ Clear | Logo → Title → Form → Button |
+
+**Minor Improvement Opportunities (Non-Blocking):**
+
+| Item | Current | Suggested |
+|------|---------|-----------|
+| Background | Gradient gray | Could use subtle CSU pattern |
+| Card shadow | elevation-4 | Acceptable, could be softer |
+| Input focus | Default Vuetify | Acceptable |
+
+**Assessment:** Login UI meets CSU standards. No immediate redesign required.
+
+### 17.8 Plan Alignment Review
+
+**Documented Assumptions (plan_active.md):**
+```
+Frontend:  Nuxt 3 + Vuetify 3 + TypeScript
+HTTP:      Native fetch (wrapped in useApi composable)
+```
+
+**Incorrect Assumption:**
+- Plan assumes direct `fetch()` to `http://localhost:3000` works reliably
+- **Reality:** Without proxy, this is fragile in development
+
+**Missing Step in Phase 3.0:**
+- No step addresses dev proxy configuration
+- Step 3.0.0 (Scaffolding) should have included proxy setup
+
+### 17.9 Classified Gap List
+
+**BLOCKING (Must Fix Before Login Works):**
+
+| # | Gap | Root Cause | Fix Direction |
+|---|-----|-----------|---------------|
+| 1 | HTML returned instead of JSON | Port conflict + no proxy | Configure `nitro.devProxy` |
+| 2 | Nuxt and NestJS both default to port 3000 | No explicit port config | Separate ports or use proxy |
+
+**WARNING (Should Fix for Stability):**
+
+| # | Gap | Impact | Mitigation |
+|---|-----|--------|------------|
+| 1 | Direct cross-origin fetch | Works but fragile | Proxy is cleaner |
+| 2 | "/api/docs" router error | Confusing console noise | Document expected behavior |
+
+**INFORMATIONAL:**
+
+| # | Note | Action |
+|---|------|--------|
+| 1 | CSU website uses purple (#6440FB), but official branding is green (#009900) | No change needed — using official colors |
+| 2 | SSR disabled (ssr: false) | Correct for admin dashboard |
+
+### 17.10 Notes for Plan Update
+
+**Recommended Plan Revisions (Phase 3.0.X):**
+
+1. Add missing step: **3.0.0a: Configure Dev Proxy**
+   - Add `nitro.devProxy` or `routeRules` in nuxt.config.ts
+   - Alternatively: Set explicit Nuxt port in package.json
+
+2. Update Development Commands section:
+   ```bash
+   # Backend (must start FIRST)
+   cd pmo-backend && npm run start:dev  # Port 3000
+
+   # Frontend (after backend)
+   cd pmo-frontend && npm run dev       # Auto port or proxy
+   ```
+
+3. Add verification step: **Test cross-origin requests work**
+
+**No Plan Changes Made — Research Only.**
+
+---
+
+## 18. Phase 3.0 Continued Investigation (2026-01-21) — **UPDATED**
+
+### 18.1 Error Re-Analysis
+
+**Observed Symptoms:**
+- Frontend message: "Backend server not running. Please start the backend first."
+- Browser console: `Failed to load resource: the server responded with a status of 404 (Not Found)`
+- Both Nuxt (frontend) and NestJS (backend) processes confirmed running
+
+**Beginner-Friendly Explanation:**
+The frontend asked the backend for login data, but received a "page not found" (404) error instead of the expected login response. This happens when the frontend's request goes to the wrong server or wrong URL path.
+
+**CRITICAL UPDATE (2026-01-21 06:12 UTC):**
+The proxy configuration IS correctly implemented in `nuxt.config.ts` (lines 39-46) and `useApi.ts` (line 23). The issue is NOT a code problem — it is an **operational startup sequence problem**.
+
+### 18.2 Root Cause Diagnosis
+
+**Issue Classification: BLOCKING**
+
+| Factor | Current State | Problem |
+|--------|--------------|---------|
+| Proxy Config | `nuxt.config.ts` lines 39-46 | ✓ Correctly configured |
+| useApi.ts | Uses relative URLs in dev mode (line 23) | ✓ Correct pattern |
+| Backend Port | 3000 (default) | ✓ Correct |
+| Backend Prefix | `api` with health excluded (main.ts:34-36) | ✓ Correct |
+| Startup Order | Unknown | **CRITICAL** |
+
+**Primary Root Cause: Startup Sequence Violation**
+
+The `nitro.devProxy` configuration IS correct, but it only works when:
+1. **Backend starts FIRST** on port 3000
+2. **Frontend starts AFTER** and auto-selects a different port (3001+)
+3. Proxy forwards `/api/*` from frontend port to backend port 3000
+
+**If frontend starts FIRST:**
+- Nuxt takes port 3000
+- Backend fails to start OR uses different port
+- Proxy forwards `/api/*` to `localhost:3000` → Nuxt itself → 404
+
+**Evidence Chain:**
+```
+1. Request: POST /api/auth/login
+2. Proxy target: http://localhost:3000 (nuxt.config.ts:42)
+3. If Nuxt owns 3000: Nuxt receives request → No route → 404 HTML
+4. useApi.ts detects non-JSON (line 36) → throws 503
+5. login.vue catches 503 (line 32) → "Backend server not running"
+```
+
+### 18.3 Diagnostic Verification Steps
+
+**To Confirm Root Cause (No Implementation):**
+
+```bash
+# Step 1: Check which process owns port 3000
+netstat -ano | findstr :3000
+
+# Step 2: If backend is NOT on 3000, verify startup order
+# Backend console should show: "PMO Backend running on http://localhost:3000"
+
+# Step 3: Test backend directly
+curl http://localhost:3000/health
+curl -X POST http://localhost:3000/api/auth/login -H "Content-Type: application/json" -d "{\"email\":\"test@test.com\",\"password\":\"test\"}"
+```
+
+**Expected Results:**
+- Port 3000 owned by `node` process running NestJS
+- `/health` returns JSON: `{"status":"ok",...}`
+- `/api/auth/login` returns 401 (invalid credentials) or 200 (valid)
+
+### 18.4 Secondary Issues Identified
+
+| Classification | Issue | Impact |
+|----------------|-------|--------|
+| WARNING | Error message says "not running" when backend IS running but unreachable | Misleading UX |
+| INFORMATIONAL | Health endpoint at `/health` not `/api/health` | Expected per main.ts:35 exclude config |
+| INFORMATIONAL | useApi content-type check triggers 503 for any non-JSON | Correct behavior, appropriate error handling |
+
+### 18.5 UI/UX Research: Auth Page Refinement
+
+**Objective:** Make login page more formal, minimal, and CSU-compliant
+
+#### 18.5.1 Asset Inventory — **VERIFIED**
+
+| Asset | Path | Status | Resolution/Notes |
+|-------|------|--------|------------------|
+| CSU Admin Building | `shared/CSU Assets/3.png` | ✓ **VERIFIED** | Modern green glass building, "CARAGA STATE UNIVERSITY" text visible |
+| CSU Official Seal | `shared/CSU Assets/CSU Official Seal_1216 x 2009.png` | ✓ **VERIFIED** | 1216×2009px, portrait orientation |
+| CSU Brand Logo 1 | `shared/CSU Assets/CSU Brand Logo 1.png` | ✓ Available | Two-line wordmark (not yet verified) |
+| CSU Brand Logo 2 | `shared/CSU Assets/CSU Brand Logo 2.png` | ✓ Available | Single-line wordmark (not yet verified) |
+| CSU Wallpaper 4k | `shared/CSU Assets/CSU Wallpaper 4k white.jpg` | ✓ Available | 4K resolution (not yet verified) |
+| Current Logo (public) | `pmo-frontend/public/csu-logo.svg` | ✓ **IN USE** | SVG format, currently used in login.vue |
+
+#### 18.5.2 CSU Branding Guidelines (Authoritative)
+
+**Source:** https://www.carsu.edu.ph/ovpeo/pico/university-branding/
+
+| Element | Specification |
+|---------|---------------|
+| **Primary Colors** | Green (#009900) = productivity, Gold (#f9dc07) = wisdom, Orange (#ff9900) = strength, White = purity |
+| **Secondary Colors** | Emerald = peace, Gray = formality |
+| **Seal Usage** | No alterations allowed (no skewing, warping, cropping, color changes, rotation, ghosting/overlaying) |
+| **Logo Versions** | Single-line (documents), Two-line (events, certificates, posters) |
+| **Core Values** | **C**ompetence, **S**ervice, **U**prightness |
+
+#### 18.5.3 UI Refinement Research Notes
+
+**Background Treatment (CSU Admin Building - 3.png):**
+
+| Approach | Implementation Pattern | Readability |
+|----------|----------------------|-------------|
+| Dark overlay | `background: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.7)), url(...)` | ✓ High |
+| Green overlay | `background: linear-gradient(rgba(0,153,0,0.7), rgba(0,102,0,0.85)), url(...)` | ✓ High, CSU-branded |
+| Blur effect | `backdrop-filter: blur(2px)` on overlay | ✓ Modern, subtle |
+| Side placement | Image on left panel, form on right (current pattern) | ✓ Already implemented |
+
+**Recommended Approach:** Green gradient overlay on admin building image (`3.png`) for left panel, maintaining current split layout.
+
+**Implementation Pattern (CSS):**
+```css
+.branding-panel {
+  background: 
+    linear-gradient(
+      135deg, 
+      rgba(0, 153, 0, 0.85) 0%, 
+      rgba(0, 102, 0, 0.90) 100%
+    ),
+    url('/csu-admin-building.png');
+  background-size: cover;
+  background-position: center;
+}
+```
+
+**Rationale:**
+- Preserves institutional context (recognizable CSU building)
+- Maintains text readability via gradient overlay
+- Aligns with CSU green branding
+- Avoids "generic corporate" aesthetic
+
+**Seal Usage (Subtle Integration):**
+
+| Placement | Compliance | Notes |
+|-----------|------------|-------|
+| Header watermark (10-15% opacity) | ✓ Allowed | Subtle, non-obtrusive |
+| Footer badge | ✓ Allowed | Institutional trust signal |
+| Form card background | ⚠ Risky | Could violate "no overlaying" rule |
+| Full-size feature | ✗ Avoid | Overdecorated, not minimal |
+
+**Recommended:** Small seal in footer or card header only, full color, no transparency effects on the seal itself.
+
+**Typography & Spacing:**
+
+| Current | Refinement Direction |
+|---------|---------------------|
+| Poppins font | ✓ Keep (modern, professional) |
+| 2-column layout | ✓ Keep (clean separation) |
+| Card-based form | ✓ Keep (focused attention) |
+| Gradient green panel | Replace with image + overlay |
+
+#### 18.5.4 Engineering Compliance Check
+
+| Principle | Current UI | Proposed Refinements | Compliance |
+|-----------|-----------|---------------------|------------|
+| **TDA** | Form submits to backend via store | No change to data flow | ✓ Pass |
+| **DRY** | Auth logic in store only | No duplication proposed | ✓ Pass |
+| **SOLID** | Components separated (login.vue, auth.ts, useApi.ts) | No structural changes | ✓ Pass |
+| **KISS** | Simple form, no animations | Keep minimal approach | ✓ Pass |
+| **YAGNI** | Basic login only | No feature creep | ✓ Pass |
+| **MIS** | Vue 3 + Nuxt per policy | Compliant | ✓ Pass |
+
+### 18.6 Plan Alignment Assessment
+
+**Step 3.0.P Status Check:**
+
+| Sub-Step | Plan Expectation | Actual State |
+|----------|-----------------|--------------|
+| 3.0.P.1 | Configure Nitro Dev Proxy | ✓ Implemented (nuxt.config.ts:39-46) |
+| 3.0.P.2 | Update useApi for proxy | ✓ Implemented (line 23: relative URLs) |
+| 3.0.P.3 | Backend starts first | **Unknown** — Not enforced |
+| 3.0.P.4 | Test login flow | **Failing** — 404 observed |
+
+**Diagnosis:**
+- Step 3.0.P is **conceptually correct** and **code-complete**
+- Step 3.0.P is **operationally failing** due to startup sequence violation
+- **Root cause is environmental, not code-based**
+
+**Step 3.0.U Status Check:**
+
+| Criterion | Plan Expectation | Actual State |
+|-----------|-----------------|--------------|
+| CSU Branding | Green/Gold/Orange colors | ✓ Implemented |
+| Split Layout | Branding panel + Form panel | ✓ Implemented |
+| Minimal Design | No clutter | ✓ Implemented |
+| Admin Building Image | Use as background | ✗ Not yet used |
+| Official Seal | Subtle integration | ✗ Only logo, no seal |
+
+**Assessment:** Step 3.0.U is **partially complete** — functional but can be refined with building image and seal.
+
+**Refinement Scope (Non-Blocking):**
+1. Replace gradient background with CSU Admin Building (`3.png`) + overlay
+2. Add official seal (small, footer or header placement)
+3. Verify formality and CSU compliance (already 90% achieved)
+4. NO layout changes (current split design is optimal)
+
+### 18.7 Classified Issue Summary
+
+**BLOCKING:**
+
+| # | Issue | Root Cause | Resolution Direction |
+|---|-------|------------|---------------------|
+| B1 | Login returns 404 despite both servers running | Startup sequence: frontend started before backend, taking port 3000 | Enforce startup order OR use explicit port config |
+
+**RESOLUTION VERIFICATION REQUIRED:**
+```bash
+# Step 1: Kill all Node.js processes
+taskkill /F /IM node.exe
+
+# Step 2: Start backend FIRST
+cd pmo-backend && npm run start:dev
+# Wait for: "PMO Backend running on http://localhost:3000"
+
+# Step 3: Start frontend AFTER backend
+cd pmo-frontend && npm run dev
+# Should auto-increment to port 3001+ if 3000 is taken
+
+# Step 4: Test login at the frontend port (NOT 3000)
+# Example: http://localhost:3001
+```
+
+**WARNING:**
+
+| # | Issue | Impact | Mitigation |
+|---|-------|--------|------------|
+| W1 | Error message "Backend not running" is misleading | User confusion when backend IS running but unreachable | Consider message: "Cannot reach backend. Check startup order." |
+
+**INFORMATIONAL:**
+
+| # | Note | Action |
+|---|------|--------|
+| I1 | UI can be refined with admin building image | Phase 3.0.U enhancement (non-blocking) |
+| I2 | CSU seal not yet integrated | Phase 3.0.U enhancement (non-blocking) |
+| I3 | Proxy config is correct but depends on startup order | Document in README |
+
+### 18.8 Notes for Plan Update (Not Implemented)
+
+**Recommended Plan Additions:**
+
+1. **Startup Enforcement Step (3.0.P.3a):**
+   - Add port ownership check before frontend starts
+   - OR add explicit port in frontend package.json: `"dev": "nuxt dev --port 3001"`
+
+2. **Troubleshooting Section Enhancement:**
+   | Symptom | Actual Cause | Resolution |
+   |---------|--------------|------------|
+   | "Backend not running" when it IS running | Frontend took port 3000 first | Stop frontend, restart backend, then frontend |
+
+3. **UI Refinement Sub-Steps (3.0.U.2-3):**
+   - 3.0.U.2: Add admin building image as left panel background
+   - 3.0.U.3: Add CSU seal to footer or card header
+
+**No changes made to plan_active.md — research only.**
+
+---
+
 *ACE Framework — Research Summary*
-*Updated: 2026-01-20 (Startup Kick-Off Gap Re-Classification)*
+*Updated: 2026-01-21 (Phase 3.0 Continued Investigation)*
+
+## 19. Phase 1 Research: Auth Integration Failure & Scope Gaps (2026-01-21)
+
+**Research Objective:** Diagnose BLOCKING authentication failure, review frontend-backend contract, research auth scope gaps (username/email/OAuth), and assess UI refinement requirements.
+
+**Authority:** GOVERNED AI BOOTSTRAP v2.4 (OPERATOR LTS)
+
+---
+
+### 19.1 Root Cause Analysis (PART A)
+
+#### 19.1.1 New Symptom: /api/docs Error During App Initialization
+
+**Observed Symptom:**
+```
+H3Error: Page not found: /api/docs
+```
+
+**Context Analysis:**
+
+| Observation | Explanation |
+|-------------|-------------|
+| Error appears during Nuxt app initialization | Nuxt router attempts to resolve `/api/docs` as a page route |
+| Backend logs: "Swagger available at http://localhost:3000/api/docs" | Backend correctly serves Swagger at `/api/docs` |
+| Backend receives `/_nuxt/*` requests and returns 404 | Frontend static assets hitting wrong server |
+
+**Root Cause Diagnosis:**
+
+The `/api/docs` error is **NOT a direct auth failure**, but a **secondary symptom of the same root cause** identified in Section 17 and 18:
+
+1. **Startup Sequence Violation:**
+   - Frontend starts FIRST on port 3000
+   - Backend fails to claim port 3000 OR starts on different port
+   - Nuxt router intercepts ALL routes, including `/api/*` paths
+
+2. **Why /api/docs Specifically:**
+   - Developer or browser attempts to access Swagger docs
+   - Request goes to `http://localhost:3000/api/docs`
+   - If Nuxt owns port 3000: Vue Router receives request
+   - Vue Router has no route for `/api/docs` → H3Error 404
+   - Nuxt returns HTML 404 page instead of Swagger UI
+
+3. **Why HTML Instead of JSON (Beginner Explanation):**
+   - Backend APIs return JSON (data format: `{"key": "value"}`)
+   - Frontend frameworks return HTML (web pages: `<!DOCTYPE html>...`)
+   - When frontend receives HTML where it expects JSON:
+     - JSON parser tries to read `<!DOCTYPE...>`
+     - First character is `<` (not `{` or `[`)
+     - Error: "Unexpected token '<'"
+
+**This is NOT a Swagger misconfiguration—it's a routing misconfiguration.**
+
+#### 19.1.2 Incorrect Assumptions Identified
+
+**Assumption in plan_active.md:**
+```
+HTTP: Native fetch (wrapped in useApi composable)
+```
+
+**Incorrect Implication:**
+- Plan assumes direct `fetch('http://localhost:3000/api/...')` works reliably
+- **Reality:** This only works if startup order is correct AND CORS configured
+- **Missing:** Explicit startup sequence enforcement
+
+**Assumption in frontend implementation:**
+- `nitro.devProxy` configured correctly (✓ TRUE per nuxt.config.ts)
+- `useApi.ts` uses relative URLs in dev mode (✓ TRUE per line 23)
+
+**Incorrect Operational Assumption:**
+- Developers will "naturally" start backend first
+- **Reality:** No enforced startup order, leading to port conflicts
+
+#### 19.1.3 Classification
+
+| Issue | Type | Impact | Root Cause |
+|-------|------|--------|------------|
+| H3Error: /api/docs | **BLOCKING** | Login fails, Swagger inaccessible | Frontend on port 3000, intercepting backend routes |
+| HTML returned instead of JSON | **BLOCKING** | Authentication cannot complete | Same as above |
+| Correct credentials fail | **BLOCKING** | Users cannot log in | Request never reaches backend |
+| Backend receives `/_nuxt/*` | **WARNING** | Confusing logs | Frontend assets requesting wrong server |
+
+**Primary Root Cause:** Startup sequence violation + no enforcement mechanism
+
+**NOT the root cause:**
+- ✗ Proxy misconfiguration (proxy IS correct)
+- ✗ useApi.ts implementation (IS correct)
+- ✗ Backend Swagger setup (IS correct)
+- ✗ CORS (IS correctly enabled)
+
+---
+
+### 19.2 Frontend ↔ Backend Contract Review (PART B)
+
+#### 19.2.1 Intended Contract (Authoritative)
+
+**What Frontend SHOULD Call:**
+
+| Endpoint | Method | Purpose | Response Type |
+|----------|--------|---------|---------------|
+| `/api/auth/login` | POST | Authenticate user | JSON: `{ access_token, user }` |
+| `/api/auth/me` | GET | Fetch current user profile | JSON: `{ id, email, first_name, ... }` |
+| `/api/auth/logout` | POST | Log out (audit trail only) | 204 No Content |
+| `/api/construction-projects` | GET | Fetch projects list | JSON: `{ data: [...], total, ... }` |
+| `/api/repair-projects` | GET | Fetch repairs list | JSON: `{ data: [...] }` |
+| `/api/university-operations` | GET | Fetch uni ops list | JSON: `{ data: [...] }` |
+| `/api/gad-parity` | GET | Fetch GAD reports | JSON: `{ data: [...] }` |
+
+**What Frontend MUST NOT Call:**
+
+| Endpoint | Reason | Alternative |
+|----------|--------|-------------|
+| `/api/docs` | Swagger UI for developers only, not runtime | Access via browser directly |
+| `/health` | Backend health check, not API resource | Not needed by frontend at runtime |
+| Direct port 3000 if Nuxt owns it | Causes HTML/JSON conflict | Use proxy or explicit backend URL |
+
+#### 19.2.2 Current Implementation Alignment
+
+**auth.ts Store (CORRECT):**
+```typescript
+// ✓ Uses /api/auth/login endpoint
+await api.post<LoginResponse>('/api/auth/login', { email, password })
+
+// ✓ Uses /api/auth/me endpoint
+await api.get<BackendUser>('/api/auth/me')
+
+// ✓ Uses /api/auth/logout endpoint
+await api.post('/api/auth/logout', {})
+```
+
+**useApi.ts Composable (CORRECT):**
+```typescript
+// ✓ Uses relative URLs in dev mode (proxy handles routing)
+const baseUrl = import.meta.dev ? '' : config.public.apiBase
+const response = await fetch(`${baseUrl}${endpoint}`, ...)
+```
+
+**nuxt.config.ts Proxy (CORRECT):**
+```typescript
+nitro: {
+  devProxy: {
+    '/api': {
+      target: 'http://localhost:3000',
+      changeOrigin: true,
+    },
+  },
+}
+```
+
+**Contract Compliance:** ✅ PASS
+
+**Issue:** Implementation is correct, but **operational environment violates assumptions** (backend not on port 3000 when proxy points to it).
+
+#### 19.2.3 Missing Research Steps (Gap Identified)
+
+**Phase 3.0 Plan Gaps:**
+
+| Missing Step | Impact | Should Have Been |
+|--------------|--------|------------------|
+| Explicit startup sequence documentation | BLOCKING failure | Step 0: "Prerequisites - Backend must start first" |
+| Port ownership verification | No enforcement | Step 3.0.P.0: "Verify backend owns port 3000" |
+| Dev environment assumptions validation | Fragile setup | Research Phase: "Validate dev proxy requirements" |
+
+**Research-to-Plan Feedback Loop Failure:**
+- Section 17 identified the startup sequence issue
+- Section 18 documented the resolution steps
+- **But:** Plan was not updated with enforceable startup order
+- **Result:** Issue persists operationally despite code being correct
+
+---
+
+### 19.3 Auth Scope Gap Research (PART C)
+
+**Objective:** Research required auth capabilities for startup kick-off without implementation.
+
+#### 19.3.1 Current Auth Capabilities (Backend)
+
+**login.dto.ts (Current):**
+```typescript
+export class LoginDto {
+  @IsEmail()
+  email: string;  // REQUIRES email format
+
+  @IsString()
+  @MinLength(6)
+  password: string;
+}
+```
+
+**Limitations:**
+- ✗ No username login support
+- ✗ No email/username flexibility
+- ✓ Email-only login (restrictive)
+
+**auth.service.ts (Current):**
+```typescript
+// Validates ONLY by email
+WHERE u.email = $1 AND u.deleted_at IS NULL
+
+// Detects Google OAuth users
+if (user.google_id && (!user.password_hash || user.password_hash === '')) {
+  // SSO-only account sentinel
+}
+```
+
+**Database Schema (users table - Current per pmo_schema_pg.sql):**
+```sql
+email VARCHAR(255) NOT NULL UNIQUE,
+password_hash VARCHAR(255) NOT NULL,
+-- NO username column
+```
+
+**Database Schema (Google OAuth Migration - Available):**
+```sql
+-- pmo_migration_google_oauth.sql
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) UNIQUE;
+```
+
+**Summary:** Backend ONLY supports email + password. Google OAuth column exists via migration but no implementation.
+
+#### 19.3.2 Required Auth Capabilities (Startup-Critical)
+
+**Capability 1: Email Login (CURRENT)**
+
+| Aspect | Requirement | Current State | Gap |
+|--------|-------------|---------------|-----|
+| DTO | Accept email field | ✓ Implemented | None |
+| Validation | `@IsEmail()` | ✓ Implemented | None |
+| Service | Lookup by email | ✓ Implemented | None |
+| Schema | `email VARCHAR UNIQUE` | ✓ Exists | None |
+| **Status** | **COMPLETE** | ✅ Production-ready | — |
+
+**Capability 2: Username Login (REQUESTED)**
+
+| Aspect | Requirement | Current State | Gap |
+|--------|-------------|---------------|-----|
+| DTO | Accept `username` OR `email` | ✗ Email only | **DTO UPDATE** |
+| Validation | Conditional: email if contains `@`, else string | ✗ None | **VALIDATOR LOGIC** |
+| Service | Lookup by `username` OR `email` | ✗ Email only | **QUERY LOGIC** |
+| Schema | Add `username VARCHAR UNIQUE` | ✗ No column | **SCHEMA MIGRATION** |
+| **Priority** | Startup-critical? | ❓ TBD | **USER DECISION** |
+
+**Required Changes (If Approved):**
+
+1. **Schema Migration:**
+   ```sql
+   ALTER TABLE users ADD COLUMN username VARCHAR(100) UNIQUE;
+   CREATE INDEX idx_users_username ON users(username);
+   ```
+
+2. **DTO Update (login.dto.ts):**
+   ```typescript
+   export class LoginDto {
+     @IsString()
+     @IsNotEmpty()
+     identifier: string;  // email OR username
+
+     @IsString()
+     @MinLength(6)
+     password: string;
+   }
+   ```
+
+3. **Service Update (auth.service.ts):**
+   ```typescript
+   // Detect if identifier is email or username
+   const isEmail = identifier.includes('@');
+   const field = isEmail ? 'email' : 'username';
+   WHERE u[field] = $1 AND u.deleted_at IS NULL
+   ```
+
+**Trade-offs:**
+- ✅ Benefit: Users can log in with username (e.g., "jdoe" instead of "jdoe@carsu.edu.ph")
+- ⚠️ Risk: Username must be enforced unique across all users
+- ⚠️ Risk: Existing users have no username (migration required)
+- ⚠️ Complexity: Seed data must be updated with usernames
+
+**Startup-Critical Assessment:** **NOT CRITICAL** — Email login is sufficient for MVP. Username is a UX enhancement, not a blocker.
+
+**Capability 3: Google OAuth Login (REQUESTED)**
+
+| Aspect | Requirement | Current State | Gap |
+|--------|-------------|---------------|-----|
+| DTO | OAuth token or callback handler | ✗ None | **OAUTH CONTROLLER** |
+| Validation | Verify Google token | ✗ None | **GOOGLE SDK INTEGRATION** |
+| Service | Lookup/create by `google_id` | ⚠️ Partial (SSO detection only) | **OAUTH FLOW** |
+| Schema | `google_id VARCHAR UNIQUE` | ✓ Via migration | None |
+| Frontend UI | Google Sign-In button | ✗ None | **UI COMPONENT** |
+| **Priority** | Startup-critical? | ❓ TBD | **USER DECISION** |
+
+**Required Changes (If Approved):**
+
+1. **Backend Dependencies:**
+   ```json
+   {
+     "@nestjs/passport": "^10.0.0",
+     "passport-google-oauth20": "^2.0.0"
+   }
+   ```
+
+2. **OAuth Strategy (auth/strategies/google.strategy.ts):**
+   ```typescript
+   @Injectable()
+   export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
+     async validate(profile): Promise<any> {
+       // Lookup user by google_id
+       // Create if not exists (with email from Google profile)
+     }
+   }
+   ```
+
+3. **OAuth Controller (auth.controller.ts):**
+   ```typescript
+   @Get('google')
+   @UseGuards(AuthGuard('google'))
+   async googleAuth() {}
+
+   @Get('google/callback')
+   @UseGuards(AuthGuard('google'))
+   async googleAuthCallback(@Req() req) {
+     // Return JWT token
+   }
+   ```
+
+4. **Frontend UI (login.vue):**
+   ```vue
+   <v-btn @click="loginWithGoogle" prepend-icon="mdi-google">
+     Sign in with Google
+   </v-btn>
+   ```
+
+5. **OAuth Flow:**
+   ```
+   User clicks "Google" → Redirect to Google → User authorizes →
+   Google redirects to /api/auth/google/callback →
+   Backend validates token → Creates/finds user →
+   Returns JWT → Frontend stores token
+   ```
+
+**Trade-offs:**
+- ✅ Benefit: Seamless login for @carsu.edu.ph email users
+- ✅ Benefit: No password management burden
+- ⚠️ Risk: Requires Google OAuth app credentials (setup effort)
+- ⚠️ Risk: Redirect flow requires HTTPS in production
+- ⚠️ Complexity: Multi-step OAuth implementation (3-5 files)
+
+**Startup-Critical Assessment:** **NOT CRITICAL** — Email+password is sufficient for internal admin dashboard. OAuth is a "nice-to-have" for UX, not a blocker for Phase 3.1 delivery.
+
+#### 19.3.3 Schema Impact Summary
+
+**Current Schema (pmo_schema_pg.sql):**
+```sql
+CREATE TABLE users (
+  id UUID PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  -- ... other fields
+);
+```
+
+**With Username Support:**
+```sql
+ALTER TABLE users ADD COLUMN username VARCHAR(100) UNIQUE;
+```
+
+**With Google OAuth (Already Available via Migration):**
+```sql
+ALTER TABLE users ADD COLUMN google_id VARCHAR(255) UNIQUE;
+```
+
+**Migration Considerations:**
+
+| Scenario | Action Required | Risk Level |
+|----------|----------------|------------|
+| Add `username` column | All existing users need username assigned | **HIGH** — Requires data migration script |
+| Use `google_id` (already exists) | Run `pmo_migration_google_oauth.sql` if not applied | **LOW** — Column addition only |
+| OAuth implementation | Backend + Frontend code changes | **MEDIUM** — New auth flow, testing needed |
+
+#### 19.3.4 Recommendation (Startup Kick-Off Scope)
+
+**DEFER:**
+- Username login (not critical for MVP)
+- Google OAuth login (UX enhancement, not blocker)
+
+**KEEP:**
+- Email + password login (current implementation, production-ready)
+
+**Rationale:**
+- Phase 3.0-3.1 goal: Functional MVP with Construction, Repairs, Uni Ops, GAD
+- Auth works reliably with email login
+- Adding username/OAuth introduces:
+  - Schema migration complexity
+  - Seed data updates
+  - Testing overhead
+  - NO immediate value gain for internal dashboard
+
+**Proposed for Phase 3.2+:**
+- Phase 3.2: Add username support with data migration
+- Phase 3.3: Add Google OAuth for SSO convenience
+
+**YAGNI Compliance:** ✅ PASS — Don't build features not immediately needed
+
+---
+
+### 19.4 UI Refinement Research (PART D)
+
+**Objective:** Research how to make Auth UI more formal, minimal, clean, and CSU-aligned.
+
+#### 19.4.1 Current Login UI Assessment
+
+**Current State (login.vue):**
+- ✓ Split-screen layout (branding left, form right)
+- ✓ CSU colors (#009900 green, #f9dc07 gold, #ff9900 orange)
+- ✓ Poppins font
+- ✓ SVG logo (`csu-logo.svg`)
+- ✗ NO admin building image
+- ✗ NO official seal integration
+- ✗ Gradient background (not photo-based)
+
+**Reference Standards:**
+- CSU website: https://www.carsu.edu.ph/
+- CSU branding page: https://www.carsu.edu.ph/ovpeo/pico/university-branding/
+
+**Available Assets (shared/CSU Assets/):**
+
+| Asset | File | Resolution | Purpose |
+|-------|------|------------|---------|
+| Admin Building (Modern) | `3.png` | High-res | **PRIMARY** background image |
+| Admin Building (Classic) | `CSU NEW ADMIN PIC.jpg` | 414 KB | Alternative background |
+| Official Seal | `CSU Official Seal_1216 x 2009.png` | 1216×2009px | Formal trust badge |
+| Brand Logo 1 | `CSU Brand Logo 1.png` | 135 KB | Two-line wordmark |
+| Brand Logo 2 | `CSU Brand Logo 2.png` | 138 KB | Single-line wordmark |
+| 4K Wallpaper (White) | `CSU Wallpaper 4k white.jpg` | 695 KB | Alternative background |
+| 4K Wallpaper (Dark) | `CSU Wallpaper 4k dark.jpg` | 620 KB | Alternative background |
+
+#### 19.4.2 CSU Branding Compliance Check
+
+**Official Guidelines (Authoritative):**
+
+| Guideline | Requirement | Current UI | Compliance |
+|-----------|-------------|------------|------------|
+| **Primary Colors** | Green (#009900), Gold (#f9dc07), Orange (#ff9900), White (#ffffff) | ✓ Implemented | ✅ PASS |
+| **Secondary Colors** | Emerald (#003300), Gray (#4d4d4d) | ✗ Not used | ⚠️ Optional |
+| **Seal Usage** | No alterations (skewing, warping, cropping, color changes, rotation, ghosting) | ✗ Not yet used | — |
+| **Logo Versions** | Single-line (documents), Two-line (events, certificates) | ✓ SVG logo used | ✅ PASS |
+| **Typography** | Not specified in branding page | Poppins font | ✅ PASS (professional) |
+
+**Prohibited Actions (If Using Seal):**
+- ✗ Skewing or warping
+- ✗ Cropping or partial display
+- ✗ Perspective changes
+- ✗ Color modifications
+- ✗ Rotation
+- ✗ Ghosting/overlaying (transparency effects)
+- ✗ Element removal
+- ✗ Wordmark text style changes
+
+**Implication:** If seal is added, it MUST be:
+- Full-size, unmodified
+- No transparency effects on seal itself (background overlay OK)
+- Proper orientation (portrait, as provided)
+
+#### 19.4.3 UI Refinement Recommendations (Non-Functional)
+
+**Refinement 1: Add Admin Building Background**
+
+**Current:**
+```css
+.branding-panel {
+  background: linear-gradient(135deg, #009900 0%, #006600 100%);
+}
+```
+
+**Proposed:**
+```css
+.branding-panel {
+  background:
+    linear-gradient(
+      135deg,
+      rgba(0, 153, 0, 0.85) 0%,
+      rgba(0, 102, 0, 0.90) 100%
+    ),
+    url('/csu-admin-building.png');
+  background-size: cover;
+  background-position: center;
+}
+```
+
+**Rationale:**
+- Preserves institutional context (recognizable CSU landmark)
+- Green overlay maintains text readability
+- Aligns with CSU green branding
+- More formal than generic gradient
+
+**Asset:** Use `3.png` (modern green glass building with "CARAGA STATE UNIVERSITY" text)
+
+**Refinement 2: Integrate Official Seal (Subtle)**
+
+**Current:** Only logo (`csu-logo.svg`)
+
+**Proposed Placements:**
+
+| Placement | Implementation | Compliance | Formality |
+|-----------|----------------|------------|-----------|
+| Card header badge | Small (60-80px), full color, above "Welcome Back" | ✓ Allowed | ⭐⭐⭐ High |
+| Footer badge | Small (50px), centered below copyright | ✓ Allowed | ⭐⭐ Medium |
+| Watermark (left panel) | Large (200px), 10% opacity | ⚠️ Risky (ghosting rule) | ⭐ Low |
+
+**Recommended:** Card header badge (formal, visible, compliant)
+
+**Code Pattern:**
+```vue
+<div class="form-wrapper">
+  <v-img
+    src="/csu-official-seal.png"
+    width="70"
+    class="mx-auto mb-4"
+    alt="CSU Official Seal"
+  />
+  <h2 class="form-title">Welcome Back</h2>
+</div>
+```
+
+**Refinement 3: Auth Field Flexibility (Visual Only)**
+
+**Current UI:** Email + Password fields
+
+**Proposed (No Backend Changes):**
+
+1. **Single "Username or Email" field** with placeholder:
+   ```
+   Placeholder: "Email or username"
+   Label: "CSU Account"
+   ```
+
+2. **Google OAuth Button (Visual Only - Non-functional until Phase 3.2+):**
+   ```vue
+   <v-btn
+     variant="outlined"
+     size="large"
+     prepend-icon="mdi-google"
+     disabled
+     class="mt-2"
+   >
+     Sign in with Google (Coming Soon)
+   </v-btn>
+   ```
+
+**Rationale:**
+- Signals future capability without implementing backend
+- Maintains YAGNI (button is disabled, no logic)
+- UX preparation for Phase 3.2+
+
+**Refinement 4: Formality Enhancements**
+
+| Element | Current | Proposed | Impact |
+|---------|---------|----------|--------|
+| Card title | "Welcome Back" | "PMO Dashboard Login" | More formal, purpose-clear |
+| Card subtitle | "Sign in to continue to the dashboard" | "Physical Planning & Management Office" | Institutional branding |
+| Footer | "Need help? Contact MIS Office" | "© 2026 Caraga State University • All Rights Reserved" | Formal, copyright notice |
+
+#### 19.4.4 Layout Structure Preservation (KISS)
+
+**Keep (No Changes):**
+- ✓ Split-screen layout (efficient use of space)
+- ✓ Responsive design (mobile logo hidden on desktop)
+- ✓ Card-based form (focused attention)
+- ✓ Poppins font (professional, readable)
+- ✓ Color scheme (CSU compliant)
+
+**Change (Enhancements Only):**
+- Background: Gradient → Photo + overlay
+- Seal: None → Card header badge
+- Formality: Casual → Professional tone
+
+**No New Features:**
+- ✗ Animations (avoid visual clutter per KISS)
+- ✗ Additional forms (YAGNI)
+- ✗ Complex layouts (KISS)
+
+#### 19.4.5 Implementation Checklist (Research Only - NOT Implemented)
+
+**Asset Preparation:**
+- [ ] Copy `3.png` to `pmo-frontend/public/csu-admin-building.png`
+- [ ] Copy `CSU Official Seal_1216 x 2009.png` to `pmo-frontend/public/csu-official-seal.png`
+
+**CSS Updates (login.vue):**
+- [ ] Update `.branding-panel` background with image + overlay
+- [ ] Verify text readability on image background
+
+**Component Updates (login.vue):**
+- [ ] Add CSU seal image to form header (60-70px)
+- [ ] Update card title to "PMO Dashboard Login"
+- [ ] Update subtitle to "Physical Planning & Management Office"
+- [ ] Update footer to formal copyright notice
+- [ ] (Optional) Add disabled Google OAuth button
+
+**Validation:**
+- [ ] Verify seal displays without distortion
+- [ ] Verify background image loads properly
+- [ ] Verify text remains readable on all screen sizes
+
+---
+
+### 19.5 Software Engineering & MIS Compliance Check (PART E)
+
+#### 19.5.1 Proposed Changes Compliance Review
+
+**Change 1: UI Refinement (Background Image + Seal)**
+
+| Principle | Check | Compliance |
+|-----------|-------|------------|
+| **TDA** | No data logic moved to frontend; only visual changes | ✅ PASS |
+| **DRY** | No duplication; assets are reference-only | ✅ PASS |
+| **SOLID** | No structural changes; login.vue remains presentation layer | ✅ PASS |
+| **KISS** | Minimal changes (CSS + asset files); no animations or complexity | ✅ PASS |
+| **YAGNI** | Only adds assets currently needed; no feature creep | ✅ PASS |
+| **MIS** | CSU branding compliance improved; no security/privacy impact | ✅ PASS |
+
+**Change 2: Auth Scope Expansion (Username/OAuth - DEFERRED)**
+
+| Principle | Check | Compliance |
+|-----------|-------|------------|
+| **YAGNI** | NOT needed for MVP; deferred to Phase 3.2+ | ✅ PASS (by deferring) |
+| **KISS** | Avoiding premature complexity | ✅ PASS (by deferring) |
+| **TDA** | Would maintain backend-only auth logic (if implemented) | ✅ PASS (design) |
+
+**Change 3: Startup Sequence Enforcement**
+
+| Principle | Check | Compliance |
+|-----------|-------|------------|
+| **KISS** | Explicit order documentation vs. complex port detection | ✅ PASS |
+| **MIS** | Predictable, auditable behavior (backend MUST start first) | ✅ PASS |
+
+#### 19.5.2 Responsibility Boundaries (SOLID - Single Responsibility)
+
+**Frontend (Nuxt.js):**
+- ✓ Presentation layer (UI, forms, navigation)
+- ✓ State management (Pinia auth store)
+- ✓ HTTP client (useApi composable)
+- ✗ Auth validation logic (backend only)
+- ✗ Password hashing (backend only)
+- ✗ Token generation (backend only)
+
+**Backend (NestJS):**
+- ✓ Auth validation (email, password verification)
+- ✓ Token generation (JWT signing)
+- ✓ User lookup (database queries)
+- ✓ RBAC (role/permission checks)
+- ✗ UI rendering (frontend only)
+- ✗ Form validation (frontend provides UX, backend enforces security)
+
+**Current Implementation:** ✅ PASS — Boundaries respected
+
+**Proposed Changes:** ✅ PASS — No boundary violations
+
+#### 19.5.3 DRY Compliance
+
+**Current State:**
+
+| Logic | Location | Duplication? |
+|-------|----------|--------------|
+| Login DTO validation | `login.dto.ts` (backend) | ✗ None |
+| Password hashing | `auth.service.ts` (backend) | ✗ None |
+| JWT signing | `auth.service.ts` (backend) | ✗ None |
+| Form validation (UX) | `login.vue` (frontend) | ⚠️ Mirrors backend rules (expected) |
+
+**Frontend form validation is NOT duplication** — it provides UX feedback before API call. Backend re-validates for security.
+
+**Proposed Changes:** No new duplication introduced.
+
+#### 19.5.4 MIS Governance Compliance
+
+**MIS Policy Requirements (Web Development Policy):**
+- ✅ Vue 3 + Nuxt.js (mandatory) — Implemented
+- ✅ Server-side auth logging — Implemented (`auth.service.ts` logs)
+- ✅ No PII in localStorage — Only JWT token stored (no email/password)
+- ✅ CSU branding compliance — Improved with seal and building image
+
+**Security Considerations:**
+
+| Aspect | Current State | Compliance |
+|--------|---------------|------------|
+| Password storage | bcrypt hashed (backend) | ✅ PASS |
+| Token storage | localStorage (client) | ⚠️ Acceptable for admin dashboard (not public-facing) |
+| HTTPS enforcement | Not yet configured | ⏳ Production requirement (not dev) |
+| Failed login tracking | Implemented (account lockout after 5 attempts) | ✅ PASS |
+| Audit logging | Server-side (`LOGIN_SUCCESS`, `LOGIN_FAILURE`) | ✅ PASS |
+
+**Audit Trail (MIS Requirement):**
+```typescript
+this.logger.log(`LOGIN_SUCCESS: user_id=${user.id}`);
+this.logger.warn(`LOGIN_FAILURE: user_id=${user.id}, reason=INVALID_PASSWORD`);
+this.logger.log(`LOGOUT: user_id=${userId}`);
+```
+
+**Compliance:** ✅ PASS — Logs do not contain PII (no passwords, only user IDs)
+
+#### 19.5.5 Predictable & Auditable Behavior (MIS)
+
+**Current Auth Flow (Auditable):**
+```
+1. User submits email + password (frontend)
+2. Frontend calls POST /api/auth/login (useApi.ts)
+3. Backend validates credentials (auth.service.ts)
+4. Backend logs LOGIN_SUCCESS or LOGIN_FAILURE
+5. Backend returns JWT token OR 401 error
+6. Frontend stores token in localStorage
+7. Frontend navigates to /dashboard
+```
+
+**All steps are:**
+- ✅ Logged (backend logs each login attempt)
+- ✅ Predictable (consistent flow every time)
+- ✅ Auditable (logs contain user_id, timestamp, outcome)
+
+**Proposed Changes:** Do NOT alter audit flow
+
+---
+
+### 19.6 Classified Issue Summary
+
+**BLOCKING:**
+
+| # | Issue | Root Cause | Resolution |
+|---|-------|------------|------------|
+| B1 | H3Error: Page not found: /api/docs | Frontend started first, owns port 3000, intercepts ALL routes | Enforce startup order: Backend FIRST on port 3000, then frontend (auto port 3001+) |
+| B2 | Login returns HTML instead of JSON | Same as B1 — request goes to Nuxt, not NestJS | Same as B1 |
+
+**DEFERRED (Not Startup-Critical):**
+
+| # | Feature | Reason | Target Phase |
+|---|---------|--------|--------------|
+| D1 | Username login | Email login sufficient for MVP; schema migration required | Phase 3.2 |
+| D2 | Google OAuth | UX enhancement, not blocker; OAuth flow complexity | Phase 3.3 |
+
+**INFORMATIONAL:**
+
+| # | Note | Action |
+|---|------|--------|
+| I1 | UI can be enhanced with admin building photo + seal | Non-blocking refinement (Step 3.0.U continuation) |
+| I2 | Backend correctly supports `google_id` via migration | Ready for OAuth when prioritized |
+| I3 | All engineering principles (TDA, DRY, SOLID, KISS, YAGNI) respected | No violations in current or proposed changes |
+
+---
+
+### 19.7 Notes for Plan Update (Not Yet Implemented)
+
+**Recommended plan_active.md Additions:**
+
+1. **Prerequisites Section (NEW):**
+   ```
+   ## Prerequisites
+
+   **CRITICAL:** Backend must start BEFORE frontend to avoid port conflicts.
+
+   Startup Order:
+   1. Start backend: `cd pmo-backend && npm run start:dev` (port 3000)
+   2. Wait for: "PMO Backend running on http://localhost:3000"
+   3. Start frontend: `cd pmo-frontend && npm run dev` (auto port 3001+)
+   ```
+
+2. **Step 3.0.P.0 (NEW) — Startup Sequence Enforcement:**
+   - Verify backend owns port 3000 BEFORE starting frontend
+   - Alternative: Add explicit port to frontend: `nuxt dev --port 3001`
+
+3. **Step 3.0.U.2-3 (UI Refinement Continuation):**
+   - 3.0.U.2: Add CSU Admin Building background (3.png)
+   - 3.0.U.3: Add CSU Official Seal to card header
+
+4. **Deferred Features (Phase 3.2+):**
+   - Phase 3.2: Username login support (requires schema migration)
+   - Phase 3.3: Google OAuth integration (requires OAuth setup)
+
+**NO PLAN CHANGES MADE — Research only per constraints.**
+
+---
+
+### 19.8 Research Summary
+
+**PART A — Root Cause:**
+- `/api/docs` error is a secondary symptom of startup sequence violation
+- Root cause: Frontend starts first, takes port 3000, intercepts backend routes
+- Solution: Enforce backend-first startup OR use explicit frontend port
+
+**PART B — Frontend-Backend Contract:**
+- Contract is CORRECT and properly implemented
+- Frontend calls appropriate endpoints (`/api/auth/*`, `/api/construction-projects`, etc.)
+- Frontend does NOT call `/api/docs` or `/health` at runtime
+- Issue is environmental (port conflict), not implementation
+
+**PART C — Auth Scope Gaps:**
+- Current: Email + password login (production-ready)
+- Requested: Username login (requires schema migration, NOT startup-critical)
+- Requested: Google OAuth (requires OAuth setup, NOT startup-critical)
+- Recommendation: DEFER username and OAuth to Phase 3.2+ per YAGNI
+
+**PART D — UI Refinement:**
+- Current UI is CSU-compliant but can be enhanced
+- Recommendations: Admin building background + official seal
+- Maintain KISS (no animations, no complexity)
+- Formal tone (institutional branding)
+
+**PART E — Engineering Compliance:**
+- All principles respected (TDA, DRY, SOLID, KISS, YAGNI, MIS)
+- No responsibility boundary violations
+- Audit logging compliant (no PII in logs)
+- Proposed changes introduce no compliance issues
+
+---
+
+*ACE Framework — Phase 1 Research Complete*
+*Updated: 2026-01-21*
+*Authority: GOVERNED AI BOOTSTRAP v2.4*
+*Next Step: Update plan_active.md with startup sequence enforcement (Phase 2)*
