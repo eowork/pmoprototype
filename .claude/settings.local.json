@@ -20,7 +20,15 @@
       "Bash(git -C:*)",
       "Bash(npx create-next-app:*)",
       "WebFetch(domain:www.carsu.edu.ph)",
-      "WebFetch(domain:myadmission.carsu.edu.ph)"
+      "WebFetch(domain:myadmission.carsu.edu.ph)",
+      "Bash(npm run dev:*)",
+      "Bash(curl:*)",
+      "Bash(taskkill:*)",
+      "Bash(rd /s /q \"D:\\\\Programming\\\\pmo-dash\\\\pmo-frontend\")",
+      "Bash(npx nuxi@latest init pmo-frontend --packageManager npm --gitInit false)",
+      "Bash(npm run start:dev:*)",
+      "Bash(tasklist:*)",
+      "Bash(ls:*)"
     ]
   }
 }
