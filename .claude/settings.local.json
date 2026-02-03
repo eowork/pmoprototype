@@ -28,7 +28,16 @@
       "Bash(npx nuxi@latest init pmo-frontend --packageManager npm --gitInit false)",
       "Bash(npm run start:dev:*)",
       "Bash(tasklist:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(npm test)",
+      "Bash(psql:*)",
+      "Bash(npx nuxt:*)",
+      "Bash(netstat:*)",
+      "Bash(powershell -Command \"Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force\")",
+      "Bash(timeout //T 10 //NOBREAK)",
+      "Bash(ping:*)",
+      "Bash(wmic process:*)",
+      "Bash(set PORT=3001)"
     ]
   }
 }

@@ -5,7 +5,7 @@ const drawer = ref(true)
 
 const navigationItems = [
   { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/dashboard' },
-  { title: 'Construction Projects', icon: 'mdi-office-building', to: '/projects' },
+  { title: 'Construction Projects', icon: 'mdi-office-building', to: '/coi' },
   { title: 'Repair Projects', icon: 'mdi-tools', to: '/repairs' },
   { title: 'University Operations', icon: 'mdi-school', to: '/university-operations' },
   { title: 'GAD Parity', icon: 'mdi-gender-male-female', to: '/gad' },

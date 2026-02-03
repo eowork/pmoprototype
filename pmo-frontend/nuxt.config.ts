@@ -29,7 +29,9 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:3000',
+      // Empty string = use relative URLs, letting Nitro devProxy handle routing
+      // This avoids CORS issues by keeping requests same-origin
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || '',
     },
   },
 
@@ -39,7 +41,7 @@ export default defineNuxtConfig({
   nitro: {
     devProxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:3000/api',
         changeOrigin: true,
       },
     },

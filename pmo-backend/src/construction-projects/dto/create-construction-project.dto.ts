@@ -11,9 +11,9 @@ import {
 import { ProjectStatus, Campus } from '../../common/enums';
 
 export class CreateConstructionProjectDto {
+  @IsOptional()
   @IsUUID()
-  @IsNotEmpty()
-  project_id: string;
+  project_id?: string;
 
   @IsString()
   @IsNotEmpty()

@@ -7,6 +7,7 @@
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>
+    <ToastContainer />
   </v-app>
 </template>
 

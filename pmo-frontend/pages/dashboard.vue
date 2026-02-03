@@ -40,7 +40,7 @@ onMounted(async () => {
 })
 
 const statCards = [
-  { title: 'Construction Projects', icon: 'mdi-office-building', color: 'primary', key: 'constructionProjects', to: '/projects' },
+  { title: 'Construction Projects', icon: 'mdi-office-building', color: 'primary', key: 'constructionProjects', to: '/coi' },
   { title: 'Repair Projects', icon: 'mdi-tools', color: 'warning', key: 'repairProjects', to: '/repairs' },
   { title: 'University Operations', icon: 'mdi-school', color: 'info', key: 'universityOperations', to: '/university-operations' },
   { title: 'GAD Reports', icon: 'mdi-gender-male-female', color: 'secondary', key: 'gadReports', to: '/gad' },
@@ -104,7 +104,7 @@ const statCards = [
       <v-row>
         <v-col cols="12" md="6">
           <v-btn
-            to="/projects"
+            to="/coi"
             color="primary"
             variant="outlined"
             block
