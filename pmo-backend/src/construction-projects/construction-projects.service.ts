@@ -5,6 +5,7 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { v4 as uuidv4 } from 'uuid';
 import { DatabaseService } from '../database/database.service';
 import { createPaginatedResponse, PaginatedResponse } from '../common/dto';
 import {
@@ -119,15 +120,6 @@ export class ConstructionProjectsService {
   }
 
   async create(dto: CreateConstructionProjectDto, userId: string): Promise<any> {
-    // Verify project_id exists
-    const projectCheck = await this.db.query(
-      `SELECT id FROM projects WHERE id = $1 AND deleted_at IS NULL`,
-      [dto.project_id],
-    );
-    if (projectCheck.rows.length === 0) {
-      throw new BadRequestException(`Project with ID ${dto.project_id} not found`);
-    }
-
     // Check for duplicate project_code
     const existing = await this.db.query(
       `SELECT id FROM construction_projects WHERE project_code = $1 AND deleted_at IS NULL`,
@@ -137,49 +129,91 @@ export class ConstructionProjectsService {
       throw new ConflictException(`Project code ${dto.project_code} already exists`);
     }
 
-    const result = await this.db.query(
-      `INSERT INTO construction_projects
-       (project_id, project_code, title, description, ideal_infrastructure_image, beneficiaries,
-        objectives, key_features, original_contract_duration, contract_number, contractor_id,
-        contract_amount, start_date, target_completion_date, project_duration, project_engineer,
-        project_manager, building_type, floor_area, number_of_floors, funding_source_id,
-        subcategory_id, campus, status, latitude, longitude, metadata, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
-       RETURNING *`,
-      [
-        dto.project_id,
-        dto.project_code,
-        dto.title,
-        dto.description,
-        dto.ideal_infrastructure_image,
-        dto.beneficiaries,
-        dto.objectives ? JSON.stringify(dto.objectives) : null,
-        dto.key_features ? JSON.stringify(dto.key_features) : null,
-        dto.original_contract_duration,
-        dto.contract_number,
-        dto.contractor_id,
-        dto.contract_amount,
-        dto.start_date,
-        dto.target_completion_date,
-        dto.project_duration,
-        dto.project_engineer,
-        dto.project_manager,
-        dto.building_type,
-        dto.floor_area,
-        dto.number_of_floors,
-        dto.funding_source_id,
-        dto.subcategory_id,
-        dto.campus,
-        dto.status,
-        dto.latitude,
-        dto.longitude,
-        dto.metadata ? JSON.stringify(dto.metadata) : null,
-        userId,
-      ],
-    );
+    // Generate project_id if not provided (Domain-Driven Creation pattern)
+    const projectId = dto.project_id || uuidv4();
 
-    this.logger.log(`CONSTRUCTION_PROJECT_CREATED: id=${result.rows[0].id}, by=${userId}`);
-    return result.rows[0];
+    // Begin atomic transaction
+    await this.db.query('BEGIN');
+    try {
+      // If project_id was not provided, create base projects record first
+      if (!dto.project_id) {
+        await this.db.query(
+          `INSERT INTO projects (id, project_code, title, description, project_type, start_date, end_date, status, budget, campus, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            projectId,
+            dto.project_code,
+            dto.title,
+            dto.description || null,
+            'CONSTRUCTION',
+            dto.start_date || null,
+            dto.target_completion_date || null,
+            dto.status,
+            dto.contract_amount || null,
+            dto.campus,
+            userId,
+          ],
+        );
+      } else {
+        // Verify provided project_id exists
+        const projectCheck = await this.db.query(
+          `SELECT id FROM projects WHERE id = $1 AND deleted_at IS NULL`,
+          [dto.project_id],
+        );
+        if (projectCheck.rows.length === 0) {
+          throw new BadRequestException(`Project with ID ${dto.project_id} not found`);
+        }
+      }
+
+      // Create construction_projects record
+      const result = await this.db.query(
+        `INSERT INTO construction_projects
+         (project_id, project_code, title, description, ideal_infrastructure_image, beneficiaries,
+          objectives, key_features, original_contract_duration, contract_number, contractor_id,
+          contract_amount, start_date, target_completion_date, project_duration, project_engineer,
+          project_manager, building_type, floor_area, number_of_floors, funding_source_id,
+          subcategory_id, campus, status, latitude, longitude, metadata, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+         RETURNING *`,
+        [
+          projectId,
+          dto.project_code,
+          dto.title,
+          dto.description,
+          dto.ideal_infrastructure_image,
+          dto.beneficiaries,
+          dto.objectives ? JSON.stringify(dto.objectives) : null,
+          dto.key_features ? JSON.stringify(dto.key_features) : null,
+          dto.original_contract_duration,
+          dto.contract_number,
+          dto.contractor_id,
+          dto.contract_amount,
+          dto.start_date,
+          dto.target_completion_date,
+          dto.project_duration,
+          dto.project_engineer,
+          dto.project_manager,
+          dto.building_type,
+          dto.floor_area,
+          dto.number_of_floors,
+          dto.funding_source_id,
+          dto.subcategory_id,
+          dto.campus,
+          dto.status,
+          dto.latitude,
+          dto.longitude,
+          dto.metadata ? JSON.stringify(dto.metadata) : null,
+          userId,
+        ],
+      );
+
+      await this.db.query('COMMIT');
+      this.logger.log(`CONSTRUCTION_PROJECT_CREATED: id=${result.rows[0].id}, by=${userId}`);
+      return result.rows[0];
+    } catch (error) {
+      await this.db.query('ROLLBACK');
+      throw error;
+    }
   }
 
   async update(id: string, dto: UpdateConstructionProjectDto, userId: string): Promise<any> {
@@ -218,14 +252,29 @@ export class ConstructionProjectsService {
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    await this.findOne(id);
+    const project = await this.findOne(id);
 
-    await this.db.query(
-      `UPDATE construction_projects SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
-      [userId, id],
-    );
+    // Begin atomic transaction to delete both domain and base records
+    await this.db.query('BEGIN');
+    try {
+      // Soft delete construction_projects record
+      await this.db.query(
+        `UPDATE construction_projects SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
+        [userId, id],
+      );
 
-    this.logger.log(`CONSTRUCTION_PROJECT_DELETED: id=${id}, by=${userId}`);
+      // Soft delete base projects record
+      await this.db.query(
+        `UPDATE projects SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
+        [userId, project.project_id],
+      );
+
+      await this.db.query('COMMIT');
+      this.logger.log(`CONSTRUCTION_PROJECT_DELETED: id=${id}, by=${userId}`);
+    } catch (error) {
+      await this.db.query('ROLLBACK');
+      throw error;
+    }
   }
 
   // --- Milestones ---

@@ -11,9 +11,9 @@ import {
 import { RepairStatus, UrgencyLevel, Campus } from '../../common/enums';
 
 export class CreateRepairProjectDto {
+  @IsOptional()
   @IsUUID()
-  @IsNotEmpty()
-  project_id: string;
+  project_id?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -62,6 +62,10 @@ export class CreateRepairProjectDto {
   @IsOptional()
   @IsString()
   reported_by?: string;
+
+  @IsOptional()
+  @IsDateString()
+  reported_date?: string;
 
   @IsOptional()
   @IsDateString()

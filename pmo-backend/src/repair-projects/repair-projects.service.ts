@@ -5,8 +5,10 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { v4 as uuidv4 } from 'uuid';
 import { DatabaseService } from '../database/database.service';
 import { createPaginatedResponse, PaginatedResponse } from '../common/dto';
+import { ProjectStatus, RepairStatus } from '../common/enums';
 import {
   CreateRepairProjectDto,
   UpdateRepairProjectDto,
@@ -19,9 +21,31 @@ import {
 @Injectable()
 export class RepairProjectsService {
   private readonly logger = new Logger(RepairProjectsService.name);
-  private readonly ALLOWED_SORTS = ['created_at', 'title', 'status', 'urgency_level', 'start_date', 'reported_date'];
+  private readonly ALLOWED_SORTS = ['created_at', 'title', 'status', 'urgency_level', 'start_date', 'reported_date', 'physical_progress'];
 
   constructor(private readonly db: DatabaseService) {}
+
+  /**
+   * Maps RepairStatus to ProjectStatus for base projects table
+   * @param repairStatus - The repair-specific status
+   * @returns Corresponding ProjectStatus value
+   */
+  private mapRepairStatusToProjectStatus(repairStatus: RepairStatus): ProjectStatus {
+    switch (repairStatus) {
+      case RepairStatus.REPORTED:
+      case RepairStatus.INSPECTED:
+      case RepairStatus.APPROVED:
+        return ProjectStatus.PLANNING;
+      case RepairStatus.IN_PROGRESS:
+        return ProjectStatus.ONGOING;
+      case RepairStatus.COMPLETED:
+        return ProjectStatus.COMPLETED;
+      case RepairStatus.CANCELLED:
+        return ProjectStatus.CANCELLED;
+      default:
+        return ProjectStatus.PLANNING;
+    }
+  }
 
   async findAll(query: QueryRepairProjectDto): Promise<PaginatedResponse<any>> {
     const { page = 1, limit = 20, sort = 'created_at', order = 'desc' } = query;
@@ -67,6 +91,7 @@ export class RepairProjectsService {
       `SELECT rp.id, rp.project_id, rp.project_code, rp.title, rp.building_name,
               rp.status, rp.urgency_level, rp.is_emergency, rp.campus,
               rp.start_date, rp.end_date, rp.budget, rp.reported_date, rp.created_at,
+              rp.physical_progress, rp.financial_progress,
               rt.name as repair_type_name
        FROM repair_projects rp
        LEFT JOIN repair_types rt ON rp.repair_type_id = rt.id
@@ -84,8 +109,8 @@ export class RepairProjectsService {
       `SELECT rp.*,
               p.title as project_title,
               rt.name as repair_type_name,
-              c.company_name as contractor_name,
-              f.name as facility_name
+              c.name as contractor_name,
+              f.building_name as facility_name
        FROM repair_projects rp
        LEFT JOIN projects p ON rp.project_id = p.id
        LEFT JOIN repair_types rt ON rp.repair_type_id = rt.id
@@ -128,15 +153,6 @@ export class RepairProjectsService {
   }
 
   async create(dto: CreateRepairProjectDto, userId: string): Promise<any> {
-    // Verify project_id exists
-    const projectCheck = await this.db.query(
-      `SELECT id FROM projects WHERE id = $1 AND deleted_at IS NULL`,
-      [dto.project_id],
-    );
-    if (projectCheck.rows.length === 0) {
-      throw new BadRequestException(`Project with ID ${dto.project_id} not found`);
-    }
-
     // Check for duplicate project_code
     const existing = await this.db.query(
       `SELECT id FROM repair_projects WHERE project_code = $1 AND deleted_at IS NULL`,
@@ -146,26 +162,71 @@ export class RepairProjectsService {
       throw new ConflictException(`Project code ${dto.project_code} already exists`);
     }
 
-    const result = await this.db.query(
-      `INSERT INTO repair_projects
-       (project_id, project_code, title, description, building_name, floor_number, room_number,
-        specific_location, repair_type_id, urgency_level, is_emergency, campus, reported_by,
-        inspection_date, inspector_id, inspection_findings, status, start_date, end_date,
-        budget, project_manager_id, contractor_id, facility_id, assigned_technician, metadata, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
-       RETURNING *`,
-      [
-        dto.project_id, dto.project_code, dto.title, dto.description, dto.building_name,
-        dto.floor_number, dto.room_number, dto.specific_location, dto.repair_type_id,
-        dto.urgency_level, dto.is_emergency || false, dto.campus, dto.reported_by,
-        dto.inspection_date, dto.inspector_id, dto.inspection_findings, dto.status,
-        dto.start_date, dto.end_date, dto.budget, dto.project_manager_id, dto.contractor_id,
-        dto.facility_id, dto.assigned_technician, dto.metadata ? JSON.stringify(dto.metadata) : null, userId,
-      ],
-    );
+    // Generate project_id if not provided (Domain-Driven Creation pattern)
+    const projectId = dto.project_id || uuidv4();
 
-    this.logger.log(`REPAIR_PROJECT_CREATED: id=${result.rows[0].id}, by=${userId}`);
-    return result.rows[0];
+    // Begin atomic transaction
+    await this.db.query('BEGIN');
+    try {
+      // If project_id was not provided, create base projects record first
+      if (!dto.project_id) {
+        // Map RepairStatus to ProjectStatus for base projects table
+        const projectStatus = this.mapRepairStatusToProjectStatus(dto.status);
+
+        await this.db.query(
+          `INSERT INTO projects (id, project_code, title, description, project_type, start_date, end_date, status, budget, campus, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            projectId,
+            dto.project_code,
+            dto.title,
+            dto.description || null,
+            'REPAIR',
+            dto.start_date || null,
+            dto.end_date || null,
+            projectStatus,
+            dto.budget || null,
+            dto.campus,
+            userId,
+          ],
+        );
+      } else {
+        // Verify provided project_id exists
+        const projectCheck = await this.db.query(
+          `SELECT id FROM projects WHERE id = $1 AND deleted_at IS NULL`,
+          [dto.project_id],
+        );
+        if (projectCheck.rows.length === 0) {
+          throw new BadRequestException(`Project with ID ${dto.project_id} not found`);
+        }
+      }
+
+      // Create repair_projects record
+      const result = await this.db.query(
+        `INSERT INTO repair_projects
+         (project_id, project_code, title, description, building_name, floor_number, room_number,
+          specific_location, repair_type_id, urgency_level, is_emergency, campus, reported_by,
+          inspection_date, inspector_id, inspection_findings, status, start_date, end_date,
+          budget, project_manager_id, contractor_id, facility_id, assigned_technician, metadata, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+         RETURNING *`,
+        [
+          projectId, dto.project_code, dto.title, dto.description, dto.building_name,
+          dto.floor_number, dto.room_number, dto.specific_location, dto.repair_type_id,
+          dto.urgency_level, dto.is_emergency || false, dto.campus, dto.reported_by,
+          dto.inspection_date, dto.inspector_id, dto.inspection_findings, dto.status,
+          dto.start_date, dto.end_date, dto.budget, dto.project_manager_id, dto.contractor_id,
+          dto.facility_id, dto.assigned_technician, dto.metadata ? JSON.stringify(dto.metadata) : null, userId,
+        ],
+      );
+
+      await this.db.query('COMMIT');
+      this.logger.log(`REPAIR_PROJECT_CREATED: id=${result.rows[0].id}, by=${userId}`);
+      return result.rows[0];
+    } catch (error) {
+      await this.db.query('ROLLBACK');
+      throw error;
+    }
   }
 
   async update(id: string, dto: UpdateRepairProjectDto, userId: string): Promise<any> {
@@ -199,12 +260,29 @@ export class RepairProjectsService {
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    await this.findOne(id);
-    await this.db.query(
-      `UPDATE repair_projects SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
-      [userId, id],
-    );
-    this.logger.log(`REPAIR_PROJECT_DELETED: id=${id}, by=${userId}`);
+    const project = await this.findOne(id);
+
+    // Begin atomic transaction to delete both domain and base records
+    await this.db.query('BEGIN');
+    try {
+      // Soft delete repair_projects record
+      await this.db.query(
+        `UPDATE repair_projects SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
+        [userId, id],
+      );
+
+      // Soft delete base projects record
+      await this.db.query(
+        `UPDATE projects SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
+        [userId, project.project_id],
+      );
+
+      await this.db.query('COMMIT');
+      this.logger.log(`REPAIR_PROJECT_DELETED: id=${id}, by=${userId}`);
+    } catch (error) {
+      await this.db.query('ROLLBACK');
+      throw error;
+    }
   }
 
   // --- POW Items ---

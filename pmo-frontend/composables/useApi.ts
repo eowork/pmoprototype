@@ -31,20 +31,35 @@ export function useApi() {
         },
       })
 
-      // Check content type to detect proxy/routing failures
-      const contentType = response.headers.get('content-type') || ''
-      if (!contentType.includes('application/json')) {
-        throw {
-          message: 'Backend unreachable. Start backend first: cd pmo-backend && npm run start:dev',
-          statusCode: 503,
-        }
-      }
-
+      // Handle error responses first
       if (!response.ok) {
+        // Check content type for error responses
+        const contentType = response.headers.get('content-type') || ''
+        if (!contentType.includes('application/json')) {
+          throw {
+            message: 'Backend unreachable. Start backend first: cd pmo-backend && npm run start:dev',
+            statusCode: 503,
+          }
+        }
+
         const errorData = await response.json().catch(() => ({}))
         throw {
           message: errorData.message || `HTTP error ${response.status}`,
           statusCode: response.status,
+        }
+      }
+
+      // Handle 204/205 No Content responses (DELETE operations)
+      if (response.status === 204 || response.status === 205) {
+        return {} as T
+      }
+
+      // Check content type for successful responses with body
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.includes('application/json')) {
+        throw {
+          message: 'Invalid response format from server',
+          statusCode: 500,
         }
       }
 
