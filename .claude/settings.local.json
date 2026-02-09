@@ -42,7 +42,8 @@
       "Bash(npx vue-tsc:*)",
       "Bash(git checkout:*)",
       "Bash(tree:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

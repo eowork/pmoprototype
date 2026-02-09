@@ -32,15 +32,15 @@ const headers = [
 
 // Navigation
 function viewUser(user: UIUserList) {
-  router.push(`/users-detail-${user.id}`)
+  router.push(`/users/detail-${user.id}`)
 }
 
 function editUser(user: UIUserList) {
-  router.push(`/users-edit-${user.id}`)
+  router.push(`/users/edit-${user.id}`)
 }
 
 function createUser() {
-  router.push('/users-new')
+  router.push('/users/new')
 }
 
 // Delete confirmation
