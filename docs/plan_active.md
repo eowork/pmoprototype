@@ -1,17 +1,71 @@
 # PMO Dashboard: Active Development Plan
 
-**Version:** 12.2.USER-MGMT-COMPLETE | **Updated:** 2026-02-09
-**Status:** 🎯 AUTHENTICATION & USER MANAGEMENT SPRINT (FEB 2-27)
+**Version:** 13.0.EXECUTIVE-REALIGNMENT | **Updated:** 2026-02-09
+**Status:** ⚠️ ROLLBACK REQUIRED + SPRINT REALIGNMENT
 **Kickoff Target:** May 2026 | **Stakeholder Review:** March 18-20, 2026
-**Authority:** ACE_BOOTSTRAP v2.4 - Auth/RBAC Sprint Planning
+**Authority:** Executive Directive - University Operations Priority
 
 ---
 
-## 📍 CURRENT PHASE: AUTHENTICATION & USER MANAGEMENT SPRINT
+## 🚨 CRITICAL: ROLLBACK REQUIRED
 
-**Sprint Duration:** Feb 2-27, 2026 (4 weeks)
-**Focus:** User Management Frontend + Optional Security Enhancements
-**Goal:** Production-ready admin user management for March review
+**Status:** ⚠️ REGRESSION DETECTED
+**Cause:** File structure reorganization (commit 479ab4c)
+**Impact:** CRUD forms and dialogs not rendering due to Nuxt routing interpretation
+
+### Why Rollback is Necessary
+
+**Nuxt Routing Behavior:**
+- Files inside `coi/` folder are interpreted as **CHILD ROUTES** of `coi.vue`
+- Child routes require parent to have `<NuxtPage />` component
+- `coi.vue` is a list page (NOT a layout wrapper) → has no `<NuxtPage />`
+- Result: Child routes (`coi/new.vue`) cannot mount → forms don't render
+
+**Current Broken Structure:**
+```
+coi.vue           ← List page (no <NuxtPage />)
+coi/
+  new.vue         ← CHILD route (expects parent to render it)
+  detail-[id].vue ← CHILD route (cannot mount)
+  edit-[id].vue   ← CHILD route (cannot mount)
+```
+
+**Working Structure (Before Feb 9):**
+```
+coi.vue                  ← /coi
+coi-new.vue              ← /coi-new (SIBLING route)
+coi-detail-[id].vue      ← /coi-detail/:id (SIBLING route)
+coi-edit-[id].vue        ← /coi-edit/:id (SIBLING route)
+```
+
+### Rollback Actions
+
+1. ✅ Revert commits: 479ab4c, c750f5b (page structure changes)
+2. ✅ Restore flat sibling routes for COI, Repairs, Contractors, Funding Sources, University Ops
+3. ✅ Keep `users/*` structure (already implemented, needs testing first)
+4. ✅ Update all navigation to old URL pattern
+
+**Target Rollback Date:** Before next development session
+
+---
+
+## 📍 CURRENT PHASE: EXECUTIVE REALIGNMENT
+
+**Sprint Duration:** Feb 9 - March 13, 2026 (5 weeks)
+**Focus:** User Management + University Operations (DBM Financial)
+**Goal:** Production-ready user management + University Operations for March review
+
+### Updated Sprint Priorities (Executive Directive)
+
+**Priority Order:**
+1. ✅ User Management (COMPLETE - needs testing after rollback)
+2. 🎯 University Operations (DBM Financial Focus) - **PRIORITY**
+3. ⏸️ COI Enhancements (DEFERRED to post-March)
+
+**Timeline:**
+- Week 1 (Feb 9-15): Rollback + User Management testing
+- Weeks 2-4 (Feb 16 - March 13): University Operations implementation
+- March 18-20: Stakeholder Review
 
 ---
 
@@ -42,33 +96,29 @@
 
 ---
 
-### Frontend Structure Reorganization (Feb 9, 2026) ✅ COMPLETE
+### Frontend Structure Reorganization (Feb 9, 2026) ⚠️ REQUIRES ROLLBACK
 
 **Branch:** refactor/page-structure-feb9 | **Commit:** 479ab4c
 
+**Status:** ❌ REGRESSION - Nuxt routing interpretation issue
+
+**Problem Identified:**
+- Nuxt interprets folder structure as parent-child routes
+- Parent files (`coi.vue`) do NOT have `<NuxtPage />` component
+- Child routes (`coi/new.vue`) cannot mount without parent renderer
+- Result: Forms/dialogs don't render, HTTP methods don't fire
+
 **What Was Done:**
-- ✅ Deleted orphaned nested route files (broken, unused)
-- ✅ Created module folders: coi/, repairs/, university-operations/, contractors/, funding-sources/
-- ✅ Moved flat pages into organized folders
-- ✅ Updated all router.push() calls to new URL structure
-- ✅ Verified TypeScript compilation (no new errors)
+- ❌ Created module folders: coi/, repairs/, university-operations/, contractors/, funding-sources/
+- ❌ Moved flat pages into folders (created unintended nesting)
+- ❌ Updated router.push() to new URL structure
 
-**Pattern Used:** Standalone pages (GAD model) - NOT nested child routes
+**Why It Failed:**
+- Assumption: Folders are just namespaces (WRONG for Nuxt)
+- Reality: Folders create parent-child route relationships
+- GAD works because `gad.vue` is a dashboard, not a list page
 
-**New URLs:**
-- `/coi/new`, `/coi/detail/:id`, `/coi/edit/:id` (vs old `/coi-new`, `/coi-detail-:id`)
-- `/repairs/new`, `/repairs/detail/:id`, `/repairs/edit/:id`
-- `/contractors/new`, `/contractors/edit/:id`
-- `/funding-sources/new`, `/funding-sources/edit/:id`
-- `/university-operations/new`, `/university-operations/detail/:id`, `/university-operations/edit/:id`
-
-**Benefits:**
-- Clear module boundaries (scalable to 50+ files)
-- RESTful URLs (better UX)
-- Removed orphaned files (cleaner codebase)
-- MIS compliance (expected structure for government systems)
-
-**Testing Required:** Manual validation of all CRUD operations (see research_frontend_structure_reorganization.md)
+**Rollback Required:** Revert to flat sibling routes (Feb 3 state)
 
 **Next:** User management pages will follow this pattern (`users/new.vue`, `users/detail-[id].vue`, `users/edit-[id].vue`)
 
@@ -102,7 +152,56 @@
 
 ---
 
-## 🎯 ACTIVE SPRINT: USER MANAGEMENT FRONTEND
+---
+
+## 🎯 UPDATED SPRINT PLAN (EXECUTIVE DIRECTIVE)
+
+### Sprint 1: Rollback + User Management Testing (Feb 9-15) ← CURRENT
+
+**Priority:** P0 (CRITICAL)
+**Status:** ⏳ IN PROGRESS
+
+**Deliverables:**
+- [ ] Rollback file structure to flat sibling routes
+- [ ] Restore working URLs: `/coi-new`, `/coi-detail-:id`, `/coi-edit-:id`
+- [ ] Test User Management with backend (all CRUD operations)
+- [ ] Verify users/* routes work correctly
+
+**Target:** Feb 15, 2026
+
+---
+
+### Sprint 2: University Operations (DBM Financial) (Feb 16 - March 13) ← NEXT
+
+**Priority:** P0 (EXECUTIVE PRIORITY)
+**Scope:** DBM Financial Measurement ONLY
+
+**Deliverables:**
+- [ ] University Operations list page
+- [ ] Create/edit forms
+- [ ] Financial indicators display (DBM metrics)
+- [ ] Dashboard with DBM financial data
+- [ ] Testing
+
+**Target:** March 13, 2026 (before stakeholder review)
+
+**Explicitly EXCLUDE:**
+- ❌ Advanced analytics
+- ❌ Custom visualizations
+- ❌ Non-critical reporting features
+
+---
+
+### Sprint 3: COI Enhancements (DEFERRED)
+
+**Priority:** P2 (POST-MARCH)
+**Status:** ⏸️ DEFERRED to post-stakeholder review
+
+**Reason:** Executive directive prioritizes University Operations over COI enhancements
+
+---
+
+## ✅ COMPLETED SPRINTS
 
 ### Sprint 1: User Management UI (Feb 2-9) ✅ COMPLETE
 
@@ -231,13 +330,83 @@
 
 ---
 
-## 📅 FEBRUARY SPRINT TIMELINE (4 WEEKS)
+## 📋 MODULE SCOPE STATUS
+
+| Module | Priority | Status | Timeline | Notes |
+|--------|----------|--------|----------|-------|
+| **User Management** | P0 | ✅ IN SCOPE | Feb 2-9 | COMPLETE - needs testing after rollback |
+| **University Operations** | P0 | 🎯 IN SCOPE | Feb 16 - Mar 13 | DBM Financial ONLY |
+| **COI (Construction)** | P1 | ✅ WORKING | Stable | Basic CRUD functional, enhancements deferred |
+| **Repairs** | P1 | ✅ WORKING | Stable | Basic CRUD functional |
+| **GAD Parity** | P1 | ✅ WORKING | Stable | All 7 modules functional |
+| **Contractors** | P2 | ✅ WORKING | Stable | Reference data complete |
+| **Funding Sources** | P2 | ✅ WORKING | Stable | Reference data complete |
+| **Google OAuth** | P3 | ⏸️ DEFERRED | Post-March | External dependency |
+| **COI Enhancements** | P3 | ⏸️ DEFERRED | Post-March | Advanced analytics |
+| **Dashboard Analytics** | P3 | ⏸️ POST-KICKOFF | May+ | Performance metrics |
+
+**Legend:**
+- 🎯 IN SCOPE - Current sprint focus
+- ✅ WORKING - Stable, basic functionality complete
+- ⏸️ DEFERRED - Postponed to post-stakeholder review
+- ⏸️ POST-KICKOFF - Deferred to May+
+
+---
+
+## 📅 UPDATED SPRINT TIMELINE (5 WEEKS)
+
+### Week 1 (Feb 9-15): Rollback + User Management Testing ← CURRENT
+
+| Day | Tasks | Hours | Status |
+|-----|-------|-------|--------|
+| Feb 9-10 | Rollback file structure to flat routes | 2-3 hrs | ⏳ TODO |
+| Feb 11-12 | Test User Management with backend | 4-6 hrs | ⏳ TODO |
+| Feb 13-15 | Fix any issues, verify all CRUD | 2-4 hrs | ⏳ TODO |
+
+**Deliverables:**
+- Flat route structure restored
+- User Management tested and verified
+- Ready for University Operations sprint
+
+---
+
+### Weeks 2-4 (Feb 16 - Mar 13): University Operations
+
+| Week | Tasks | Hours | Status |
+|------|-------|-------|--------|
+| Week 2 | List page + Create/Edit forms | 8-12 hrs | ⏳ TODO |
+| Week 3 | Financial indicators + DBM metrics | 12-16 hrs | ⏳ TODO |
+| Week 4 | Dashboard + Testing | 8-12 hrs | ⏳ TODO |
+
+**Deliverables:**
+- University Operations CRUD complete
+- DBM financial measurement display
+- Admin-focused interface
+- Minimal analytics (no overengineering)
+
+**Scope Limits:**
+- ❌ NO advanced analytics
+- ❌ NO complex visualizations
+- ❌ NO optional enhancements
+
+---
+
+### Week 5 (Mar 13-20): Stakeholder Review Prep
+
+| Day | Tasks | Hours | Status |
+|-----|-------|-------|--------|
+| Mar 13-17 | Final testing, bug fixes | 8-12 hrs | ⏳ TODO |
+| Mar 18-20 | **STAKEHOLDER REVIEW** | - | ⏳ SCHEDULED |
+
+---
+
+## 📅 OLD TIMELINE (ARCHIVED)
 
 ### Week 1 (Feb 2-8): User Management UI
 
 | Day | Tasks | Hours | Status |
 |-----|-------|-------|--------|
-| Mon-Tue | User list page + detail page | 4-6 hrs | ⏳ TODO |
+| Mon-Tue | User list page + detail page | 4-6 hrs | ✅ DONE |
 | Wed-Thu | Create/edit forms | 4-5 hrs | ⏳ TODO |
 | Fri | Role assignment UI | 2-3 hrs | ⏳ TODO |
 | Sat | Account management actions | 2-3 hrs | ⏳ TODO |
