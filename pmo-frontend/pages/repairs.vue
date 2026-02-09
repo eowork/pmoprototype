@@ -28,15 +28,15 @@ const headers = [
 
 // Navigation
 function viewRepair(repair: UIRepairProject) {
-  router.push(`/repairs-detail-${repair.id}`)
+  router.push(`/repairs/detail-${repair.id}`)
 }
 
 function editRepair(repair: UIRepairProject) {
-  router.push(`/repairs-edit-${repair.id}`)
+  router.push(`/repairs/edit-${repair.id}`)
 }
 
 function createRepair() {
-  router.push('/repairs-new')
+  router.push('/repairs/new')
 }
 
 // Delete confirmation

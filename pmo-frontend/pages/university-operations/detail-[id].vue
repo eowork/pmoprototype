@@ -99,7 +99,7 @@ function goBack() {
 }
 
 function editOperation() {
-  router.push(`/university-operations-edit-${operationId}`)
+  router.push(`/university-operations/edit-${operationId}`)
 }
 
 // ACE-R15 Tier 3: Simple onMounted (no watchEffect complexity)

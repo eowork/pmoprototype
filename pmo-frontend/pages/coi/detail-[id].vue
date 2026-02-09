@@ -83,7 +83,7 @@ function goBack() {
 }
 
 function editProject() {
-  router.push(`/coi-edit-${projectId}`)
+  router.push(`/coi/edit-${projectId}`)
 }
 
 // ACE-R15 Tier 3: Simple onMounted (no watchEffect complexity)

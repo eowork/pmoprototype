@@ -28,15 +28,15 @@ const headers = [
 
 // Navigation
 function viewProject(project: UIProject) {
-  router.push(`/coi-detail-${project.id}`)
+  router.push(`/coi/detail-${project.id}`)
 }
 
 function editProject(project: UIProject) {
-  router.push(`/coi-edit-${project.id}`)
+  router.push(`/coi/edit-${project.id}`)
 }
 
 function createProject() {
-  router.push('/coi-new')
+  router.push('/coi/new')
 }
 
 // Delete confirmation

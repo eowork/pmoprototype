@@ -207,15 +207,15 @@ export class RepairProjectsService {
          (project_id, project_code, title, description, building_name, floor_number, room_number,
           specific_location, repair_type_id, urgency_level, is_emergency, campus, reported_by,
           inspection_date, inspector_id, inspection_findings, status, start_date, end_date,
-          budget, project_manager_id, contractor_id, facility_id, assigned_technician, metadata, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+          budget, actual_cost, project_manager_id, contractor_id, facility_id, assigned_technician, metadata, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
          RETURNING *`,
         [
           projectId, dto.project_code, dto.title, dto.description, dto.building_name,
           dto.floor_number, dto.room_number, dto.specific_location, dto.repair_type_id,
           dto.urgency_level, dto.is_emergency || false, dto.campus, dto.reported_by,
           dto.inspection_date, dto.inspector_id, dto.inspection_findings, dto.status,
-          dto.start_date, dto.end_date, dto.budget, dto.project_manager_id, dto.contractor_id,
+          dto.start_date, dto.end_date, dto.budget, dto.actual_cost || null, dto.project_manager_id, dto.contractor_id,
           dto.facility_id, dto.assigned_technician, dto.metadata ? JSON.stringify(dto.metadata) : null, userId,
         ],
       );

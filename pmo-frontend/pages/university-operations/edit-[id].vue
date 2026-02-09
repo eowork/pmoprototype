@@ -117,7 +117,7 @@ async function handleSubmit() {
     console.log('[UniOps Edit] Submitting update for:', operationId)
     await api.patch(`/api/university-operations/${operationId}`, payload)
     toast.success('Operation updated successfully')
-    router.push(`/university-operations/${operationId}`)
+    router.push(`/university-operations/detail-${operationId}`)
   } catch (err: unknown) {
     const apiError = err as { message?: string }
     toast.error(apiError.message || 'Failed to update operation')
@@ -129,7 +129,7 @@ async function handleSubmit() {
 
 // Navigation
 function goBack() {
-  router.push(`/university-operations/${operationId}`)
+  router.push(`/university-operations/detail-${operationId}`)
 }
 
 // ACE-R15 Tier 3: Simple onMounted (no watchEffect complexity)

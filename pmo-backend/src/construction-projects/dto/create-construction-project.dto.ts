@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsDateString,
   IsArray,
+  Matches,
 } from 'class-validator';
 import { ProjectStatus, Campus } from '../../common/enums';
 
@@ -17,6 +18,9 @@ export class CreateConstructionProjectDto {
 
   @IsString()
   @IsNotEmpty()
+  @Matches(/^CP-\d{4}-\d{3}$/, {
+    message: 'Project code must follow format CP-YYYY-NNN (e.g., CP-2026-001)',
+  })
   project_code: string;
 
   @IsString()

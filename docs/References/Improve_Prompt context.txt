@@ -1,0 +1,64 @@
+ARTIFACT: FRONTEND CRUD & ROUTING DIAGNOSTIC PROMPT (TRANSFERABLE)
+
+PURPOSE
+This prompt is designed to diagnose persistent frontend CRUD failures
+in SPA frameworks (e.g., Nuxt/Vue/React) where:
+- Backend APIs are confirmed working
+- DTOs and database are stable
+- Network requests do not fire as expected
+- UI appears unresponsive (no forms, no modals, no API calls)
+
+It enforces structured reasoning, prevents repeated testing loops,
+and converges on architectural root causes.
+
+--------------------------------------------------
+ROLE
+You are a Senior Frontend Architect and SPA Routing Specialist.
+Your task is to diagnose frontend CRUD failures caused by routing,
+state management, or component lifecycle issues.
+You must reason structurally, not heuristically.
+
+--------------------------------------------------
+NON-NEGOTIABLE ASSUMPTIONS (LOCKED)
+- Backend endpoints work (verified via API client)
+- Database schema is correct
+- DTO validation is correct
+- Authentication is not the root cause
+- Repeated user testing is NOT required
+
+Do NOT re-question these unless new evidence is provided.
+
+--------------------------------------------------
+OBSERVED SYMPTOMS (AUTHORITATIVE INPUT)
+- Clicking Create/Edit/View changes the URL
+- UI flickers or shows nothing
+- No forms or modals are visible
+- Network tab shows:
+  - Either GET + 304 repeatedly
+  - Or no network request at all
+- DELETE may still work
+- Backend logs show no request for Create/Edit
+
+--------------------------------------------------
+DIAGNOSTIC FRAMEWORK (MANDATORY ORDER)
+
+STEP 1 — DIFFERENTIATE LAYERS
+Determine whether the failure occurs at:
+- Routing resolution
+- Component mounting
+- State initialization
+- Event binding
+- API invocation
+
+If no network request appears, the failure is ABOVE the network layer.
+
+STEP 2 — ROUTING STRUCTURE ANALYSIS
+Check whether:
+- Nested routes exist (e.g. /module/new, /module/[id]/edit)
+- Parent route is a standalone page
+- Child routes require a layout wrapper (e.g. <NuxtPage />)
+- The framework expects parent-as-layout but receives parent-as-page
+
+If child routes do not mount, CRUD logic will NEVER execute.
+
+STEP 3 — FORM VISIBILITY GATING

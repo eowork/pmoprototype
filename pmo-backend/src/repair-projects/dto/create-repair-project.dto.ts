@@ -96,6 +96,10 @@ export class CreateRepairProjectDto {
   budget?: number;
 
   @IsOptional()
+  @IsNumber()
+  actual_cost?: number;
+
+  @IsOptional()
   @IsUUID()
   project_manager_id?: string;
 

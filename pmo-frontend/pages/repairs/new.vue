@@ -153,7 +153,10 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-text-field
                     v-model="form.project_code"
-                    label="Repair Code"
+                    label="Repair Code *"
+                    placeholder="RP-2026-001"
+                    hint="Unique repair identifier"
+                    persistent-hint
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -163,12 +166,13 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.repair_type_id"
-                    label="Repair Type"
+                    label="Repair Type *"
                     :items="repairTypes"
                     item-title="name"
                     item-value="id"
                     :rules="[rules.required]"
                     required
+                    placeholder="Select repair type"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -176,7 +180,8 @@ onMounted(fetchLookups)
                 <v-col cols="12">
                   <v-text-field
                     v-model="form.title"
-                    label="Title"
+                    label="Title *"
+                    placeholder="e.g., Ceiling Repair in Room 101"
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -187,6 +192,7 @@ onMounted(fetchLookups)
                   <v-textarea
                     v-model="form.description"
                     label="Description"
+                    placeholder="Describe the repair issue and scope of work..."
                     rows="3"
                     variant="outlined"
                     density="comfortable"
@@ -205,7 +211,7 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.campus"
-                    label="Campus"
+                    label="Campus *"
                     :items="campusOptions"
                     :rules="[rules.required]"
                     required
@@ -216,7 +222,8 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-text-field
                     v-model="form.building_name"
-                    label="Building Name"
+                    label="Building Name *"
+                    placeholder="e.g., Admin Building"
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -227,6 +234,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.floor_number"
                     label="Floor Number"
+                    placeholder="e.g., 2nd Floor"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -235,6 +243,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.room_number"
                     label="Room Number"
+                    placeholder="e.g., 101"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -243,6 +252,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.specific_location"
                     label="Specific Location"
+                    placeholder="e.g., Near window"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -260,7 +270,7 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.status"
-                    label="Status"
+                    label="Status *"
                     :items="statusOptions"
                     :rules="[rules.required]"
                     required
@@ -272,6 +282,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.reported_by"
                     label="Reported By"
+                    placeholder="Name of person who reported"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -280,6 +291,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.assigned_technician"
                     label="Assigned Technician"
+                    placeholder="Name of assigned personnel"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -289,6 +301,7 @@ onMounted(fetchLookups)
                     v-model.number="form.budget"
                     label="Estimated Budget (PHP)"
                     type="number"
+                    placeholder="50000"
                     :rules="[rules.positiveNumber]"
                     prefix="₱"
                     variant="outlined"
@@ -309,7 +322,7 @@ onMounted(fetchLookups)
             <v-card-text>
               <v-select
                 v-model="form.urgency_level"
-                label="Urgency Level"
+                label="Urgency Level *"
                 :items="urgencyOptions"
                 :rules="[rules.required]"
                 required
@@ -321,7 +334,7 @@ onMounted(fetchLookups)
                 v-model="form.is_emergency"
                 label="This is an emergency"
                 color="error"
-                hide-details
+                hint="Check if immediate attention required"
               />
             </v-card-text>
           </v-card>

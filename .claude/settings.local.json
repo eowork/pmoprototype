@@ -37,7 +37,12 @@
       "Bash(timeout //T 10 //NOBREAK)",
       "Bash(ping:*)",
       "Bash(wmic process:*)",
-      "Bash(set PORT=3001)"
+      "Bash(set PORT=3001)",
+      "Bash(wc:*)",
+      "Bash(npx vue-tsc:*)",
+      "Bash(git checkout:*)",
+      "Bash(tree:*)",
+      "Bash(git add:*)"
     ]
   }
 }

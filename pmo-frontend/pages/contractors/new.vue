@@ -7,48 +7,32 @@ const router = useRouter()
 const api = useApi()
 const toast = useToast()
 
-const loading = ref(false)
 const submitting = ref(false)
 
 // Form data
 const form = ref({
-  title: '',
-  description: '',
-  code: '',
-  operation_type: '',
-  campus: '',
-  status: 'PLANNING',
-  start_date: '',
-  end_date: '',
-  budget: null as number | null,
+  name: '',
+  contact_person: '',
+  email: '',
+  phone: '',
+  address: '',
+  tin_number: '',
+  registration_number: '',
+  validity_date: '',
+  status: 'ACTIVE',
 })
 
-// Dropdown options
-const operationTypeOptions = [
-  { title: 'Higher Education', value: 'HIGHER_EDUCATION' },
-  { title: 'Advanced Education', value: 'ADVANCED_EDUCATION' },
-  { title: 'Research', value: 'RESEARCH' },
-  { title: 'Technical Advisory', value: 'TECHNICAL_ADVISORY' },
-]
-
-const campusOptions = [
-  { title: 'Main Campus', value: 'MAIN' },
-  { title: 'Cabadbaran Campus', value: 'CABADBARAN' },
-  { title: 'Both Campuses', value: 'BOTH' },
-]
-
+// Status options
 const statusOptions = [
-  { title: 'Planning', value: 'PLANNING' },
-  { title: 'Ongoing', value: 'ONGOING' },
-  { title: 'Completed', value: 'COMPLETED' },
-  { title: 'On Hold', value: 'ON_HOLD' },
-  { title: 'Cancelled', value: 'CANCELLED' },
+  { title: 'Active', value: 'ACTIVE' },
+  { title: 'Suspended', value: 'SUSPENDED' },
+  { title: 'Blacklisted', value: 'BLACKLISTED' },
 ]
 
 // Validation rules
 const rules = {
   required: (v: string) => !!v || 'This field is required',
-  positiveNumber: (v: number | null) => v === null || v >= 0 || 'Must be a positive number',
+  email: (v: string) => !v || /.+@.+\..+/.test(v) || 'Invalid email format',
 }
 
 // Submit form
@@ -57,25 +41,25 @@ async function handleSubmit() {
 
   try {
     const payload = {
-      title: form.value.title,
-      description: form.value.description || undefined,
-      code: form.value.code || undefined,
-      operation_type: form.value.operation_type,
-      campus: form.value.campus,
+      name: form.value.name,
+      contact_person: form.value.contact_person || undefined,
+      email: form.value.email || undefined,
+      phone: form.value.phone || undefined,
+      address: form.value.address || undefined,
+      tin_number: form.value.tin_number || undefined,
+      registration_number: form.value.registration_number || undefined,
+      validity_date: form.value.validity_date || undefined,
       status: form.value.status,
-      start_date: form.value.start_date || undefined,
-      end_date: form.value.end_date || undefined,
-      budget: form.value.budget || undefined,
     }
 
-    console.log('[UniOps Create] Submitting:', payload)
-    await api.post('/api/university-operations', payload)
-    toast.success('Operation created successfully')
-    router.push('/university-operations')
+    console.log('[Contractor Create] Submitting:', payload)
+    await api.post('/api/contractors', payload)
+    toast.success('Contractor created successfully')
+    router.push('/contractors')
   } catch (err: unknown) {
     const apiError = err as { message?: string }
-    toast.error(apiError.message || 'Failed to create operation')
-    console.error('[UniOps Create] Failed:', err)
+    toast.error(apiError.message || 'Failed to create contractor')
+    console.error('[Contractor Create] Failed:', err)
   } finally {
     submitting.value = false
   }
@@ -83,7 +67,7 @@ async function handleSubmit() {
 
 // Navigation
 function goBack() {
-  router.push('/university-operations')
+  router.push('/contractors')
 }
 </script>
 
@@ -94,10 +78,10 @@ function goBack() {
       <v-btn icon="mdi-arrow-left" variant="text" @click="goBack" />
       <div>
         <h1 class="text-h4 font-weight-bold text-grey-darken-3">
-          New University Operation
+          New Contractor
         </h1>
         <p class="text-subtitle-1 text-grey-darken-1">
-          Create a new university operation or program
+          Add a new contractor to the system
         </p>
       </div>
     </div>
@@ -113,51 +97,22 @@ function goBack() {
             <v-divider />
             <v-card-text>
               <v-row>
-                <v-col cols="12" sm="6">
-                  <v-text-field
-                    v-model="form.code"
-                    label="Operation Code"
-                    variant="outlined"
-                    density="comfortable"
-                  />
-                </v-col>
-                <v-col cols="12" sm="6">
-                  <v-select
-                    v-model="form.operation_type"
-                    label="Operation Type"
-                    :items="operationTypeOptions"
-                    :rules="[rules.required]"
-                    required
-                    variant="outlined"
-                    density="comfortable"
-                  />
-                </v-col>
                 <v-col cols="12">
                   <v-text-field
-                    v-model="form.title"
-                    label="Title"
+                    v-model="form.name"
+                    label="Contractor Name *"
+                    placeholder="ABC Construction Company"
                     :rules="[rules.required]"
                     required
-                    variant="outlined"
-                    density="comfortable"
-                  />
-                </v-col>
-                <v-col cols="12">
-                  <v-textarea
-                    v-model="form.description"
-                    label="Description"
-                    rows="3"
                     variant="outlined"
                     density="comfortable"
                   />
                 </v-col>
                 <v-col cols="12" sm="6">
-                  <v-select
-                    v-model="form.campus"
-                    label="Campus"
-                    :items="campusOptions"
-                    :rules="[rules.required]"
-                    required
+                  <v-text-field
+                    v-model="form.contact_person"
+                    label="Contact Person"
+                    placeholder="Juan Dela Cruz"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -165,7 +120,7 @@ function goBack() {
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.status"
-                    label="Status"
+                    label="Status *"
                     :items="statusOptions"
                     :rules="[rules.required]"
                     required
@@ -177,37 +132,77 @@ function goBack() {
             </v-card-text>
           </v-card>
 
-          <!-- Schedule & Budget -->
+          <!-- Contact Information -->
           <v-card class="mb-4">
-            <v-card-title>Schedule & Budget</v-card-title>
+            <v-card-title>Contact Information</v-card-title>
             <v-divider />
             <v-card-text>
               <v-row>
                 <v-col cols="12" sm="6">
                   <v-text-field
-                    v-model="form.start_date"
-                    label="Start Date"
-                    type="date"
+                    v-model="form.email"
+                    label="Email"
+                    placeholder="contractor@example.com"
+                    type="email"
+                    :rules="[rules.email]"
                     variant="outlined"
                     density="comfortable"
                   />
                 </v-col>
                 <v-col cols="12" sm="6">
                   <v-text-field
-                    v-model="form.end_date"
-                    label="End Date"
-                    type="date"
+                    v-model="form.phone"
+                    label="Phone"
+                    placeholder="+63 912 345 6789"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12">
+                  <v-textarea
+                    v-model="form.address"
+                    label="Address"
+                    placeholder="123 Main Street, City, Province"
+                    rows="2"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+              </v-row>
+            </v-card-text>
+          </v-card>
+
+          <!-- Registration Details -->
+          <v-card class="mb-4">
+            <v-card-title>Registration Details</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <v-row>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model="form.tin_number"
+                    label="TIN Number"
+                    placeholder="123-456-789-000"
                     variant="outlined"
                     density="comfortable"
                   />
                 </v-col>
                 <v-col cols="12" sm="6">
                   <v-text-field
-                    v-model.number="form.budget"
-                    label="Budget (PHP)"
-                    type="number"
-                    :rules="[rules.positiveNumber]"
-                    prefix="₱"
+                    v-model="form.registration_number"
+                    label="Registration Number"
+                    placeholder="REG-2026-001"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model="form.validity_date"
+                    label="Registration Validity Date"
+                    type="date"
+                    hint="When the contractor's registration expires"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -221,6 +216,8 @@ function goBack() {
         <v-col cols="12" md="4">
           <!-- Actions -->
           <v-card>
+            <v-card-title>Actions</v-card-title>
+            <v-divider />
             <v-card-text>
               <v-btn
                 type="submit"
@@ -230,7 +227,7 @@ function goBack() {
                 :loading="submitting"
                 :disabled="submitting"
               >
-                Create Operation
+                Create Contractor
               </v-btn>
               <v-btn
                 variant="outlined"

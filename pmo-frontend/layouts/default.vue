@@ -3,12 +3,24 @@ const router = useRouter()
 const authStore = useAuthStore()
 const drawer = ref(true)
 
-const navigationItems = [
+// Main operational modules
+const mainModules = [
   { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/dashboard' },
   { title: 'Construction Projects', icon: 'mdi-office-building', to: '/coi' },
   { title: 'Repair Projects', icon: 'mdi-tools', to: '/repairs' },
   { title: 'University Operations', icon: 'mdi-school', to: '/university-operations' },
   { title: 'GAD Parity', icon: 'mdi-gender-male-female', to: '/gad' },
+]
+
+// Reference data management
+const referenceData = [
+  { title: 'Contractors', icon: 'mdi-account-hard-hat', to: '/contractors' },
+  { title: 'Funding Sources', icon: 'mdi-cash-multiple', to: '/funding-sources' },
+]
+
+// Administration
+const administration = [
+  { title: 'User Management', icon: 'mdi-account-group', to: '/users' },
 ]
 
 async function handleLogout() {
@@ -71,10 +83,45 @@ async function handleLogout() {
 
       <v-divider />
 
-      <!-- Navigation Items -->
+      <!-- Main Modules -->
       <v-list nav density="comfortable">
+        <v-list-subheader>MODULES</v-list-subheader>
         <v-list-item
-          v-for="item in navigationItems"
+          v-for="item in mainModules"
+          :key="item.to"
+          :to="item.to"
+          :prepend-icon="item.icon"
+          :title="item.title"
+          color="primary"
+          rounded="lg"
+          class="mb-1"
+        />
+      </v-list>
+
+      <v-divider class="my-2" />
+
+      <!-- Reference Data -->
+      <v-list nav density="comfortable">
+        <v-list-subheader>REFERENCE DATA</v-list-subheader>
+        <v-list-item
+          v-for="item in referenceData"
+          :key="item.to"
+          :to="item.to"
+          :prepend-icon="item.icon"
+          :title="item.title"
+          color="primary"
+          rounded="lg"
+          class="mb-1"
+        />
+      </v-list>
+
+      <v-divider class="my-2" />
+
+      <!-- Administration -->
+      <v-list nav density="comfortable">
+        <v-list-subheader>ADMINISTRATION</v-list-subheader>
+        <v-list-item
+          v-for="item in administration"
           :key="item.to"
           :to="item.to"
           :prepend-icon="item.icon"

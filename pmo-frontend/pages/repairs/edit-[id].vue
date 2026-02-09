@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { BackendRepairProject } from '~/utils/adapters'
+import type { BackendRepairProjectDetail } from '~/utils/adapters'
+import { adaptRepairDetail } from '~/utils/adapters'
 
 definePageMeta({
   middleware: 'auth',
@@ -78,6 +79,7 @@ const rules = {
 }
 
 // Fetch repair and lookup data using direct ID
+// STEP 5 Fix: Load lookups FIRST, then repair data (ensures v-select items exist before v-model is set)
 async function fetchData() {
   if (!repairId) {
     toast.error('Invalid repair ID')
@@ -88,36 +90,41 @@ async function fetchData() {
   loading.value = true
 
   try {
-    console.log('[Repairs Edit] Fetching repair data:', repairId)
-    const [repairRes, typesRes] = await Promise.all([
-      api.get<BackendRepairProject>(`/api/repair-projects/${repairId}`),
-      api.get<{ data: { id: string; name: string }[] }>('/api/repair-types'),
-    ])
+    console.log('[Repairs Edit] Fetching lookup data first...')
 
+    // STEP 1: Load lookup data FIRST (v-select requires items before value)
+    const typesRes = await api.get<{ data: { id: string; name: string }[] }>('/api/repair-types')
     repairTypes.value = typesRes.data || []
 
-    const r = repairRes
+    console.log('[Repairs Edit] Lookups loaded, fetching repair:', repairId)
+
+    // STEP 2: Then load repair data and use adapter (items already exist)
+    const repairRes = await api.get<BackendRepairProjectDetail>(`/api/repair-projects/${repairId}`)
+    const adapted = adaptRepairDetail(repairRes)
+
     form.value = {
-      project_code: r.repair_code || '',
-      title: r.title || '',
-      description: r.description || '',
-      building_name: r.location || '',
-      floor_number: '',
-      room_number: '',
-      specific_location: '',
-      repair_type_id: '',
-      urgency_level: r.urgency_level || '',
-      is_emergency: false,
-      campus: r.campus || '',
-      status: r.status || '',
-      reported_by: r.reported_by || '',
-      inspection_date: r.inspection_date ? r.inspection_date.split('T')[0] : '',
-      start_date: r.start_date ? r.start_date.split('T')[0] : '',
-      end_date: r.completion_date ? r.completion_date.split('T')[0] : '',
-      budget: r.estimated_cost || null,
-      actual_cost: r.actual_cost || null,
-      assigned_technician: r.assigned_to || '',
+      project_code: adapted.project_code,
+      title: adapted.title,
+      description: adapted.description,
+      building_name: adapted.building_name,
+      floor_number: adapted.floor_number,
+      room_number: adapted.room_number,
+      specific_location: adapted.specific_location,
+      repair_type_id: adapted.repair_type_id,
+      urgency_level: adapted.urgency_level,
+      is_emergency: adapted.is_emergency,
+      campus: adapted.campus,
+      status: adapted.status,
+      reported_by: adapted.reported_by,
+      inspection_date: adapted.inspection_date,
+      start_date: adapted.start_date,
+      end_date: adapted.end_date,
+      budget: adapted.budget,
+      actual_cost: adapted.actual_cost,
+      assigned_technician: adapted.assigned_technician,
     }
+
+    console.log('[Repairs Edit] Form populated with repair_type_id:', form.value.repair_type_id)
   } catch (err: unknown) {
     const apiError = err as { message?: string }
     toast.error(apiError.message || 'Failed to load repair data')
@@ -157,7 +164,7 @@ async function handleSubmit() {
     console.log('[Repairs Edit] Submitting update for:', repairId)
     await api.patch(`/api/repair-projects/${repairId}`, payload)
     toast.success('Repair updated successfully')
-    router.push(`/repairs/${repairId}`)
+    router.push(`/repairs/detail-${repairId}`)
   } catch (err: unknown) {
     const apiError = err as { message?: string }
     toast.error(apiError.message || 'Failed to update repair')
@@ -201,11 +208,6 @@ onMounted(() => {
 
     <!-- Form -->
     <v-form v-else @submit.prevent="handleSubmit">
-      <!-- Error Alert -->
-      <v-alert v-if="error" type="error" class="mb-4" closable @click:close="error = ''">
-        {{ error }}
-      </v-alert>
-
       <v-row>
         <!-- Main Form -->
         <v-col cols="12" md="8">
@@ -218,7 +220,10 @@ onMounted(() => {
                 <v-col cols="12" sm="6">
                   <v-text-field
                     v-model="form.project_code"
-                    label="Repair Code"
+                    label="Repair Code *"
+                    placeholder="RP-2026-001"
+                    hint="Unique repair identifier"
+                    persistent-hint
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -233,6 +238,7 @@ onMounted(() => {
                     item-title="name"
                     item-value="id"
                     clearable
+                    placeholder="Select repair type"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -240,7 +246,8 @@ onMounted(() => {
                 <v-col cols="12">
                   <v-text-field
                     v-model="form.title"
-                    label="Title"
+                    label="Title *"
+                    placeholder="e.g., Ceiling Repair in Room 101"
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -251,6 +258,7 @@ onMounted(() => {
                   <v-textarea
                     v-model="form.description"
                     label="Description"
+                    placeholder="Describe the repair issue and scope of work..."
                     rows="3"
                     variant="outlined"
                     density="comfortable"
@@ -269,7 +277,7 @@ onMounted(() => {
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.campus"
-                    label="Campus"
+                    label="Campus *"
                     :items="campusOptions"
                     :rules="[rules.required]"
                     required
@@ -280,7 +288,8 @@ onMounted(() => {
                 <v-col cols="12" sm="6">
                   <v-text-field
                     v-model="form.building_name"
-                    label="Building Name"
+                    label="Building Name *"
+                    placeholder="e.g., Admin Building"
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -291,6 +300,7 @@ onMounted(() => {
                   <v-text-field
                     v-model="form.floor_number"
                     label="Floor Number"
+                    placeholder="e.g., 2nd Floor"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -299,6 +309,7 @@ onMounted(() => {
                   <v-text-field
                     v-model="form.room_number"
                     label="Room Number"
+                    placeholder="e.g., 101"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -307,6 +318,7 @@ onMounted(() => {
                   <v-text-field
                     v-model="form.specific_location"
                     label="Specific Location"
+                    placeholder="e.g., Near window"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -324,7 +336,7 @@ onMounted(() => {
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.status"
-                    label="Status"
+                    label="Status *"
                     :items="statusOptions"
                     :rules="[rules.required]"
                     required
@@ -336,6 +348,7 @@ onMounted(() => {
                   <v-text-field
                     v-model="form.reported_by"
                     label="Reported By"
+                    placeholder="Name of person who reported"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -345,6 +358,8 @@ onMounted(() => {
                     v-model="form.inspection_date"
                     label="Inspection Date"
                     type="date"
+                    hint="When facility was inspected"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -354,6 +369,8 @@ onMounted(() => {
                     v-model="form.start_date"
                     label="Start Date"
                     type="date"
+                    hint="When repair work begins"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -363,6 +380,8 @@ onMounted(() => {
                     v-model="form.end_date"
                     label="Completion Date"
                     type="date"
+                    hint="Expected or actual completion"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -371,6 +390,7 @@ onMounted(() => {
                   <v-text-field
                     v-model="form.assigned_technician"
                     label="Assigned Technician"
+                    placeholder="Name of assigned personnel"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -390,6 +410,7 @@ onMounted(() => {
                     v-model.number="form.budget"
                     label="Estimated Budget (PHP)"
                     type="number"
+                    placeholder="50000"
                     :rules="[rules.positiveNumber]"
                     prefix="₱"
                     variant="outlined"
@@ -401,6 +422,7 @@ onMounted(() => {
                     v-model.number="form.actual_cost"
                     label="Actual Cost (PHP)"
                     type="number"
+                    placeholder="45000"
                     :rules="[rules.positiveNumber]"
                     prefix="₱"
                     variant="outlined"
@@ -421,7 +443,7 @@ onMounted(() => {
             <v-card-text>
               <v-select
                 v-model="form.urgency_level"
-                label="Urgency Level"
+                label="Urgency Level *"
                 :items="urgencyOptions"
                 :rules="[rules.required]"
                 required
@@ -433,7 +455,7 @@ onMounted(() => {
                 v-model="form.is_emergency"
                 label="This is an emergency"
                 color="error"
-                hide-details
+                hint="Check if immediate attention required"
               />
             </v-card-text>
           </v-card>

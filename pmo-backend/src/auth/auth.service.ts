@@ -18,14 +18,17 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
-  async validateUser(email: string, password: string): Promise<any> {
+  async validateUser(identifier: string, password: string): Promise<any> {
+    // Support login by email or username (case-insensitive)
+    // Uses proper username column (indexed) for O(log n) performance
     const result = await this.db.query(
-      `SELECT u.id, u.email, u.password_hash, u.is_active, u.google_id,
+      `SELECT u.id, u.email, u.username, u.password_hash, u.is_active, u.google_id,
               u.failed_login_attempts, u.account_locked_until,
               u.first_name, u.last_name
        FROM users u
-       WHERE u.email = $1 AND u.deleted_at IS NULL`,
-      [email],
+       WHERE (LOWER(u.email) = LOWER($1) OR LOWER(u.username) = LOWER($1))
+         AND u.deleted_at IS NULL`,
+      [identifier],
     );
 
     if (result.rows.length === 0) {
@@ -79,7 +82,7 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.validateUser(dto.email, dto.password);
+    const user = await this.validateUser(dto.identifier, dto.password);
 
     if (!user) {
       throw new UnauthorizedException('INVALID_CREDENTIALS');
@@ -120,7 +123,7 @@ export class AuthService {
 
   async getProfile(userId: string) {
     const result = await this.db.query(
-      `SELECT u.id, u.email, u.first_name, u.last_name, u.avatar_url
+      `SELECT u.id, u.email, u.username, u.first_name, u.last_name, u.avatar_url
        FROM users u
        WHERE u.id = $1 AND u.deleted_at IS NULL`,
       [userId],

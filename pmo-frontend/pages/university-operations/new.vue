@@ -117,6 +117,9 @@ function goBack() {
                   <v-text-field
                     v-model="form.code"
                     label="Operation Code"
+                    placeholder="UO-2026-001"
+                    hint="Unique operation identifier"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -124,7 +127,7 @@ function goBack() {
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.operation_type"
-                    label="Operation Type"
+                    label="Operation Type *"
                     :items="operationTypeOptions"
                     :rules="[rules.required]"
                     required
@@ -135,7 +138,8 @@ function goBack() {
                 <v-col cols="12">
                   <v-text-field
                     v-model="form.title"
-                    label="Title"
+                    label="Title *"
+                    placeholder="e.g., Graduate School Enrollment Drive"
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -146,6 +150,7 @@ function goBack() {
                   <v-textarea
                     v-model="form.description"
                     label="Description"
+                    placeholder="Describe the operation objectives and scope..."
                     rows="3"
                     variant="outlined"
                     density="comfortable"
@@ -154,7 +159,7 @@ function goBack() {
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.campus"
-                    label="Campus"
+                    label="Campus *"
                     :items="campusOptions"
                     :rules="[rules.required]"
                     required
@@ -165,7 +170,7 @@ function goBack() {
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.status"
-                    label="Status"
+                    label="Status *"
                     :items="statusOptions"
                     :rules="[rules.required]"
                     required
@@ -188,6 +193,8 @@ function goBack() {
                     v-model="form.start_date"
                     label="Start Date"
                     type="date"
+                    hint="Operation start date"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -197,6 +204,8 @@ function goBack() {
                     v-model="form.end_date"
                     label="End Date"
                     type="date"
+                    hint="Estimated end date"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -206,6 +215,7 @@ function goBack() {
                     v-model.number="form.budget"
                     label="Budget (PHP)"
                     type="number"
+                    placeholder="500000.00"
                     :rules="[rules.positiveNumber]"
                     prefix="₱"
                     variant="outlined"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { adaptRepairProject, type UIRepairProject, type BackendRepairProject } from '~/utils/adapters'
+import { adaptRepairDetail, type UIRepairDetail, type BackendRepairProjectDetail } from '~/utils/adapters'
 
 definePageMeta({
   middleware: 'auth',
@@ -10,7 +10,7 @@ const router = useRouter()
 const api = useApi()
 const toast = useToast()
 
-const repair = ref<UIRepairProject | null>(null)
+const repair = ref<UIRepairDetail | null>(null)
 const loading = ref(true)
 
 // ACE-R15 Tier 3: Direct ID extraction (no computed, no watchEffect)
@@ -77,8 +77,8 @@ async function fetchRepair() {
   try {
     loading.value = true
     console.log('[Repairs Detail] Fetching repair:', repairId)
-    const response = await api.get<BackendRepairProject>(`/api/repair-projects/${repairId}`)
-    repair.value = adaptRepairProject(response)
+    const response = await api.get<BackendRepairProjectDetail>(`/api/repair-projects/${repairId}`)
+    repair.value = adaptRepairDetail(response)
   } catch (err: unknown) {
     const apiError = err as { message?: string }
     toast.error(apiError.message || 'Failed to load repair details')
@@ -94,7 +94,7 @@ function goBack() {
 }
 
 function editRepair() {
-  router.push(`/repairs-edit-${repairId}`)
+  router.push(`/repairs/edit-${repairId}`)
 }
 
 // ACE-R15 Tier 3: Simple onMounted (no watchEffect complexity)
@@ -151,8 +151,8 @@ onMounted(() => {
             </div>
             <div>
               <p class="text-caption text-grey mb-1">Urgency</p>
-              <v-chip :color="getUrgencyColor(repair.urgencyLevel)" size="large">
-                {{ repair.urgencyLevel }}
+              <v-chip :color="getUrgencyColor(repair.urgency_level)" size="large">
+                {{ repair.urgency_level }}
               </v-chip>
             </div>
             <div>
@@ -161,9 +161,9 @@ onMounted(() => {
             </div>
             <v-spacer />
             <div class="text-right">
-              <p class="text-caption text-grey mb-1">Estimated Cost</p>
+              <p class="text-caption text-grey mb-1">Estimated Budget</p>
               <p class="text-h5 font-weight-bold text-primary">
-                {{ formatCurrency(repair.estimatedCost) }}
+                {{ formatCurrency(repair.budget || 0) }}
               </p>
             </div>
           </div>
@@ -184,28 +184,28 @@ onMounted(() => {
                   <p>{{ repair.description }}</p>
                 </v-col>
                 <v-col cols="12" sm="6">
-                  <p class="text-caption text-grey">Location</p>
-                  <p class="font-weight-medium">{{ repair.location }}</p>
+                  <p class="text-caption text-grey">Building</p>
+                  <p class="font-weight-medium">{{ repair.building_name || '-' }}</p>
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <p class="text-caption text-grey">Floor / Room</p>
+                  <p class="font-weight-medium">{{ repair.floor_number || '-' }} / {{ repair.room_number || '-' }}</p>
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <p class="text-caption text-grey">Specific Location</p>
+                  <p class="font-weight-medium">{{ repair.specific_location || '-' }}</p>
                 </v-col>
                 <v-col cols="12" sm="6">
                   <p class="text-caption text-grey">Reported By</p>
-                  <p class="font-weight-medium">{{ repair.reportedBy || '-' }}</p>
-                </v-col>
-                <v-col cols="12" sm="6">
-                  <p class="text-caption text-grey">Reported Date</p>
-                  <p class="font-weight-medium">{{ formatDate(repair.reportedDate) }}</p>
+                  <p class="font-weight-medium">{{ repair.reported_by || '-' }}</p>
                 </v-col>
                 <v-col cols="12" sm="6">
                   <p class="text-caption text-grey">Inspection Date</p>
-                  <p class="font-weight-medium">{{ formatDate(repair.inspectionDate) }}</p>
+                  <p class="font-weight-medium">{{ formatDate(repair.inspection_date) }}</p>
                 </v-col>
                 <v-col cols="12" sm="6">
-                  <p class="text-caption text-grey">Approval Date</p>
-                  <p class="font-weight-medium">{{ formatDate(repair.approvalDate) }}</p>
-                </v-col>
-                <v-col cols="12" sm="6">
-                  <p class="text-caption text-grey">Assigned To</p>
-                  <p class="font-weight-medium">{{ repair.assignedTo || '-' }}</p>
+                  <p class="text-caption text-grey">Assigned Technician</p>
+                  <p class="font-weight-medium">{{ repair.assigned_technician || '-' }}</p>
                 </v-col>
               </v-row>
             </v-card-text>
@@ -219,11 +219,11 @@ onMounted(() => {
               <v-row>
                 <v-col cols="12" sm="6">
                   <p class="text-caption text-grey">Start Date</p>
-                  <p class="font-weight-medium">{{ formatDate(repair.startDate) }}</p>
+                  <p class="font-weight-medium">{{ formatDate(repair.start_date) }}</p>
                 </v-col>
                 <v-col cols="12" sm="6">
-                  <p class="text-caption text-grey">Completion Date</p>
-                  <p class="font-weight-medium">{{ formatDate(repair.completionDate) }}</p>
+                  <p class="text-caption text-grey">End Date</p>
+                  <p class="font-weight-medium">{{ formatDate(repair.end_date) }}</p>
                 </v-col>
               </v-row>
             </v-card-text>
@@ -240,15 +240,15 @@ onMounted(() => {
                 <template #prepend>
                   <v-icon icon="mdi-calculator" />
                 </template>
-                <v-list-item-title>Estimated Cost</v-list-item-title>
-                <v-list-item-subtitle>{{ formatCurrency(repair.estimatedCost) }}</v-list-item-subtitle>
+                <v-list-item-title>Estimated Budget</v-list-item-title>
+                <v-list-item-subtitle>{{ formatCurrency(repair.budget || 0) }}</v-list-item-subtitle>
               </v-list-item>
               <v-list-item>
                 <template #prepend>
                   <v-icon icon="mdi-receipt" />
                 </template>
                 <v-list-item-title>Actual Cost</v-list-item-title>
-                <v-list-item-subtitle>{{ formatCurrency(repair.actualCost) }}</v-list-item-subtitle>
+                <v-list-item-subtitle>{{ formatCurrency(repair.actual_cost || 0) }}</v-list-item-subtitle>
               </v-list-item>
             </v-list>
           </v-card>
@@ -263,21 +263,21 @@ onMounted(() => {
                   <v-icon icon="mdi-identifier" />
                 </template>
                 <v-list-item-title>Repair Code</v-list-item-title>
-                <v-list-item-subtitle>{{ repair.repairCode }}</v-list-item-subtitle>
+                <v-list-item-subtitle>{{ repair.project_code }}</v-list-item-subtitle>
               </v-list-item>
               <v-list-item>
                 <template #prepend>
-                  <v-icon icon="mdi-calendar" />
+                  <v-icon icon="mdi-map-marker" />
                 </template>
-                <v-list-item-title>Created</v-list-item-title>
-                <v-list-item-subtitle>{{ formatDate(repair.createdAt) }}</v-list-item-subtitle>
+                <v-list-item-title>Campus</v-list-item-title>
+                <v-list-item-subtitle>{{ repair.campus }}</v-list-item-subtitle>
               </v-list-item>
-              <v-list-item>
+              <v-list-item v-if="repair.is_emergency">
                 <template #prepend>
-                  <v-icon icon="mdi-update" />
+                  <v-icon icon="mdi-alert" color="error" />
                 </template>
-                <v-list-item-title>Last Updated</v-list-item-title>
-                <v-list-item-subtitle>{{ formatDate(repair.updatedAt) }}</v-list-item-subtitle>
+                <v-list-item-title class="text-error">Emergency</v-list-item-title>
+                <v-list-item-subtitle>Requires immediate attention</v-list-item-subtitle>
               </v-list-item>
             </v-list>
           </v-card>

@@ -28,15 +28,15 @@ const headers = [
 
 // Navigation
 function viewOperation(op: UIUniversityOperation) {
-  router.push(`/university-operations-detail-${op.id}`)
+  router.push(`/university-operations/detail-${op.id}`)
 }
 
 function editOperation(op: UIUniversityOperation) {
-  router.push(`/university-operations-edit-${op.id}`)
+  router.push(`/university-operations/edit-${op.id}`)
 }
 
 function createOperation() {
-  router.push('/university-operations-new')
+  router.push('/university-operations/new')
 }
 
 // Delete confirmation

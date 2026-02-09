@@ -25,7 +25,7 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } }) // 5 attempts per minute
-  @ApiOperation({ summary: 'User login', description: 'Authenticate user with email and password' })
+  @ApiOperation({ summary: 'User login', description: 'Authenticate user with email/username and password' })
   @ApiResponse({ status: 200, description: 'Login successful, returns JWT token and user info' })
   @ApiResponse({ status: 401, description: 'Invalid credentials or account locked' })
   @ApiResponse({ status: 429, description: 'Too many login attempts' })

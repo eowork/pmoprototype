@@ -70,9 +70,11 @@ const rules = {
   required: (v: string) => !!v || 'This field is required',
   positiveNumber: (v: number | null) => v === null || v >= 0 || 'Must be a positive number',
   percentage: (v: number | null) => v === null || (v >= 0 && v <= 100) || 'Must be between 0 and 100',
+  projectCode: (v: string) => !v || /^CP-\d{4}-\d{3}$/.test(v) || 'Format: CP-YYYY-NNN (e.g., CP-2026-001)',
 }
 
 // Fetch project and lookup data using direct ID
+// STEP 4 Fix: Load lookups FIRST, then project data (ensures v-select items exist before v-model is set)
 async function fetchData() {
   if (!projectId) {
     toast.error('Invalid project ID')
@@ -83,9 +85,10 @@ async function fetchData() {
   loading.value = true
 
   try {
-    console.log('[COI Edit] Fetching project data:', projectId)
-    const [projectRes, fundingRes, contractorRes] = await Promise.all([
-      api.get<BackendProjectDetail>(`/api/construction-projects/${projectId}`),
+    console.log('[COI Edit] Fetching lookup data first...')
+
+    // STEP 1: Load lookup data FIRST (v-select requires items before value)
+    const [fundingRes, contractorRes] = await Promise.all([
       api.get<{ data: { id: string; name: string }[] }>('/api/funding-sources'),
       api.get<{ data: { id: string; name: string }[] }>('/api/contractors'),
     ])
@@ -93,16 +96,20 @@ async function fetchData() {
     fundingSources.value = fundingRes.data || []
     contractors.value = contractorRes.data || []
 
-    // Populate form with existing data
+    console.log('[COI Edit] Lookups loaded, fetching project:', projectId)
+
+    // STEP 2: Then load project data and populate form (items already exist)
+    const projectRes = await api.get<BackendProjectDetail>(`/api/construction-projects/${projectId}`)
     const p = projectRes
+
     form.value = {
       project_code: p.project_code || '',
       title: p.title || '',
       description: p.description || '',
-      campus: p.campus?.name || p.campus || '',
+      campus: p.campus || '',
       status: p.status || '',
-      funding_source_id: p.fund_source?.id || '',
-      contractor_id: p.contractor?.id || '',
+      funding_source_id: p.funding_source_id || '',
+      contractor_id: p.contractor_id || '',
       contract_amount: p.contract_amount || null,
       contract_number: p.contract_number || '',
       start_date: p.start_date ? p.start_date.split('T')[0] : '',
@@ -117,6 +124,8 @@ async function fetchData() {
       beneficiaries: p.beneficiaries || '',
       physical_progress: p.physical_progress || null,
     }
+
+    console.log('[COI Edit] Form populated with funding_source_id:', form.value.funding_source_id)
   } catch (err: unknown) {
     const apiError = err as { message?: string }
     toast.error(apiError.message || 'Failed to load project data')
@@ -157,7 +166,7 @@ async function handleSubmit() {
     console.log('[COI Edit] Submitting update for:', projectId)
     await api.patch(`/api/construction-projects/${projectId}`, payload)
     toast.success('Project updated successfully')
-    router.push(`/coi/${projectId}`)
+    router.push(`/coi/detail-${projectId}`)
   } catch (err: unknown) {
     const apiError = err as { message?: string }
     toast.error(apiError.message || 'Failed to update project')
@@ -213,8 +222,11 @@ onMounted(() => {
                 <v-col cols="12" sm="6">
                   <v-text-field
                     v-model="form.project_code"
-                    label="Project Code"
-                    :rules="[rules.required]"
+                    label="Project Code *"
+                    placeholder="CP-2026-001"
+                    hint="Format: CP-YYYY-NNN"
+                    persistent-hint
+                    :rules="[rules.required, rules.projectCode]"
                     required
                     variant="outlined"
                     density="comfortable"
@@ -223,7 +235,7 @@ onMounted(() => {
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.campus"
-                    label="Campus"
+                    label="Campus *"
                     :items="campusOptions"
                     :rules="[rules.required]"
                     required
@@ -234,7 +246,8 @@ onMounted(() => {
                 <v-col cols="12">
                   <v-text-field
                     v-model="form.title"
-                    label="Project Title"
+                    label="Project Title *"
+                    placeholder="New Building Construction"
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -245,6 +258,7 @@ onMounted(() => {
                   <v-textarea
                     v-model="form.description"
                     label="Description"
+                    placeholder="Describe the project scope and objectives..."
                     rows="3"
                     variant="outlined"
                     density="comfortable"
@@ -253,7 +267,7 @@ onMounted(() => {
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.status"
-                    label="Status"
+                    label="Status *"
                     :items="statusOptions"
                     :rules="[rules.required]"
                     required
@@ -266,6 +280,7 @@ onMounted(() => {
                     v-model.number="form.physical_progress"
                     label="Physical Progress (%)"
                     type="number"
+                    placeholder="0"
                     :rules="[rules.percentage]"
                     suffix="%"
                     variant="outlined"
@@ -276,6 +291,7 @@ onMounted(() => {
                   <v-text-field
                     v-model="form.beneficiaries"
                     label="Beneficiaries"
+                    placeholder="e.g., Students, Faculty, Community"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -293,7 +309,7 @@ onMounted(() => {
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.funding_source_id"
-                    label="Funding Source"
+                    label="Funding Source *"
                     :items="fundingSources"
                     item-title="name"
                     item-value="id"
@@ -319,6 +335,7 @@ onMounted(() => {
                   <v-text-field
                     v-model="form.contract_number"
                     label="Contract Number"
+                    placeholder="e.g., CON-2026-001"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -328,6 +345,7 @@ onMounted(() => {
                     v-model.number="form.contract_amount"
                     label="Contract Amount (PHP)"
                     type="number"
+                    placeholder="1000000.00"
                     :rules="[rules.positiveNumber]"
                     prefix="₱"
                     variant="outlined"
@@ -349,6 +367,8 @@ onMounted(() => {
                     v-model="form.start_date"
                     label="Start Date"
                     type="date"
+                    hint="Expected project start"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -358,6 +378,8 @@ onMounted(() => {
                     v-model="form.target_completion_date"
                     label="Target Completion Date"
                     type="date"
+                    hint="Estimated completion date"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -367,6 +389,8 @@ onMounted(() => {
                     v-model="form.actual_completion_date"
                     label="Actual Completion Date"
                     type="date"
+                    hint="When project was actually completed"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -394,6 +418,7 @@ onMounted(() => {
                   <v-text-field
                     v-model="form.project_engineer"
                     label="Project Engineer"
+                    placeholder="Engr. Juan Dela Cruz"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -402,6 +427,7 @@ onMounted(() => {
                   <v-text-field
                     v-model="form.project_manager"
                     label="Project Manager"
+                    placeholder="Engr. Maria Santos"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -421,6 +447,7 @@ onMounted(() => {
               <v-text-field
                 v-model="form.building_type"
                 label="Building Type"
+                placeholder="e.g., Academic, Administrative"
                 variant="outlined"
                 density="comfortable"
                 class="mb-3"
@@ -429,6 +456,7 @@ onMounted(() => {
                 v-model.number="form.floor_area"
                 label="Floor Area (sqm)"
                 type="number"
+                placeholder="500"
                 :rules="[rules.positiveNumber]"
                 variant="outlined"
                 density="comfortable"
@@ -438,6 +466,7 @@ onMounted(() => {
                 v-model.number="form.number_of_floors"
                 label="Number of Floors"
                 type="number"
+                placeholder="3"
                 :rules="[rules.positiveNumber]"
                 variant="outlined"
                 density="comfortable"
