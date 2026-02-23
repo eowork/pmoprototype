@@ -4,6 +4,9 @@ import {
   IsEmail,
   IsOptional,
   IsBoolean,
+  IsInt,
+  Min,
+  Max,
   MinLength,
   MaxLength,
   Matches,
@@ -33,6 +36,15 @@ export class CreateUserDto {
   @MaxLength(100)
   last_name: string;
 
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(3)
+  @MaxLength(100)
+  @Matches(/^[a-z0-9._-]+$/, {
+    message: 'Username must be lowercase and contain only letters, numbers, dots, underscores, or dashes',
+  })
+  username: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(20)
@@ -45,6 +57,17 @@ export class CreateUserDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(10)
+  @Max(100)
+  rank_level?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  campus?: string;  // Phase Y: Office-scoped visibility
 
   @IsOptional()
   metadata?: Record<string, any>;

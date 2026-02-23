@@ -23,6 +23,13 @@ export default defineNuxtConfig({
         transformAssetUrls,
       },
     },
+    // Fix HMR WebSocket connection - align with Nuxt dev server port
+    // Without this, Vite HMR tries to connect to port 5173 while browser is on 3001
+    server: {
+      hmr: {
+        clientPort: 3001,
+      },
+    },
   },
 
   css: ['@mdi/font/css/materialdesignicons.css'],

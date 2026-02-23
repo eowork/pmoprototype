@@ -1,0 +1,610 @@
+════════════════════════════════════════════════════════════════════════════════
+PMO DASHBOARD — APPROVAL VISIBILITY & PERMISSION ALIGNMENT RISK SUMMARY
+════════════════════════════════════════════════════════════════════════════════
+
+Generated: 2026-02-16
+Governance: ACE Framework v2.4 (Phase 1 Research Complete)
+Research Reference: docs/research.md Section 1.32
+Plan Reference: docs/plan.md Phases H-K
+
+════════════════════════════════════════════════════════════════════════════════
+EXECUTIVE SUMMARY
+════════════════════════════════════════════════════════════════════════════════
+
+Research Scope:
+1. Approved record indicator analysis
+2. Module-scoped approve functionality verification
+3. Edit button visibility enforcement analysis
+4. UI-backend permission alignment assessment
+
+Key Findings:
+✅ Approve functionality EXISTS and is secured at backend
+✅ Backend validation is ROBUST (rank, module, status, self-approval checks)
+❌ Approval metadata NOT VISIBLE in UI (poor UX, no audit trail)
+❌ Edit button UNCONDITIONAL in detail view (poor UX, causes confusion)
+⚠️ UI shows actions backend may reject (permission context gap)
+
+Security Posture:
+- Backend enforcement: STRONG ✅
+- UI-backend alignment: WEAK ⚠️
+- Attack surface: LOW (backend authoritative)
+- User experience: DEGRADED (UI blind to backend constraints)
+
+════════════════════════════════════════════════════════════════════════════════
+RISK MATRIX
+════════════════════════════════════════════════════════════════════════════════
+
+┌──────────┬─────────────────────────────────────┬────────────┬────────┬──────────┐
+│ Risk ID  │ Threat                              │ Likelihood │ Impact │ Priority │
+├──────────┼─────────────────────────────────────┼────────────┼────────┼──────────┤
+│ RISK-038 │ Silent approval (no attribution)    │ CONFIRMED  │ MEDIUM │ P0       │
+│ RISK-039 │ No audit trail visible in UI        │ CONFIRMED  │ MEDIUM │ P0       │
+│ RISK-040 │ Approval attribution lost in UI     │ CONFIRMED  │ LOW    │ P1       │
+│ RISK-041 │ Approve button despite low rank     │ HIGH       │ MEDIUM │ P1       │
+│ RISK-042 │ Approve button despite no module    │ MEDIUM     │ MEDIUM │ P1       │
+│ RISK-043 │ Edit button for PENDING_REVIEW      │ HIGH       │ LOW    │ P0       │
+│ RISK-044 │ Race condition (MITIGATED)          │ VERY LOW   │ LOW    │ P3       │
+│ RISK-045 │ Hydration exposure (MITIGATED)      │ VERY LOW   │ LOW    │ P3       │
+│ RISK-046 │ Unauthorized publish (MITIGATED)    │ VERY LOW   │ HIGH   │ P3       │
+│ RISK-047 │ Self-approval attempt (MITIGATED)   │ LOW        │ HIGH   │ P2       │
+│ RISK-048 │ Rank hierarchy bypass (MITIGATED)   │ LOW        │ HIGH   │ P2       │
+│ RISK-049 │ Badge labeling confusion            │ LOW        │ LOW    │ P3       │
+│ RISK-050 │ Color scheme ambiguity              │ VERY LOW   │ LOW    │ P3       │
+└──────────┴─────────────────────────────────────┴────────────┴────────┴──────────┘
+
+════════════════════════════════════════════════════════════════════════════════
+RISK DETAILS — APPROVAL VISIBILITY
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ RISK-038: Silent Approval Visibility                                       │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Category:       Governance / Audit                                         │
+│ Status:         CONFIRMED                                                  │
+│ Likelihood:     CONFIRMED (100%)                                           │
+│ Impact:         MEDIUM                                                     │
+│ Priority:       P0 (MUST FIX)                                              │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Description:                                                               │
+│   Admin approves records without UI showing who approved or when. Record   │
+│   transitions to PUBLISHED status, but no attribution visible.             │
+│                                                                            │
+│ Evidence:                                                                  │
+│   - Backend stores reviewed_by, reviewed_at in database ✅                 │
+│   - Backend API response does NOT include approval fields ❌               │
+│   - Frontend adapters do NOT map approval metadata ❌                      │
+│   - UI displays status badge only (no approval attribution) ❌             │
+│                                                                            │
+│ Impact Analysis:                                                           │
+│   - Users cannot see who approved a record                                 │
+│   - No visible accountability for approval actions                         │
+│   - Audit trail exists in database but not accessible via UI              │
+│   - Workflow transparency degraded                                         │
+│                                                                            │
+│ Current Mitigation:                                                        │
+│   None. Data stored in database but not exposed.                          │
+│                                                                            │
+│ Required Mitigation:                                                       │
+│   Phase H: Approval Metadata Display                                       │
+│   - Backend: Include reviewed_by, reviewed_at in API response             │
+│   - Backend: Join users table to resolve UUID to names                    │
+│   - Adapter: Map approval fields to UI types                              │
+│   - UI: Display "Approved by [Name] on [Date]" badge                      │
+│                                                                            │
+│ Success Criteria:                                                          │
+│   ✓ PUBLISHED records show approver name and timestamp                    │
+│   ✓ REJECTED records show reviewer name, timestamp, and notes             │
+│   ✓ PENDING_REVIEW records show submitter name and timestamp              │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ RISK-039: No Audit Trail Visible in UI                                    │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Category:       Governance / Compliance                                    │
+│ Status:         CONFIRMED                                                  │
+│ Likelihood:     CONFIRMED (100%)                                           │
+│ Impact:         MEDIUM                                                     │
+│ Priority:       P0 (MUST FIX)                                              │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Description:                                                               │
+│   Workflow transitions (DRAFT → PENDING → PUBLISHED) occur with no        │
+│   visible history. Users cannot trace submission or approval timeline.    │
+│                                                                            │
+│ Evidence:                                                                  │
+│   - Database has submitted_at, reviewed_at timestamps ✅                   │
+│   - UI shows current status only ✅                                        │
+│   - No timeline or history view ❌                                         │
+│   - No "changed from X to Y on [date]" indicators ❌                       │
+│                                                                            │
+│ Impact Analysis:                                                           │
+│   - Cannot determine workflow velocity (submission to approval time)       │
+│   - Cannot identify bottlenecks in approval process                        │
+│   - Compliance audits require database queries instead of UI reports      │
+│                                                                            │
+│ Current Mitigation:                                                        │
+│   Database audit fields exist. Manual SQL queries required.               │
+│                                                                            │
+│ Required Mitigation:                                                       │
+│   Phase H: Display basic metadata (submitter, reviewer, timestamps)       │
+│   DEFERRED: Full audit log timeline view (Phase 2+)                       │
+│                                                                            │
+│ Success Criteria:                                                          │
+│   ✓ Each status shows associated actor and timestamp                      │
+│   ✓ Users can see who submitted and when                                  │
+│   ✓ Users can see who approved/rejected and when                          │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ RISK-040: Approval Attribution Lost in UI                                 │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Category:       UX / Transparency                                          │
+│ Status:         CONFIRMED                                                  │
+│ Likelihood:     CONFIRMED (100%)                                           │
+│ Impact:         LOW                                                        │
+│ Priority:       P1 (SHOULD FIX)                                            │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Description:                                                               │
+│   After approval, record shows "Published" badge but not who published.   │
+│   In shared accountability environments, knowing approver identity is      │
+│   valuable for follow-up questions.                                        │
+│                                                                            │
+│ Impact Analysis:                                                           │
+│   - Users cannot identify point of contact for approved records            │
+│   - Accountability diluted in team environments                            │
+│   - Lower severity than RISK-038 (same root cause)                        │
+│                                                                            │
+│ Required Mitigation:                                                       │
+│   Same as RISK-038 (Phase H implementation)                               │
+└────────────────────────────────────────────────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════════
+RISK DETAILS — UI-BACKEND PERMISSION DESYNC
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ RISK-041: Approve Button Despite Insufficient Rank                        │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Category:       UX / Permission Alignment                                  │
+│ Status:         ACTIVE                                                     │
+│ Likelihood:     HIGH                                                       │
+│ Impact:         MEDIUM                                                     │
+│ Priority:       P1 (SHOULD FIX)                                            │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Description:                                                               │
+│   Junior Admin (rank 30) sees Approve button for record submitted by      │
+│   Senior Admin (rank 20). UI checks isAdmin only. Backend validates rank  │
+│   hierarchy and returns 403 Forbidden. User confused.                     │
+│                                                                            │
+│ Evidence:                                                                  │
+│   Frontend check:                                                          │
+│     canApproveItem(project): return isAdmin && status === PENDING_REVIEW  │
+│                                                                            │
+│   Backend enforcement (construction-projects.service.ts:440-458):         │
+│     if (approverRank >= submitterRank && !isSuperAdmin) {                 │
+│       throw ForbiddenException('Rank hierarchy violation')                │
+│     }                                                                      │
+│                                                                            │
+│ Attack Vector:                                                             │
+│   1. Junior Admin views PENDING_REVIEW record                             │
+│   2. UI shows Approve button (isAdmin = true) ✅                          │
+│   3. User clicks Approve                                                   │
+│   4. API POST /coi/:id/publish                                            │
+│   5. Backend validates rank: approverRank (30) >= submitterRank (20)      │
+│   6. Backend returns 403 Forbidden                                         │
+│   7. User receives error toast: "Insufficient rank"                       │
+│                                                                            │
+│ Impact Analysis:                                                           │
+│   - User confusion (action visible but fails)                              │
+│   - Perceived system error (UI/backend inconsistency)                      │
+│   - NOT a security issue (backend blocks)                                  │
+│   - UX degradation only                                                    │
+│                                                                            │
+│ Current Mitigation:                                                        │
+│   Backend validates rank. 403 error returned.                             │
+│                                                                            │
+│ Required Mitigation:                                                       │
+│   Phase J: Permission Context Enhancement                                  │
+│   - Include rank_level in auth response                                    │
+│   - Include submitted_by in adapter mapping                                │
+│   - UI checks rank before showing Approve button                          │
+│                                                                            │
+│   Complexity Note:                                                         │
+│   Rank comparison requires:                                                │
+│     1. Current user rank (from auth)                                       │
+│     2. Submitter rank (requires lookup or embed in response)              │
+│     3. Comparison logic (approver rank < submitter rank)                  │
+│                                                                            │
+│   Recommendation:                                                          │
+│   DEFER rank UI validation. Backend enforcement sufficient.               │
+│   Classify as SHOULD (not MUST).                                          │
+│                                                                            │
+│ Success Criteria:                                                          │
+│   ✓ User rank available in authStore                                      │
+│   ✓ Submitter rank available in project metadata                          │
+│   ✓ Approve button hidden when rank insufficient (optional)               │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ RISK-042: Approve Button Despite No Module Assignment                     │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Category:       UX / Permission Alignment                                  │
+│ Status:         ACTIVE                                                     │
+│ Likelihood:     MEDIUM                                                     │
+│ Impact:         MEDIUM                                                     │
+│ Priority:       P1 (SHOULD FIX)                                            │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Description:                                                               │
+│   Admin WITHOUT module assignment sees Approve button. UI checks isAdmin  │
+│   only. Backend validates module assignment and returns 403.              │
+│                                                                            │
+│ Evidence:                                                                  │
+│   Frontend check:                                                          │
+│     canApproveItem(project): return isAdmin && status === PENDING_REVIEW  │
+│                                                                            │
+│   Backend enforcement (construction-projects.service.ts:469-481):         │
+│     if (!isSuperAdmin) {                                                   │
+│       const hasAccess = await db.query(                                   │
+│         `SELECT 1 FROM user_module_assignments                            │
+│          WHERE user_id = $1 AND (module = 'CONSTRUCTION' OR module = 'ALL')` │
+│       )                                                                    │
+│       if (hasAccess.rows.length === 0) {                                  │
+│         throw ForbiddenException('No module access')                      │
+│       }                                                                    │
+│     }                                                                      │
+│                                                                            │
+│ Attack Vector:                                                             │
+│   1. Admin user exists with Admin role ✅                                 │
+│   2. User has NO module assignment in user_module_assignments table       │
+│   3. User views COI record in PENDING_REVIEW status                       │
+│   4. UI shows Approve button (isAdmin = true) ✅                          │
+│   5. User clicks Approve                                                   │
+│   6. Backend checks module_assignments → finds none                       │
+│   7. Backend returns 403 Forbidden                                         │
+│   8. User receives error: "No module access"                              │
+│                                                                            │
+│ Impact Analysis:                                                           │
+│   - Similar to RISK-041 (UX confusion)                                     │
+│   - More likely to occur (module assignments may be incomplete)            │
+│   - NOT a security issue (backend blocks)                                  │
+│                                                                            │
+│ Current Mitigation:                                                        │
+│   Backend enforces module assignment check in publish() method.           │
+│                                                                            │
+│ Required Mitigation:                                                       │
+│   Phase J: Permission Context Enhancement                                  │
+│   - Include module_assignments[] in auth response                         │
+│   - Add canApprove(module) method to usePermissions                       │
+│   - Check module assignment before showing Approve button                 │
+│                                                                            │
+│ Success Criteria:                                                          │
+│   ✓ moduleAssignments array in authStore                                  │
+│   ✓ canApprove('coi') checks module assignment                           │
+│   ✓ Approve button hidden when no module access                           │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ RISK-043: Edit Button Visible During PENDING_REVIEW                       │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Category:       UX / Workflow Enforcement                                  │
+│ Status:         CONFIRMED                                                  │
+│ Likelihood:     HIGH                                                       │
+│ Impact:         LOW                                                        │
+│ Priority:       P0 (MUST FIX)                                              │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Description:                                                               │
+│   Edit button in detail view renders unconditionally. Owner of            │
+│   PENDING_REVIEW record sees Edit button, clicks, navigates to edit page, │
+│   modifies record, attempts to save → backend blocks.                     │
+│                                                                            │
+│ Evidence:                                                                  │
+│   File: pmo-frontend/pages/coi/detail-[id].vue Line 231                   │
+│                                                                            │
+│   <v-btn color="primary" @click="editProject" prepend-icon="mdi-pencil">  │
+│     Edit Project                                                           │
+│   </v-btn>                                                                 │
+│                                                                            │
+│   ❌ NO v-if CHECK                                                         │
+│                                                                            │
+│   Backend enforcement (construction-projects.service.ts:216-220):         │
+│     if (project.publication_status === 'PENDING_REVIEW') {                │
+│       throw BadRequestException('Cannot edit during review')              │
+│     }                                                                      │
+│                                                                            │
+│ Attack Vector:                                                             │
+│   1. Owner creates DRAFT record                                            │
+│   2. Owner submits for review → Status: PENDING_REVIEW                    │
+│   3. Owner views detail page                                               │
+│   4. Edit button VISIBLE ❌                                                │
+│   5. Owner clicks Edit                                                     │
+│   6. Permission middleware allows (owner has canEdit) ✅                   │
+│   7. Edit page loads ✅                                                    │
+│   8. Owner modifies fields                                                 │
+│   9. Owner clicks Save                                                     │
+│  10. API PATCH /coi/:id                                                    │
+│  11. Backend checks status: PENDING_REVIEW                                 │
+│  12. Backend returns 400 Bad Request: "Cannot edit during review"         │
+│  13. Owner confusion (why allow edit navigation but block save?)          │
+│                                                                            │
+│ Impact Analysis:                                                           │
+│   - Owner allowed into edit flow but blocked at save                       │
+│   - Wasted user effort (form filling pointless)                            │
+│   - Perceived system bug                                                   │
+│   - NOT a security issue (backend enforces workflow lock)                  │
+│   - UX degradation (inconsistent with list view logic)                     │
+│                                                                            │
+│ Current Mitigation:                                                        │
+│   Backend service blocks edit attempts during PENDING_REVIEW.             │
+│                                                                            │
+│ Required Mitigation:                                                       │
+│   Phase I: Edit Button Visibility Hardening                               │
+│   - Add canEditCurrentProject computed property                           │
+│   - Check canEdit(module) permission                                       │
+│   - Check publicationStatus !== 'PENDING_REVIEW'                          │
+│   - Check ownership (if not Admin)                                         │
+│   - Add v-if="canEditCurrentProject" to Edit button                       │
+│                                                                            │
+│ Comparison:                                                                │
+│   List view meatball menu (CORRECT):                                      │
+│     canEditItem(project):                                                  │
+│       if (!canEdit('coi')) return false                                   │
+│       if (status === 'PENDING_REVIEW') return false                       │
+│       if (isAdmin) return true                                             │
+│       return isOwner(project)                                              │
+│                                                                            │
+│   Detail view (INCORRECT):                                                 │
+│     NO PERMISSION CHECK                                                    │
+│                                                                            │
+│ Success Criteria:                                                          │
+│   ✓ Edit button hidden for Viewer role                                    │
+│   ✓ Edit button hidden during PENDING_REVIEW                              │
+│   ✓ Edit button hidden for non-owners (Staff)                             │
+│   ✓ Logic matches list view canEditItem()                                 │
+└────────────────────────────────────────────────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════════
+RISK DETAILS — MITIGATED THREATS
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ RISK-044: Edit Button Exposure Race Condition                             │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Category:       Timing / Hydration                                         │
+│ Status:         MITIGATED                                                  │
+│ Likelihood:     VERY LOW                                                   │
+│ Impact:         LOW                                                        │
+│ Priority:       P3 (MONITOR)                                               │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Description:                                                               │
+│   Hypothesis: Edit button might render before authStore loads, exposing   │
+│   button temporarily during hydration.                                     │
+│                                                                            │
+│ Evidence:                                                                  │
+│   File: pmo-frontend/middleware/auth.ts Lines 7-16                         │
+│                                                                            │
+│   if (authStore.token && !authStore.user) {                               │
+│     await authStore.initialize()  // ✅ AWAITED                           │
+│   }                                                                        │
+│                                                                            │
+│   Analysis:                                                                │
+│   - Middleware properly awaits authStore.initialize() ✅                   │
+│   - Page component renders AFTER user data loaded ✅                       │
+│   - No race condition detected ✅                                          │
+│                                                                            │
+│ Conclusion:                                                                │
+│   NOT a race condition. Edit button exposure is due to missing            │
+│   permission check (RISK-043), not timing issue.                          │
+│                                                                            │
+│ Current Mitigation:                                                        │
+│   Auth middleware properly awaits user load.                              │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ RISK-046: Unauthorized Publish Attempt                                    │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Category:       Security / Authorization                                   │
+│ Status:         MITIGATED                                                  │
+│ Likelihood:     VERY LOW                                                   │
+│ Impact:         CRITICAL                                                   │
+│ Priority:       P3 (MONITOR)                                               │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Description:                                                               │
+│   Staff user attempts to directly publish record via API bypass.          │
+│                                                                            │
+│ Evidence:                                                                  │
+│   Backend enforcement:                                                     │
+│     @Post(':id/publish')                                                   │
+│     @Roles('Admin')  // ✅ Admin-only decorator                           │
+│                                                                            │
+│ Attack Vector:                                                             │
+│   1. Staff user obtains JWT token (legitimate login)                       │
+│   2. curl -X POST https://api/coi/123/publish -H "Auth: Bearer {token}"   │
+│   3. RolesGuard executes                                                   │
+│   4. Guard checks user.roles.includes('admin') → FALSE                    │
+│   5. Guard returns 403 Forbidden                                           │
+│   6. Attack blocked ✅                                                     │
+│                                                                            │
+│ Current Mitigation:                                                        │
+│   @Roles('Admin') decorator on all publish endpoints. Robust.             │
+│                                                                            │
+│ Conclusion:                                                                │
+│   Security enforced at backend. Not exploitable.                          │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ RISK-047: Self-Approval Attempt                                           │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Category:       Workflow / Governance                                      │
+│ Status:         MITIGATED                                                  │
+│ Likelihood:     LOW                                                        │
+│ Impact:         HIGH                                                       │
+│ Priority:       P2 (MONITOR)                                               │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Description:                                                               │
+│   Admin submits record, then attempts to approve their own submission.    │
+│                                                                            │
+│ Evidence:                                                                  │
+│   Backend enforcement (construction-projects.service.ts:435-437):         │
+│     if (project.created_by === user.sub && !user.is_superadmin) {         │
+│       throw ForbiddenException('Cannot approve own submission')           │
+│     }                                                                      │
+│                                                                            │
+│ Attack Vector:                                                             │
+│   1. Admin creates DRAFT record                                            │
+│   2. Admin submits for review                                              │
+│   3. UI shows Approve button (Admin viewing PENDING_REVIEW) ✅            │
+│   4. Admin clicks Approve                                                  │
+│   5. API POST /coi/:id/publish                                            │
+│   6. Backend checks: created_by === user.sub → TRUE                       │
+│   7. Backend returns 403 Forbidden                                         │
+│   8. Attack blocked ✅                                                     │
+│                                                                            │
+│ Current Mitigation:                                                        │
+│   Backend service validates self-approval prevention.                     │
+│                                                                            │
+│ Enhancement (Phase J):                                                     │
+│   UI could hide Approve button when user is submitter:                    │
+│     if (project.submittedBy === authStore.user?.id) return false          │
+│                                                                            │
+│ Conclusion:                                                                │
+│   Backend enforced. UI enhancement improves UX (optional).                │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ RISK-048: Rank Hierarchy Bypass                                           │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Category:       Authorization / Governance                                 │
+│ Status:         MITIGATED                                                  │
+│ Likelihood:     LOW                                                        │
+│ Impact:         HIGH                                                       │
+│ Priority:       P2 (MONITOR)                                               │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Description:                                                               │
+│   Lower-rank admin attempts to approve submission by higher-rank user.    │
+│                                                                            │
+│ Evidence:                                                                  │
+│   Backend enforcement (construction-projects.service.ts:440-458):         │
+│     const approverRank = await getUserRank(user.sub)                      │
+│     const submitterRank = await getUserRank(project.submitted_by)         │
+│                                                                            │
+│     if (approverRank >= submitterRank && !user.is_superadmin) {           │
+│       throw ForbiddenException('Rank hierarchy violation')                │
+│     }                                                                      │
+│                                                                            │
+│ Rank Levels:                                                               │
+│   SUPER_ADMIN: 10 (highest authority)                                     │
+│   SENIOR_ADMIN: 20                                                         │
+│   MODULE_ADMIN: 30                                                         │
+│   SENIOR_STAFF: 50                                                         │
+│   JUNIOR_STAFF: 70                                                         │
+│   VIEWER: 100 (lowest authority)                                           │
+│                                                                            │
+│ Attack Vector:                                                             │
+│   1. Senior Admin (rank 20) submits record                                 │
+│   2. Module Admin (rank 30) views PENDING_REVIEW record                   │
+│   3. UI shows Approve button (both are Admins) ✅                         │
+│   4. Module Admin clicks Approve                                           │
+│   5. Backend calculates: approverRank (30) >= submitterRank (20) → TRUE  │
+│   6. Backend returns 403 Forbidden                                         │
+│   7. Attack blocked ✅                                                     │
+│                                                                            │
+│ Current Mitigation:                                                        │
+│   Rank-based validation in service layer. Database function               │
+│   can_modify_user(actor_id, target_id) enforces hierarchy.                │
+│                                                                            │
+│ Enhancement (Phase J):                                                     │
+│   Include rank_level in auth response. UI could check rank before         │
+│   showing Approve button. Complex (requires submitter rank lookup).       │
+│                                                                            │
+│ Conclusion:                                                                │
+│   Backend enforced. UI enhancement deferred (complexity vs value).        │
+└────────────────────────────────────────────────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════════
+IMPLEMENTATION PRIORITY MATRIX
+════════════════════════════════════════════════════════════════════════════════
+
+Priority P0 (MUST FIX):
+  ✓ RISK-038: Approval metadata display (Phase H)
+  ✓ RISK-039: Audit trail visibility (Phase H)
+  ✓ RISK-043: Edit button unconditional (Phase I)
+
+Priority P1 (SHOULD FIX):
+  ✓ RISK-040: Approval attribution (Phase H)
+  ✓ RISK-041: Approve despite low rank (Phase J)
+  ✓ RISK-042: Approve despite no module (Phase J)
+
+Priority P2 (MONITOR):
+  ✓ RISK-047: Self-approval prevention (Mitigated, UI enhancement optional)
+  ✓ RISK-048: Rank hierarchy bypass (Mitigated, UI enhancement complex)
+
+Priority P3 (LOW):
+  ✓ RISK-044: Race condition (False alarm, no action needed)
+  ✓ RISK-045: Hydration exposure (False alarm, no action needed)
+  ✓ RISK-046: Unauthorized publish (Mitigated, backend robust)
+  ✓ RISK-049: Badge labeling (Low impact, no action needed)
+  ✓ RISK-050: Color scheme (Very low impact, no action needed)
+
+════════════════════════════════════════════════════════════════════════════════
+SECURITY POSTURE ASSESSMENT
+════════════════════════════════════════════════════════════════════════════════
+
+Backend Enforcement:
+  ✅ All publish endpoints guarded with @Roles('Admin')
+  ✅ Self-approval prevention enforced in service layer
+  ✅ Rank hierarchy validation enforced
+  ✅ Module assignment checked before approval
+  ✅ Status transitions validated (PENDING_REVIEW → PUBLISHED only)
+
+Frontend Protection:
+  ⚠️ UI relies on role checks (isAdmin, isStaff)
+  ⚠️ UI lacks module assignment awareness
+  ⚠️ UI lacks rank level awareness
+  ⚠️ Edit button unconditional in detail view
+  ✅ Meatball menu actions properly gated in list view
+
+Attack Surface:
+  ✅ Direct API calls blocked by backend guards
+  ✅ JWT validation prevents unauthorized access
+  ✅ Role-based decorators prevent privilege escalation
+  ⚠️ UI shows actions backend may reject (poor UX, not security issue)
+
+Conclusion:
+  System is SECURE at backend layer.
+  UX degraded due to UI-backend permission desync.
+  No exploitable vulnerabilities identified.
+
+════════════════════════════════════════════════════════════════════════════════
+RECOMMENDATIONS
+════════════════════════════════════════════════════════════════════════════════
+
+Phase H (MUST): Approval Metadata Display
+  - Include reviewed_by, reviewed_at, submitted_by, submitted_at in API response
+  - Join users table to resolve UUIDs to names
+  - Map approval fields in frontend adapters
+  - Display approval attribution in detail view
+  - Estimated Effort: 4-6 hours
+  - Risk Mitigation: RISK-038, RISK-039, RISK-040
+
+Phase I (MUST): Edit Button Visibility Hardening
+  - Add canEditCurrentProject computed property to detail pages
+  - Check canEdit(module), status, ownership
+  - Add v-if="canEditCurrentProject" to Edit button
+  - Estimated Effort: 1-2 hours
+  - Risk Mitigation: RISK-043
+
+Phase J (SHOULD): Permission Context Enhancement
+  - Include rank_level in auth response
+  - Include module_assignments array in auth response
+  - Add canApprove(module) method to usePermissions
+  - Update Approve button visibility logic
+  - Estimated Effort: 4-6 hours
+  - Risk Mitigation: RISK-041, RISK-042 (partial)
+
+Deferred Enhancements:
+  - Rank-based UI validation (complex, low ROI)
+  - Full audit log timeline view (Phase 2+)
+  - Real-time permission refresh (low priority)
+
+════════════════════════════════════════════════════════════════════════════════
+END OF RISK SUMMARY
+════════════════════════════════════════════════════════════════════════════════

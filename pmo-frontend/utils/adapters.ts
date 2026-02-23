@@ -6,6 +6,23 @@
  * and frontend UI expectations without requiring backend changes.
  */
 
+// Publication status type for draft governance
+export type PublicationStatus = 'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'REJECTED'
+
+// Approval metadata interface for draft governance workflow
+export interface ApprovalMetadata {
+  createdBy: string | null
+  createdByName: string | null
+  createdAt: string | null
+  submittedBy: string | null
+  submittedByName: string | null
+  submittedAt: string | null
+  reviewedBy: string | null
+  reviewedByName: string | null
+  reviewedAt: string | null
+  reviewNotes: string | null
+}
+
 // Types matching backend DTOs (flat fields from SQL JOIN)
 export interface BackendProject {
   id: string
@@ -20,8 +37,23 @@ export interface BackendProject {
   contractor_name?: string
   start_date?: string
   end_date?: string
+  publication_status?: PublicationStatus
+  created_by?: string
   created_at: string
   updated_at: string
+  // Approval metadata fields
+  submitted_by?: string
+  submitted_by_name?: string
+  submitted_at?: string
+  reviewed_by?: string
+  reviewed_by_name?: string
+  reviewed_at?: string
+  review_notes?: string
+  // Phase AE: Record-level delegation (legacy single)
+  assigned_to?: string
+  assigned_to_name?: string
+  // Phase AW: Multi-select assignment
+  assigned_users?: { id: string; name: string }[]
 }
 
 export interface BackendUser {
@@ -31,6 +63,10 @@ export interface BackendUser {
   last_name: string
   is_superadmin: boolean
   permissions: string[]
+  module_overrides?: Record<string, boolean>
+  module_assignments?: string[]
+  rank_level?: number
+  campus?: string  // Phase Y: Office-scoped visibility
   role?: { name: string }
 }
 
@@ -46,8 +82,16 @@ export interface UIProject {
   contractor: string
   startDate: string
   endDate: string
+  publicationStatus: PublicationStatus
+  createdBy: string
   createdAt: string
   updatedAt: string
+  approvalMetadata: ApprovalMetadata
+  // Phase AE: Record-level delegation (legacy)
+  delegatedTo: string
+  delegatedToName: string
+  // Phase AW: Multi-select assignment
+  assignedUsers: { id: string; name: string }[]
 }
 
 export interface UIUser {
@@ -58,6 +102,10 @@ export interface UIUser {
   fullName: string
   isSuperAdmin: boolean
   permissions: string[]
+  moduleOverrides: Record<string, boolean>
+  moduleAssignments: string[]
+  rankLevel: number
+  campus: string  // Phase Y: Office-scoped visibility
   roleName: string
 }
 
@@ -76,8 +124,27 @@ export function adaptProject(backend: BackendProject): UIProject {
     contractor: backend.contractor_name || '',
     startDate: backend.start_date || '',
     endDate: backend.end_date || '',
+    publicationStatus: backend.publication_status || 'PUBLISHED',
+    createdBy: backend.created_by || '',
     createdAt: backend.created_at,
     updatedAt: backend.updated_at,
+    approvalMetadata: {
+      createdBy: backend.created_by || null,
+      createdByName: backend.created_by_name || null,
+      createdAt: backend.created_at || null,
+      submittedBy: backend.submitted_by || null,
+      submittedByName: backend.submitted_by_name || null,
+      submittedAt: backend.submitted_at || null,
+      reviewedBy: backend.reviewed_by || null,
+      reviewedByName: backend.reviewed_by_name || null,
+      reviewedAt: backend.reviewed_at || null,
+      reviewNotes: backend.review_notes || null,
+    },
+    // Phase AE: Record-level delegation (legacy)
+    delegatedTo: backend.assigned_to || '',
+    delegatedToName: backend.assigned_to_name || '',
+    // Phase AW: Multi-select assignment
+    assignedUsers: backend.assigned_users || [],
   }
 }
 
@@ -100,6 +167,10 @@ export function adaptUser(backend: BackendUser): UIUser {
     fullName: `${backend.first_name} ${backend.last_name}`,
     isSuperAdmin: backend.is_superadmin,
     permissions: backend.permissions || [],
+    moduleOverrides: backend.module_overrides || {},
+    moduleAssignments: backend.module_assignments || [],
+    rankLevel: backend.rank_level ?? 100,
+    campus: backend.campus || '',  // Phase Y: Office-scoped visibility
     roleName: backend.role?.name || '',
   }
 }
@@ -265,8 +336,23 @@ export interface BackendUniversityOperation {
   actual_value?: number
   budget_allocated?: number
   budget_utilized?: number
+  publication_status?: PublicationStatus
+  created_by?: string
   created_at: string
   updated_at: string
+  // Approval metadata fields
+  submitted_by?: string
+  submitted_by_name?: string
+  submitted_at?: string
+  reviewed_by?: string
+  reviewed_by_name?: string
+  reviewed_at?: string
+  review_notes?: string
+  // Phase AE: Record-level delegation (legacy single)
+  assigned_to?: string
+  assigned_to_name?: string
+  // Phase AW: Multi-select assignment
+  assigned_users?: { id: string; name: string }[]
 }
 
 export interface UIUniversityOperation {
@@ -285,8 +371,16 @@ export interface UIUniversityOperation {
   actualValue: number
   budgetAllocated: number
   budgetUtilized: number
+  publicationStatus: PublicationStatus
+  createdBy: string
   createdAt: string
   updatedAt: string
+  approvalMetadata: ApprovalMetadata
+  // Phase AE: Record-level delegation (legacy)
+  delegatedTo: string
+  delegatedToName: string
+  // Phase AW: Multi-select assignment
+  assignedUsers: { id: string; name: string }[]
 }
 
 export function adaptUniversityOperation(backend: BackendUniversityOperation): UIUniversityOperation {
@@ -306,8 +400,27 @@ export function adaptUniversityOperation(backend: BackendUniversityOperation): U
     actualValue: backend.actual_value || 0,
     budgetAllocated: backend.budget_allocated || 0,
     budgetUtilized: backend.budget_utilized || 0,
+    publicationStatus: backend.publication_status || 'PUBLISHED',
+    createdBy: backend.created_by || '',
     createdAt: backend.created_at,
     updatedAt: backend.updated_at,
+    approvalMetadata: {
+      createdBy: backend.created_by || null,
+      createdByName: backend.created_by_name || null,
+      createdAt: backend.created_at || null,
+      submittedBy: backend.submitted_by || null,
+      submittedByName: backend.submitted_by_name || null,
+      submittedAt: backend.submitted_at || null,
+      reviewedBy: backend.reviewed_by || null,
+      reviewedByName: backend.reviewed_by_name || null,
+      reviewedAt: backend.reviewed_at || null,
+      reviewNotes: backend.review_notes || null,
+    },
+    // Phase AE: Record-level delegation (legacy)
+    delegatedTo: backend.assigned_to || '',
+    delegatedToName: backend.assigned_to_name || '',
+    // Phase AW: Multi-select assignment
+    assignedUsers: backend.assigned_users || [],
   }
 }
 
@@ -335,12 +448,27 @@ export interface BackendRepairProject {
   end_date?: string
   budget?: number
   actual_cost?: number
+  created_by?: string
+  // Approval metadata fields
+  submitted_by?: string
+  submitted_by_name?: string
+  submitted_at?: string
+  reviewed_by?: string
+  reviewed_by_name?: string
+  reviewed_at?: string
+  review_notes?: string
   reported_by?: string
   assigned_technician?: string
   physical_progress?: number
   financial_progress?: number
+  publication_status?: PublicationStatus
   created_at: string
   updated_at: string
+  // Phase AE: Record-level delegation (legacy single)
+  assigned_to?: string
+  assigned_to_name?: string
+  // Phase AW: Multi-select assignment
+  assigned_users?: { id: string; name: string }[]
 }
 
 export interface UIRepairProject {
@@ -363,8 +491,16 @@ export interface UIRepairProject {
   assignedTo: string
   physicalProgress: number
   financialProgress: number
+  publicationStatus: PublicationStatus
+  createdBy: string
   createdAt: string
   updatedAt: string
+  approvalMetadata: ApprovalMetadata
+  // Phase AE: Record-level delegation (legacy)
+  delegatedTo: string
+  delegatedToName: string
+  // Phase AW: Multi-select assignment
+  assignedUsers: { id: string; name: string }[]
 }
 
 export function adaptRepairProject(backend: BackendRepairProject): UIRepairProject {
@@ -388,8 +524,27 @@ export function adaptRepairProject(backend: BackendRepairProject): UIRepairProje
     assignedTo: backend.assigned_technician || '',
     physicalProgress: backend.physical_progress || 0,
     financialProgress: backend.financial_progress || 0,
+    publicationStatus: backend.publication_status || 'PUBLISHED',
+    createdBy: backend.created_by || '',
     createdAt: backend.created_at,
     updatedAt: backend.updated_at,
+    approvalMetadata: {
+      createdBy: backend.created_by || null,
+      createdByName: backend.created_by_name || null,
+      createdAt: backend.created_at || null,
+      submittedBy: backend.submitted_by || null,
+      submittedByName: backend.submitted_by_name || null,
+      submittedAt: backend.submitted_at || null,
+      reviewedBy: backend.reviewed_by || null,
+      reviewedByName: backend.reviewed_by_name || null,
+      reviewedAt: backend.reviewed_at || null,
+      reviewNotes: backend.review_notes || null,
+    },
+    // Phase AE: Record-level delegation (legacy)
+    delegatedTo: backend.assigned_to || '',
+    delegatedToName: backend.assigned_to_name || '',
+    // Phase AW: Multi-select assignment
+    assignedUsers: backend.assigned_users || [],
   }
 }
 
@@ -432,6 +587,17 @@ export interface UIRepairDetail {
   budget: number | null
   actual_cost: number | null
   assigned_technician: string
+  // Draft governance fields (for detail view)
+  repairCode: string
+  createdBy: string
+  publicationStatus: PublicationStatus
+  approvalMetadata: ApprovalMetadata
+  // Phase AE: Record-level delegation (legacy)
+  delegatedTo: string
+  delegatedToName: string
+  // Phase AW: Multi-select assignment
+  assignedUsers: { id: string; name: string }[]
+  assignedUserIds: string[]
 }
 
 /**
@@ -460,6 +626,28 @@ export function adaptRepairDetail(backend: BackendRepairProjectDetail): UIRepair
     budget: backend.budget || null,
     actual_cost: backend.actual_cost || null,
     assigned_technician: backend.assigned_technician || '',
+    // Draft governance fields
+    repairCode: backend.project_code || '',
+    createdBy: backend.created_by || '',
+    publicationStatus: backend.publication_status || 'PUBLISHED',
+    approvalMetadata: {
+      createdBy: backend.created_by || null,
+      createdByName: backend.created_by_name || null,
+      createdAt: backend.created_at || null,
+      submittedBy: backend.submitted_by || null,
+      submittedByName: backend.submitted_by_name || null,
+      submittedAt: backend.submitted_at || null,
+      reviewedBy: backend.reviewed_by || null,
+      reviewedByName: backend.reviewed_by_name || null,
+      reviewedAt: backend.reviewed_at || null,
+      reviewNotes: backend.review_notes || null,
+    },
+    // Phase AE: Record-level delegation (legacy)
+    delegatedTo: backend.assigned_to || '',
+    delegatedToName: backend.assigned_to_name || '',
+    // Phase AW: Multi-select assignment
+    assignedUsers: (backend as any).assigned_users || [],
+    assignedUserIds: ((backend as any).assigned_users || []).map((u: { id: string }) => u.id),
   }
 }
 
@@ -652,6 +840,8 @@ export interface BackendUserList {
   avatar_url?: string
   is_active: boolean
   last_login_at?: string
+  rank_level?: number
+  campus?: string
   created_at: string
   updated_at: string
   roles: BackendUserRole[]
@@ -667,6 +857,8 @@ export interface UIUserList {
   avatarUrl: string
   isActive: boolean
   lastLoginAt: string
+  rankLevel: number
+  campus: string
   createdAt: string
   updatedAt: string
   roles: string[]
@@ -687,6 +879,8 @@ export function adaptUserList(backend: BackendUserList): UIUserList {
     avatarUrl: backend.avatar_url || '',
     isActive: backend.is_active,
     lastLoginAt: backend.last_login_at || '',
+    rankLevel: backend.rank_level || 100,
+    campus: backend.campus || '',
     createdAt: backend.created_at,
     updatedAt: backend.updated_at,
     roles: roleNames,

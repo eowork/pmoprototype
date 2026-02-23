@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { Pool, QueryResult } from 'pg';
+import { Pool, PoolClient, QueryResult } from 'pg';
 import { DATABASE_POOL } from './database.constants';
 
 @Injectable()
@@ -58,5 +58,13 @@ export class DatabaseService {
   async getVersion(): Promise<string> {
     const result = await this.query<{ version: string }>('SELECT version()');
     return result.rows[0].version;
+  }
+
+  /**
+   * Get a client from the pool for transaction support
+   * @returns PoolClient - Remember to call client.release() when done
+   */
+  async getClient(): Promise<PoolClient> {
+    return this.pool.connect();
   }
 }

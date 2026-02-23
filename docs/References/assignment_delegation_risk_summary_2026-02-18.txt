@@ -1,0 +1,55 @@
+RECORD ASSIGNMENT AND DELEGATION RISK SUMMARY
+ACE v2.4 — Phase 1 Research Section 1.38
+Date: 2026-02-18
+
+SCHEMA GAPS CONFIRMED:
+  - assigned_to column: MISSING from all 3 module tables
+  - office_id on records: MISSING
+  - campus on users: MISSING (Phase Y prerequisite)
+  - rank_level in JWT: NOT present (DB fetch required)
+
+DESIGN DECISION:
+  Single assigned_to UUID FK (not join table, not array).
+  ON DELETE SET NULL — delegate cleared if user deleted.
+  Multi-delegate upgrade path: future join table migration.
+
+RISK-070 [MEDIUM] — Draft Overexposure via assigned_to
+  Symptom: Assigned user reads confidential DRAFT outside their scope.
+  Mitigation: Only record owner or Admin can set assigned_to.
+  Plan: Phase AA enforces via update() service layer.
+
+RISK-071 [MEDIUM] — Unauthorized Delegated Edit
+  Symptom: Delegate modifies record in ways owner did not intend.
+  Mitigation: Owner can clear assignment (set assigned_to = NULL).
+  Future: Audit log entry when assignment set/cleared.
+  Plan: Phase AC.
+
+RISK-072 [MEDIUM] — Office Boundary Leakage
+  Symptom: Staff assigned cross-office record, bypasses office scoping.
+  Mitigation: Cannot enforce until Phase Y adds campus to users table.
+  Deferred: Phase Y unblocks this.
+
+RISK-073 [LOW] — Rank Bypass via Assignment
+  Symptom: Junior staff assigned to senior staff's record.
+  Analysis: assignment does NOT grant approve/delete — rank check at approval
+  still enforced. No rank bypass possible through assignment alone.
+
+RISK-074 [LOW] — findAll() Condition Complexity
+  Symptom: OR conditions in WHERE clause grow as visibility rules expand.
+  Mitigation: Keep flat OR, use parameterized values (no nested subqueries).
+  Current structure post-AB: (PUBLISHED OR created_by OR assigned_to)
+
+RISK-075 [LOW] — Cascade on User Delete
+  Resolution: ON DELETE SET NULL on assigned_to FK. No risk.
+
+REGRESSION PRESERVATION MATRIX:
+  V1–V3: Unaffected (requiresStatusReset doesn't touch assigned_to)
+  W1–W3: Unaffected (PENDING_REVIEW revert clears submitted_by, not assigned_to)
+  W4:    Preserved — Phase AC extends ownership check to include assigned_to;
+         non-owner AND non-assigned still gets 403
+  X1–X5: Subset of Phase AB — AB is a superset of X behavior
+
+IMPLEMENTATION ORDER:
+  AA → (AB, AC, AD in parallel) → regression verify
+  Phase AA is a hard prerequisite for AB, AC, AD (column must exist).
+  AB, AC, AD are independent of each other once AA is done.

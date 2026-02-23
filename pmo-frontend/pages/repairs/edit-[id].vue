@@ -3,7 +3,7 @@ import type { BackendRepairProjectDetail } from '~/utils/adapters'
 import { adaptRepairDetail } from '~/utils/adapters'
 
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const route = useRoute()
@@ -44,6 +44,8 @@ const form = ref({
   budget: null as number | null,
   actual_cost: null as number | null,
   assigned_technician: '',
+  // Phase AW: Multi-select assignment
+  assigned_user_ids: [] as string[],
 })
 
 // Dropdown options
@@ -71,6 +73,8 @@ const statusOptions = [
 
 // Lookup data
 const repairTypes = ref<{ id: string; name: string }[]>([])
+// Phase AF: Staff users for delegation
+const staffUsers = ref<{ id: string; first_name: string; last_name: string }[]>([])
 
 // Validation rules
 const rules = {
@@ -92,14 +96,13 @@ async function fetchData() {
   try {
     console.log('[Repairs Edit] Fetching lookup data first...')
 
-    // STEP 1: Load lookup data FIRST (v-select requires items before value)
-    const typesRes = await api.get<{ data: { id: string; name: string }[] }>('/api/repair-types')
+    // STEP 1: Load repair types and repair data in parallel
+    const [typesRes, repairRes] = await Promise.all([
+      api.get<{ data: { id: string; name: string }[] }>('/api/repair-types'),
+      api.get<BackendRepairProjectDetail>(`/api/repair-projects/${repairId}`),
+    ])
     repairTypes.value = typesRes.data || []
 
-    console.log('[Repairs Edit] Lookups loaded, fetching repair:', repairId)
-
-    // STEP 2: Then load repair data and use adapter (items already exist)
-    const repairRes = await api.get<BackendRepairProjectDetail>(`/api/repair-projects/${repairId}`)
     const adapted = adaptRepairDetail(repairRes)
 
     form.value = {
@@ -122,7 +125,15 @@ async function fetchData() {
       budget: adapted.budget,
       actual_cost: adapted.actual_cost,
       assigned_technician: adapted.assigned_technician,
+      // Phase AW: Multi-select assignment - extract IDs from assigned_users array
+      assigned_user_ids: ((repairRes as any).assigned_users || []).map((u: { id: string }) => u.id),
     }
+
+    // STEP 2: Load eligible users (Phase AV: global, no campus filter)
+    const usersRes = await api.get<{ id: string; first_name: string; last_name: string }[]>(
+      '/api/users/eligible-for-assignment'
+    )
+    staffUsers.value = Array.isArray(usersRes) ? usersRes : []
 
     console.log('[Repairs Edit] Form populated with repair_type_id:', form.value.repair_type_id)
   } catch (err: unknown) {
@@ -159,6 +170,8 @@ async function handleSubmit() {
       budget: form.value.budget || undefined,
       actual_cost: form.value.actual_cost || undefined,
       assigned_technician: form.value.assigned_technician || undefined,
+      // Phase AW: Multi-select assignment
+      assigned_user_ids: form.value.assigned_user_ids.length > 0 ? form.value.assigned_user_ids : undefined,
     }
 
     console.log('[Repairs Edit] Submitting update for:', repairId)
@@ -174,9 +187,9 @@ async function handleSubmit() {
   }
 }
 
-// Navigation
+// Navigation - Use router.back() to return to exact previous context
 function goBack() {
-  router.push(`/repairs/${repairId}`)
+  router.back()
 }
 
 // ACE-R15 Tier 3: Simple onMounted (no watchEffect complexity)
@@ -436,6 +449,29 @@ onMounted(() => {
 
         <!-- Sidebar -->
         <v-col cols="12" md="4">
+          <!-- Assigned Staff/Personnel -->
+          <v-card class="mb-4">
+            <v-card-title>Assigned Staff/Personnel</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <v-autocomplete
+                v-model="form.assigned_user_ids"
+                label="Assigned Staff/Personnel"
+                :items="staffUsers"
+                :item-title="(u: any) => `${u.last_name}, ${u.first_name}`"
+                item-value="id"
+                multiple
+                chips
+                closable-chips
+                clearable
+                hint="Search and assign one or more staff members"
+                persistent-hint
+                variant="outlined"
+                density="comfortable"
+              />
+            </v-card-text>
+          </v-card>
+
           <!-- Urgency -->
           <v-card class="mb-4">
             <v-card-title>Urgency</v-card-title>

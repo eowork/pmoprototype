@@ -2,12 +2,18 @@
 import { adaptContractors, type UIContractor, type BackendContractor } from '~/utils/adapters'
 
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const router = useRouter()
 const api = useApi()
 const toast = useToast()
+const { canAdd, canEdit, canDelete } = usePermissions()
+
+// View contractor (edit page doubles as detail for reference data)
+function viewContractor(contractor: UIContractor) {
+  router.push(`/contractors/edit-${contractor.id}`)
+}
 
 const contractors = ref<UIContractor[]>([])
 const search = ref('')
@@ -112,7 +118,7 @@ onMounted(fetchContractors)
           Manage contractor records
         </p>
       </div>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="createContractor">
+      <v-btn v-if="canAdd('contractors')" color="primary" prepend-icon="mdi-plus" @click="createContractor">
         New Contractor
       </v-btn>
     </div>
@@ -167,12 +173,46 @@ onMounted(fetchContractors)
           </v-chip>
         </template>
 
-        <!-- Actions -->
+        <!-- Actions (Meatball Menu) -->
         <template #item.actions="{ item }">
-          <div class="d-flex justify-center ga-1">
-            <v-btn icon="mdi-pencil" size="small" variant="text" color="warning" @click="editContractor(item)" />
-            <v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="confirmDelete(item)" />
-          </div>
+          <v-menu location="start">
+            <template #activator="{ props }">
+              <v-btn
+                icon="mdi-dots-vertical"
+                variant="text"
+                size="small"
+                v-bind="props"
+              />
+            </template>
+            <v-list density="compact" min-width="150">
+              <!-- View -->
+              <v-list-item @click="viewContractor(item)" prepend-icon="mdi-eye">
+                <v-list-item-title>View</v-list-item-title>
+              </v-list-item>
+
+              <!-- Edit -->
+              <v-list-item
+                v-if="canEdit('contractors')"
+                @click="editContractor(item)"
+                prepend-icon="mdi-pencil"
+              >
+                <v-list-item-title>Edit</v-list-item-title>
+              </v-list-item>
+
+              <!-- Divider before Delete -->
+              <v-divider v-if="canDelete('contractors')" class="my-1" />
+
+              <!-- Delete -->
+              <v-list-item
+                v-if="canDelete('contractors')"
+                @click="confirmDelete(item)"
+                prepend-icon="mdi-delete"
+                class="text-error"
+              >
+                <v-list-item-title>Delete</v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-menu>
         </template>
 
         <!-- Loading State -->

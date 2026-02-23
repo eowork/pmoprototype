@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { adaptUniversityOperations, type UIUniversityOperation, type BackendUniversityOperation } from '~/utils/adapters'
+import { adaptUniversityOperations, type UIUniversityOperation, type BackendUniversityOperation, type PublicationStatus } from '~/utils/adapters'
 
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const router = useRouter()
 const api = useApi()
 const toast = useToast()
+const authStore = useAuthStore()
+const { canAdd, canEdit, canDelete, isAdmin, isStaff } = usePermissions()
 
 const operations = ref<UIUniversityOperation[]>([])
 const search = ref('')
@@ -16,15 +18,49 @@ const deleting = ref(false)
 const deleteDialog = ref(false)
 const operationToDelete = ref<UIUniversityOperation | null>(null)
 
-// Table headers
-const headers = [
-  { title: 'Title', key: 'title', sortable: true },
-  { title: 'Type', key: 'operationType', sortable: true },
-  { title: 'Campus', key: 'campus', sortable: true },
-  { title: 'Status', key: 'status', sortable: true },
-  { title: 'Budget', key: 'budgetAllocated', sortable: true, align: 'end' as const },
-  { title: 'Actions', key: 'actions', sortable: false, align: 'center' as const },
-]
+// Reject dialog state
+const rejectDialog = ref(false)
+const rejectNotes = ref('')
+const operationToReject = ref<UIUniversityOperation | null>(null)
+const rejecting = ref(false)
+
+// Action state
+const actionLoading = ref<string | null>(null)
+
+// Table headers - publication status visible to all users
+const headers = computed(() => {
+  return [
+    { title: 'Title', key: 'title', sortable: true },
+    { title: 'Type', key: 'operationType', sortable: true },
+    { title: 'Campus', key: 'campus', sortable: true },
+    { title: 'Status', key: 'status', sortable: true },
+    { title: 'Publication', key: 'publicationStatus', sortable: true },
+    { title: 'Budget', key: 'budgetAllocated', sortable: true, align: 'end' as const },
+    { title: 'Actions', key: 'actions', sortable: false, align: 'center' as const },
+  ]
+})
+
+// Publication status color mapping
+function getPublicationStatusColor(status: PublicationStatus): string {
+  const colors: Record<PublicationStatus, string> = {
+    DRAFT: 'grey',
+    PENDING_REVIEW: 'orange',
+    PUBLISHED: 'success',
+    REJECTED: 'error',
+  }
+  return colors[status] || 'grey'
+}
+
+// Publication status label mapping
+function getPublicationStatusLabel(status: PublicationStatus): string {
+  const labels: Record<PublicationStatus, string> = {
+    DRAFT: 'Draft',
+    PENDING_REVIEW: 'Pending',
+    PUBLISHED: 'Published',
+    REJECTED: 'Rejected',
+  }
+  return labels[status] || status
+}
 
 // Navigation
 function viewOperation(op: UIUniversityOperation) {
@@ -43,6 +79,126 @@ function createOperation() {
 function confirmDelete(op: UIUniversityOperation) {
   operationToDelete.value = op
   deleteDialog.value = true
+}
+
+// --- Meatball Menu Action Visibility ---
+
+// Check if current user is record owner, delegate, or assigned (Phase BM)
+function isOwnerOrAssigned(op: UIUniversityOperation): boolean {
+  const userId = authStore.user?.id
+  if (!userId) return false
+  return (
+    op.createdBy === userId
+    || op.delegatedTo === userId
+    || op.assignedUsers?.some(u => u.id === userId) || false
+  )
+}
+
+// Edit: Owner/assigned can edit own record, Admin can edit any. Editing PENDING_REVIEW auto-reverts to DRAFT.
+function canEditItem(op: UIUniversityOperation): boolean {
+  if (isAdmin.value) return true
+  return isOwnerOrAssigned(op)
+}
+
+// Submit/Resubmit for Review: Owner/assigned + DRAFT or REJECTED status
+function canSubmitForReview(op: UIUniversityOperation): boolean {
+  if (!isStaff.value && !isOwnerOrAssigned(op)) return false
+  if (!isOwnerOrAssigned(op)) return false
+  return op.publicationStatus === 'DRAFT' || op.publicationStatus === 'REJECTED'
+}
+
+// Withdraw: Original submitter + PENDING_REVIEW status only
+function canWithdraw(op: UIUniversityOperation): boolean {
+  if (op.publicationStatus !== 'PENDING_REVIEW') return false
+  return op.approvalMetadata?.submittedBy === authStore.user?.id
+}
+
+// Approve: Admin + PENDING_REVIEW status + NOT self-submitted
+// Self-approval prevention: UI hides button if user is the submitter (backend also enforces)
+function canApproveItem(op: UIUniversityOperation): boolean {
+  if (!isAdmin.value) return false
+  if (op.publicationStatus !== 'PENDING_REVIEW') return false
+  // Prevent self-approval - hide button for own submissions (SuperAdmin excluded from this check)
+  const currentUserId = authStore.user?.id
+  if (!isSuperAdmin.value && op.approvalMetadata?.submittedBy === currentUserId) {
+    return false
+  }
+  return true
+}
+
+// Reject: Admin + PENDING_REVIEW status only
+function canRejectItem(op: UIUniversityOperation): boolean {
+  return isAdmin.value && op.publicationStatus === 'PENDING_REVIEW'
+}
+
+// --- Meatball Menu Actions ---
+
+async function submitForReview(op: UIUniversityOperation) {
+  actionLoading.value = op.id
+  try {
+    await api.post(`/api/university-operations/${op.id}/submit-for-review`, {})
+    toast.success(`"${op.title}" submitted for review`)
+    await fetchOperations()
+  } catch (err: unknown) {
+    const error = err as { message?: string }
+    toast.error(error.message || 'Failed to submit for review')
+  } finally {
+    actionLoading.value = null
+  }
+}
+
+async function withdrawSubmission(op: UIUniversityOperation) {
+  actionLoading.value = op.id
+  try {
+    await api.post(`/api/university-operations/${op.id}/withdraw`, {})
+    toast.success(`"${op.title}" withdrawn successfully`)
+    await fetchOperations()
+  } catch (err: unknown) {
+    const error = err as { message?: string }
+    toast.error(error.message || 'Failed to withdraw submission')
+  } finally {
+    actionLoading.value = null
+  }
+}
+
+async function approveItem(op: UIUniversityOperation) {
+  actionLoading.value = op.id
+  try {
+    await api.post(`/api/university-operations/${op.id}/publish`, {})
+    toast.success(`"${op.title}" published successfully`)
+    await fetchOperations()
+  } catch (err: unknown) {
+    const error = err as { message?: string }
+    toast.error(error.message || 'Failed to publish')
+  } finally {
+    actionLoading.value = null
+  }
+}
+
+function openRejectDialog(op: UIUniversityOperation) {
+  operationToReject.value = op
+  rejectNotes.value = ''
+  rejectDialog.value = true
+}
+
+async function rejectItem() {
+  if (!operationToReject.value) return
+  rejecting.value = true
+  try {
+    await api.post(`/api/university-operations/${operationToReject.value.id}/reject`, {
+      notes: rejectNotes.value || 'Rejected by administrator',
+    })
+    toast.success(`"${operationToReject.value.title}" rejected`)
+    rejectDialog.value = false
+    await fetchOperations()
+  } catch (err: unknown) {
+    const error = err as { message?: string }
+    toast.error(error.message || 'Failed to reject')
+  } finally {
+    rejecting.value = false
+    operationToReject.value = null
+    rejectNotes.value = ''
+  }
 }
 
 async function deleteOperation() {
@@ -133,7 +289,7 @@ onMounted(fetchOperations)
           Manage university programs and operations
         </p>
       </div>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="createOperation">
+      <v-btn v-if="canAdd('university-operations')" color="primary" prepend-icon="mdi-plus" @click="createOperation">
         New Operation
       </v-btn>
     </div>
@@ -195,18 +351,108 @@ onMounted(fetchOperations)
           </v-chip>
         </template>
 
+        <!-- Publication Status -->
+        <template #item.publicationStatus="{ item }">
+          <v-chip
+            :color="getPublicationStatusColor(item.publicationStatus)"
+            size="small"
+            variant="tonal"
+          >
+            {{ getPublicationStatusLabel(item.publicationStatus) }}
+          </v-chip>
+          <div
+            v-if="item.publicationStatus === 'PENDING_REVIEW' && item.approvalMetadata?.submittedByName"
+            class="text-caption text-medium-emphasis mt-1"
+          >
+            by {{ item.approvalMetadata.submittedByName }}
+          </div>
+        </template>
+
         <!-- Budget -->
         <template #item.budgetAllocated="{ item }">
           {{ formatCurrency(item.budgetAllocated) }}
         </template>
 
-        <!-- Actions -->
+        <!-- Actions (Meatball Menu) -->
         <template #item.actions="{ item }">
-          <div class="d-flex justify-center ga-1">
-            <v-btn icon="mdi-eye" size="small" variant="text" color="info" @click="viewOperation(item)" />
-            <v-btn icon="mdi-pencil" size="small" variant="text" color="warning" @click="editOperation(item)" />
-            <v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="confirmDelete(item)" />
-          </div>
+          <v-menu location="start">
+            <template #activator="{ props }">
+              <v-btn
+                icon="mdi-dots-vertical"
+                variant="text"
+                size="small"
+                v-bind="props"
+                :loading="actionLoading === item.id"
+              />
+            </template>
+            <v-list density="compact" min-width="180">
+              <!-- View (always visible) -->
+              <v-list-item @click="viewOperation(item)" prepend-icon="mdi-eye">
+                <v-list-item-title>View</v-list-item-title>
+              </v-list-item>
+
+              <!-- Edit (conditional) -->
+              <v-list-item
+                v-if="canEditItem(item)"
+                @click="editOperation(item)"
+                prepend-icon="mdi-pencil"
+              >
+                <v-list-item-title>Edit</v-list-item-title>
+              </v-list-item>
+
+              <!-- Submit for Review (Staff owner + DRAFT) -->
+              <v-list-item
+                v-if="canSubmitForReview(item)"
+                @click="submitForReview(item)"
+                prepend-icon="mdi-send"
+              >
+                <v-list-item-title>Submit for Review</v-list-item-title>
+              </v-list-item>
+
+              <!-- Withdraw Submission (Original submitter + PENDING_REVIEW) -->
+              <v-list-item
+                v-if="canWithdraw(item)"
+                @click="withdrawSubmission(item)"
+                prepend-icon="mdi-undo"
+                class="text-orange"
+              >
+                <v-list-item-title>Withdraw Submission</v-list-item-title>
+              </v-list-item>
+
+              <!-- Approve (Admin + PENDING_REVIEW) -->
+              <v-list-item
+                v-if="canApproveItem(item)"
+                @click="approveItem(item)"
+                prepend-icon="mdi-check-circle"
+                class="text-success"
+              >
+                <v-list-item-title>Approve</v-list-item-title>
+              </v-list-item>
+
+              <!-- Reject (Admin + PENDING_REVIEW) -->
+              <v-list-item
+                v-if="canRejectItem(item)"
+                @click="openRejectDialog(item)"
+                prepend-icon="mdi-close-circle"
+                class="text-warning"
+              >
+                <v-list-item-title>Reject</v-list-item-title>
+              </v-list-item>
+
+              <!-- Divider before Delete -->
+              <v-divider v-if="canDelete('university-operations')" class="my-1" />
+
+              <!-- Delete (Admin only) -->
+              <v-list-item
+                v-if="canDelete('university-operations')"
+                @click="confirmDelete(item)"
+                prepend-icon="mdi-delete"
+                class="text-error"
+              >
+                <v-list-item-title>Delete</v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-menu>
         </template>
 
         <!-- Loading State -->
@@ -237,6 +483,32 @@ onMounted(fetchOperations)
           <v-spacer />
           <v-btn variant="text" @click="deleteDialog = false" :disabled="deleting">Cancel</v-btn>
           <v-btn color="error" variant="flat" @click="deleteOperation" :loading="deleting">Delete</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Reject Dialog -->
+    <v-dialog v-model="rejectDialog" max-width="500" persistent>
+      <v-card>
+        <v-card-title class="text-h6">Reject Submission</v-card-title>
+        <v-card-text>
+          <p class="mb-4">
+            Reject <strong>{{ operationToReject?.title }}</strong>?
+            The owner will be notified and can edit and resubmit.
+          </p>
+          <v-textarea
+            v-model="rejectNotes"
+            label="Rejection Notes (optional)"
+            placeholder="Provide feedback for the submitter..."
+            rows="3"
+            variant="outlined"
+            hide-details
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="rejectDialog = false" :disabled="rejecting">Cancel</v-btn>
+          <v-btn color="warning" variant="flat" @click="rejectItem" :loading="rejecting">Reject</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

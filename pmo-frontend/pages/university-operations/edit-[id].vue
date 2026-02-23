@@ -2,7 +2,7 @@
 import type { BackendUniversityOperation } from '~/utils/adapters'
 
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const route = useRoute()
@@ -33,6 +33,8 @@ const form = ref({
   start_date: '',
   end_date: '',
   budget: null as number | null,
+  // Phase AW: Multi-select assignment
+  assigned_user_ids: [] as string[],
 })
 
 // Dropdown options
@@ -57,6 +59,9 @@ const statusOptions = [
   { title: 'Cancelled', value: 'CANCELLED' },
 ]
 
+// Phase AF: Staff users for delegation
+const staffUsers = ref<{ id: string; first_name: string; last_name: string }[]>([])
+
 // Validation rules
 const rules = {
   required: (v: string) => !!v || 'This field is required',
@@ -74,7 +79,9 @@ async function fetchData() {
   loading.value = true
 
   try {
-    console.log('[UniOps Edit] Fetching operation data:', operationId)
+    console.log('[UniOps Edit] Fetching data:', operationId)
+
+    // STEP 1: Load operation data
     const op = await api.get<BackendUniversityOperation>(`/api/university-operations/${operationId}`)
 
     form.value = {
@@ -87,7 +94,15 @@ async function fetchData() {
       start_date: op.start_date ? op.start_date.split('T')[0] : '',
       end_date: op.end_date ? op.end_date.split('T')[0] : '',
       budget: op.budget_allocated || null,
+      // Phase AW: Multi-select assignment - extract IDs from assigned_users array
+      assigned_user_ids: ((op as any).assigned_users || []).map((u: { id: string }) => u.id),
     }
+
+    // STEP 2: Load eligible users (Phase AV: global, no campus filter)
+    const usersRes = await api.get<{ id: string; first_name: string; last_name: string }[]>(
+      '/api/users/eligible-for-assignment'
+    )
+    staffUsers.value = Array.isArray(usersRes) ? usersRes : []
   } catch (err: unknown) {
     const apiError = err as { message?: string }
     toast.error(apiError.message || 'Failed to load operation data')
@@ -112,6 +127,8 @@ async function handleSubmit() {
       start_date: form.value.start_date || undefined,
       end_date: form.value.end_date || undefined,
       budget: form.value.budget || undefined,
+      // Phase AW: Multi-select assignment
+      assigned_user_ids: form.value.assigned_user_ids.length > 0 ? form.value.assigned_user_ids : undefined,
     }
 
     console.log('[UniOps Edit] Submitting update for:', operationId)
@@ -127,9 +144,9 @@ async function handleSubmit() {
   }
 }
 
-// Navigation
+// Navigation - Use router.back() for context-aware return
 function goBack() {
-  router.push(`/university-operations/detail-${operationId}`)
+  router.back()
 }
 
 // ACE-R15 Tier 3: Simple onMounted (no watchEffect complexity)
@@ -276,6 +293,29 @@ onMounted(() => {
 
         <!-- Sidebar -->
         <v-col cols="12" md="4">
+          <!-- Assigned Staff/Personnel -->
+          <v-card class="mb-4">
+            <v-card-title>Assigned Staff/Personnel</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <v-autocomplete
+                v-model="form.assigned_user_ids"
+                label="Assigned Staff/Personnel"
+                :items="staffUsers"
+                :item-title="(u: any) => `${u.last_name}, ${u.first_name}`"
+                item-value="id"
+                multiple
+                chips
+                closable-chips
+                clearable
+                hint="Search and assign one or more staff members"
+                persistent-hint
+                variant="outlined"
+                density="comfortable"
+              />
+            </v-card-text>
+          </v-card>
+
           <!-- Actions -->
           <v-card>
             <v-card-text>

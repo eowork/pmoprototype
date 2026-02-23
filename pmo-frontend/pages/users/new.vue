@@ -1,6 +1,6 @@
 <script setup lang="ts">
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const router = useRouter()
@@ -22,7 +22,17 @@ const form = ref({
   password: '',
   confirm_password: '',
   is_active: true,
+  rank_level: 100,
+  // Phase AG: Campus assignment for office-scoped visibility
+  campus: '' as string,
 })
+
+// Phase AG: Campus options for office-scoped visibility
+const campusOptions = [
+  { title: 'None (No campus filter)', value: '' },
+  { title: 'Butuan Campus', value: 'Butuan Campus' },
+  { title: 'Cabadbaran', value: 'Cabadbaran' },
+]
 
 const roles = ref<Role[]>([])
 const selectedRoles = ref<string[]>([])
@@ -30,6 +40,21 @@ const loading = ref(false)
 const submitting = ref(false)
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
+
+// Rank levels for university hierarchy
+const rankOptions = [
+  { value: 10, title: 'SuperAdmin (Rank 10)' },
+  { value: 15, title: 'Vice President (Rank 15)' },
+  { value: 20, title: 'Division Chief (Rank 20)' },
+  { value: 30, title: 'Director (Rank 30)' },
+  { value: 40, title: 'Dean (Rank 40)' },
+  { value: 50, title: 'Chairperson (Rank 50)' },
+  { value: 60, title: 'Admin Personnel (Rank 60)' },
+  { value: 70, title: 'Faculty (Rank 70)' },
+  { value: 80, title: 'Clerk/Staff (Rank 80)' },
+  { value: 90, title: 'Student (Rank 90)' },
+  { value: 100, title: 'Viewer (Rank 100)' },
+]
 
 // Validation rules
 const rules = {
@@ -88,11 +113,15 @@ async function handleSubmit() {
   try {
     const payload = {
       email: form.value.email,
+      username: form.value.username,
       first_name: form.value.first_name,
       last_name: form.value.last_name,
       phone: form.value.phone || undefined,
       password: form.value.password,
       is_active: form.value.is_active,
+      rank_level: form.value.rank_level,
+      // Phase AG: Campus for office-scoped visibility
+      campus: form.value.campus || undefined,
     }
 
     console.log('[User New] Creating user:', payload)
@@ -173,19 +202,18 @@ onMounted(() => {
                 variant="outlined"
                 density="compact"
                 :rules="[rules.required, rules.username]"
-                hint="Lowercase, numbers, dots, dashes only"
+                hint="Auto-filled from name (editable)"
                 persistent-hint
                 required
               >
                 <template #append-inner>
                   <v-btn
+                    icon="mdi-refresh"
                     size="x-small"
                     variant="text"
                     @click="generateUsername"
-                    title="Generate from name"
-                  >
-                    Auto
-                  </v-btn>
+                    title="Regenerate from name"
+                  />
                 </template>
               </v-text-field>
             </v-col>
@@ -223,6 +251,33 @@ onMounted(() => {
                 label="Phone"
                 variant="outlined"
                 density="compact"
+              />
+            </v-col>
+
+            <!-- Rank Level -->
+            <v-col cols="12" md="6">
+              <v-select
+                v-model="form.rank_level"
+                :items="rankOptions"
+                label="Rank Level *"
+                variant="outlined"
+                density="compact"
+                required
+                hint="User's position in the university hierarchy"
+                persistent-hint
+              />
+            </v-col>
+
+            <!-- Phase AG: Campus Assignment -->
+            <v-col cols="12" md="6">
+              <v-select
+                v-model="form.campus"
+                :items="campusOptions"
+                label="Campus Assignment"
+                variant="outlined"
+                density="compact"
+                hint="Determines which records the user can see (Staff only)"
+                persistent-hint
               />
             </v-col>
 

@@ -34,8 +34,19 @@ export class UniversityOperationsController {
   constructor(private readonly service: UniversityOperationsService) {}
 
   @Get()
-  findAll(@Query() query: QueryOperationDto) {
-    return this.service.findAll(query);
+  findAll(@Query() query: QueryOperationDto, @CurrentUser() user: JwtPayload) {
+    return this.service.findAll(query, user);
+  }
+
+  @Get('pending-review')
+  @Roles('Admin')
+  findPendingReview(@CurrentUser() user: JwtPayload) {
+    return this.service.findPendingReview(user);
+  }
+
+  @Get('my-drafts')
+  findMyDrafts(@CurrentUser() user: JwtPayload) {
+    return this.service.findMyDrafts(user.sub);
   }
 
   @Get(':id')
@@ -46,7 +57,48 @@ export class UniversityOperationsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateOperationDto, @CurrentUser() user: JwtPayload) {
-    return this.service.create(dto, user.sub);
+    return this.service.create(dto, user.sub, user);
+  }
+
+  // --- Draft Governance Workflow ---
+
+  @Post(':id/submit-for-review')
+  @HttpCode(HttpStatus.OK)
+  submitForReview(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.submitForReview(id, user.sub);
+  }
+
+  @Post(':id/publish')
+  @Roles('Admin')
+  @HttpCode(HttpStatus.OK)
+  publish(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.publish(id, user.sub, user);
+  }
+
+  @Post(':id/reject')
+  @Roles('Admin')
+  @HttpCode(HttpStatus.OK)
+  reject(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('notes') notes: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.reject(id, user.sub, notes, user);
+  }
+
+  @Post(':id/withdraw')
+  @HttpCode(HttpStatus.OK)
+  withdraw(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.withdraw(id, user.sub);
   }
 
   @Patch(':id')
@@ -55,10 +107,11 @@ export class UniversityOperationsController {
     @Body() dto: UpdateOperationDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.service.update(id, dto, user.sub);
+    return this.service.update(id, dto, user.sub, user);
   }
 
   @Delete(':id')
+  @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
     return this.service.remove(id, user.sub);
@@ -94,6 +147,7 @@ export class UniversityOperationsController {
   }
 
   @Delete(':id/indicators/:indicatorId')
+  @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
   removeIndicator(
     @Param('id', ParseUUIDPipe) id: string,
@@ -134,6 +188,7 @@ export class UniversityOperationsController {
   }
 
   @Delete(':id/financials/:financialId')
+  @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
   removeFinancial(
     @Param('id', ParseUUIDPipe) id: string,

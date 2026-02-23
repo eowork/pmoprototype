@@ -1,6 +1,6 @@
 <script setup lang="ts">
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const router = useRouter()
@@ -9,6 +9,9 @@ const toast = useToast()
 
 const loading = ref(false)
 const submitting = ref(false)
+
+// Phase AO: Staff users for assignment dropdown
+const staffUsers = ref<{ id: string; first_name: string; last_name: string }[]>([])
 
 // Form data
 const form = ref({
@@ -27,6 +30,8 @@ const form = ref({
   reported_by: '',
   budget: null as number | null,
   assigned_technician: '',
+  // Phase AW: Multi-select assignment
+  assigned_user_ids: [] as string[],
 })
 
 // Dropdown options
@@ -96,6 +101,8 @@ async function handleSubmit() {
       reported_by: form.value.reported_by || undefined,
       budget: form.value.budget || undefined,
       assigned_technician: form.value.assigned_technician || undefined,
+      // Phase AW: Multi-select assignment
+      assigned_user_ids: form.value.assigned_user_ids.length > 0 ? form.value.assigned_user_ids : undefined,
     }
 
     console.log('[Repairs Create] Submitting:', payload)
@@ -116,7 +123,23 @@ function goBack() {
   router.push('/repairs')
 }
 
-onMounted(fetchLookups)
+// Phase AV: Fetch eligible staff once on mount (global, no campus filter)
+async function fetchEligibleStaff() {
+  try {
+    const res = await api.get<{ id: string; first_name: string; last_name: string }[]>(
+      '/api/users/eligible-for-assignment'
+    )
+    staffUsers.value = Array.isArray(res) ? res : []
+  } catch (err) {
+    console.error('[Repairs Create] Failed to fetch eligible staff:', err)
+    staffUsers.value = []
+  }
+}
+
+onMounted(() => {
+  fetchLookups()
+  fetchEligibleStaff()
+})
 </script>
 
 <template>
@@ -335,6 +358,29 @@ onMounted(fetchLookups)
                 label="This is an emergency"
                 color="error"
                 hint="Check if immediate attention required"
+              />
+            </v-card-text>
+          </v-card>
+
+          <!-- Phase AW: Multi-select Assignment Card -->
+          <v-card class="mb-4">
+            <v-card-title>Assigned Staff</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <v-autocomplete
+                v-model="form.assigned_user_ids"
+                label="Assign To"
+                :items="staffUsers"
+                :item-title="(item: any) => `${item.last_name}, ${item.first_name}`"
+                item-value="id"
+                multiple
+                chips
+                closable-chips
+                clearable
+                hint="Search and assign one or more staff members"
+                persistent-hint
+                variant="outlined"
+                density="comfortable"
               />
             </v-card-text>
           </v-card>

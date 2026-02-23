@@ -1,0 +1,47 @@
+STATE MACHINE GOVERNANCE RISK SUMMARY
+ACE v2.4 — Phase 1 Research Section 1.37
+Date: 2026-02-18
+
+RISK-064 [HIGH] — Rejected State Dead-End
+  Symptom: Staff user with REJECTED record sees no Resubmit action in UI.
+  Root cause: canSubmitForReview() guards on publicationStatus === 'DRAFT' only.
+  Backend: submitForReview() already accepts REJECTED — no backend gap.
+  Plan: Phase V.
+
+RISK-065 [HIGH] — REJECTED Edit Leaves Status Unchanged
+  Symptom: User edits a REJECTED record; status remains REJECTED.
+  Root cause: update() requiresStatusReset only checks PUBLISHED.
+  Impact: Workflow stuck. User cannot transition out of REJECTED via edit.
+  Plan: Phase V (extend requiresStatusReset to REJECTED).
+
+RISK-067 [HIGH] — Director-Level Staff Cannot See Own DRAFTs in Main List
+  Symptom: Staff creates records, main list appears empty or near-empty.
+  Root cause: findAll() filters non-admins to PUBLISHED only.
+  Note: Own DRAFTs accessible via /my-drafts but not main list.
+  Plan: Phase X (PUBLISHED OR created_by = userId).
+
+RISK-068 [MEDIUM] — PENDING_REVIEW Hard-Block vs Auto-Revert Inconsistency
+  Symptom: Phase T returns 400 for PENDING_REVIEW edits; required behavior is auto-revert.
+  Root cause: Phase T implemented hard-block; governance requires auto-revert to DRAFT.
+  Plan: Phase W (replace 400 with requiresStatusReset = PENDING_REVIEW).
+
+RISK-066 [MEDIUM] — Office-Level Data Visibility Undefined
+  Symptom: All Staff see all PUBLISHED records regardless of campus.
+  Root cause: No campus column on users table; no scoping logic in findAll().
+  Plan: Phase Y (schema migration + campus proxy filter).
+
+RISK-069 [LOW] — Division Chief Rank Slot Unoccupied
+  Symptom: No rank 40 defined; gap between Module Admin (30) and Senior Staff (50).
+  Root cause: Migration 008 defines 10/20/30/50/70/100 — no 40.
+  Plan: Manual DB update (UPDATE users SET rank_level = 40 WHERE ...).
+
+COMPLETE DETERMINISTIC STATE MACHINE (REQUIRED POST-PHASES V/W):
+  CREATE              -> DRAFT
+  EDIT DRAFT          -> DRAFT
+  EDIT PUBLISHED      -> DRAFT  (clear reviewed_by, reviewed_at)
+  EDIT REJECTED       -> DRAFT  (clear reviewed_by, reviewed_at)
+  EDIT PENDING_REVIEW -> DRAFT  (clear submitted_by, submitted_at)
+  SUBMIT/RESUBMIT     -> PENDING_REVIEW  (from DRAFT or REJECTED)
+  APPROVE             -> PUBLISHED
+  REJECT              -> REJECTED  (notes required)
+  WITHDRAW            -> DRAFT  (from PENDING_REVIEW, submitter only)

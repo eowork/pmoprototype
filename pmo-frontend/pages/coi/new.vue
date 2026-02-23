@@ -1,6 +1,6 @@
 <script setup lang="ts">
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const router = useRouter()
@@ -9,6 +9,9 @@ const toast = useToast()
 
 const loading = ref(false)
 const submitting = ref(false)
+
+// Phase AO: Staff users for assignment dropdown
+const staffUsers = ref<{ id: string; first_name: string; last_name: string }[]>([])
 
 // Form data
 const form = ref({
@@ -30,6 +33,8 @@ const form = ref({
   floor_area: null as number | null,
   number_of_floors: null as number | null,
   beneficiaries: '',
+  // Phase AW: Multi-select assignment
+  assigned_user_ids: [] as string[],
 })
 
 // Dropdown options
@@ -100,6 +105,8 @@ async function handleSubmit() {
       floor_area: form.value.floor_area || undefined,
       number_of_floors: form.value.number_of_floors || undefined,
       beneficiaries: form.value.beneficiaries || undefined,
+      // Phase AW: Multi-select assignment
+      assigned_user_ids: form.value.assigned_user_ids.length > 0 ? form.value.assigned_user_ids : undefined,
     }
 
     console.log('[COI Create] Submitting:', payload)
@@ -120,7 +127,23 @@ function goBack() {
   router.push('/coi')
 }
 
-onMounted(fetchLookups)
+// Phase AV: Fetch eligible staff once on mount (global, no campus filter)
+async function fetchEligibleStaff() {
+  try {
+    const res = await api.get<{ id: string; first_name: string; last_name: string }[]>(
+      '/api/users/eligible-for-assignment'
+    )
+    staffUsers.value = Array.isArray(res) ? res : []
+  } catch (err) {
+    console.error('[COI Create] Failed to fetch eligible staff:', err)
+    staffUsers.value = []
+  }
+}
+
+onMounted(() => {
+  fetchLookups()
+  fetchEligibleStaff()
+})
 </script>
 
 <template>
@@ -380,6 +403,29 @@ onMounted(fetchLookups)
                 type="number"
                 placeholder="3"
                 :rules="[rules.positiveNumber]"
+                variant="outlined"
+                density="comfortable"
+              />
+            </v-card-text>
+          </v-card>
+
+          <!-- Phase AW: Multi-select Assignment Card -->
+          <v-card class="mb-4">
+            <v-card-title>Assigned Staff</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <v-autocomplete
+                v-model="form.assigned_user_ids"
+                label="Assign To"
+                :items="staffUsers"
+                :item-title="(item: any) => `${item.last_name}, ${item.first_name}`"
+                item-value="id"
+                multiple
+                chips
+                closable-chips
+                clearable
+                hint="Search and assign one or more staff members"
+                persistent-hint
                 variant="outlined"
                 density="comfortable"
               />

@@ -2,7 +2,7 @@
 import type { BackendProjectDetail } from '~/utils/adapters'
 
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const route = useRoute()
@@ -44,6 +44,8 @@ const form = ref({
   number_of_floors: null as number | null,
   beneficiaries: '',
   physical_progress: null as number | null,
+  // Phase AW: Multi-select assignment
+  assigned_user_ids: [] as string[],
 })
 
 // Dropdown options
@@ -64,6 +66,8 @@ const statusOptions = [
 // Lookup data
 const fundingSources = ref<{ id: string; name: string }[]>([])
 const contractors = ref<{ id: string; name: string }[]>([])
+// Phase AF: Staff users for delegation
+const staffUsers = ref<{ id: string; first_name: string; last_name: string }[]>([])
 
 // Validation rules
 const rules = {
@@ -87,19 +91,16 @@ async function fetchData() {
   try {
     console.log('[COI Edit] Fetching lookup data first...')
 
-    // STEP 1: Load lookup data FIRST (v-select requires items before value)
-    const [fundingRes, contractorRes] = await Promise.all([
+    // STEP 1: Load funding/contractor lookups and project data in parallel
+    const [fundingRes, contractorRes, projectRes] = await Promise.all([
       api.get<{ data: { id: string; name: string }[] }>('/api/funding-sources'),
       api.get<{ data: { id: string; name: string }[] }>('/api/contractors'),
+      api.get<BackendProjectDetail>(`/api/construction-projects/${projectId}`),
     ])
 
     fundingSources.value = fundingRes.data || []
     contractors.value = contractorRes.data || []
 
-    console.log('[COI Edit] Lookups loaded, fetching project:', projectId)
-
-    // STEP 2: Then load project data and populate form (items already exist)
-    const projectRes = await api.get<BackendProjectDetail>(`/api/construction-projects/${projectId}`)
     const p = projectRes
 
     form.value = {
@@ -123,7 +124,15 @@ async function fetchData() {
       number_of_floors: p.number_of_floors || null,
       beneficiaries: p.beneficiaries || '',
       physical_progress: p.physical_progress || null,
+      // Phase AW: Multi-select assignment - extract IDs from assigned_users array
+      assigned_user_ids: ((p as any).assigned_users || []).map((u: { id: string }) => u.id),
     }
+
+    // STEP 2: Load eligible users (Phase AV: global, no campus filter)
+    const usersRes = await api.get<{ id: string; first_name: string; last_name: string }[]>(
+      '/api/users/eligible-for-assignment'
+    )
+    staffUsers.value = Array.isArray(usersRes) ? usersRes : []
 
     console.log('[COI Edit] Form populated with funding_source_id:', form.value.funding_source_id)
   } catch (err: unknown) {
@@ -161,6 +170,8 @@ async function handleSubmit() {
       number_of_floors: form.value.number_of_floors || undefined,
       beneficiaries: form.value.beneficiaries || undefined,
       physical_progress: form.value.physical_progress || undefined,
+      // Phase AW: Multi-select assignment
+      assigned_user_ids: form.value.assigned_user_ids.length > 0 ? form.value.assigned_user_ids : undefined,
     }
 
     console.log('[COI Edit] Submitting update for:', projectId)
@@ -176,9 +187,9 @@ async function handleSubmit() {
   }
 }
 
-// Navigation
+// Navigation - Use router.back() to return to exact previous context
 function goBack() {
-  router.push(`/coi/${projectId}`)
+  router.back()
 }
 
 // ACE-R15 Tier 3: Simple onMounted (no watchEffect complexity)
@@ -439,6 +450,29 @@ onMounted(() => {
 
         <!-- Sidebar -->
         <v-col cols="12" md="4">
+          <!-- Assigned Staff/Personnel -->
+          <v-card class="mb-4">
+            <v-card-title>Assigned Staff/Personnel</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <v-autocomplete
+                v-model="form.assigned_user_ids"
+                label="Assigned Staff/Personnel"
+                :items="staffUsers"
+                :item-title="(u: any) => `${u.last_name}, ${u.first_name}`"
+                item-value="id"
+                multiple
+                chips
+                closable-chips
+                clearable
+                hint="Search and assign one or more staff members"
+                persistent-hint
+                variant="outlined"
+                density="comfortable"
+              />
+            </v-card-text>
+          </v-card>
+
           <!-- Building Details -->
           <v-card class="mb-4">
             <v-card-title>Building Details</v-card-title>

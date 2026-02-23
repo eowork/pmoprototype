@@ -2,12 +2,13 @@
 import { adaptUsersList, type UIUserList, type BackendUserList } from '~/utils/adapters'
 
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const router = useRouter()
 const api = useApi()
 const toast = useToast()
+const { canAdd, canEdit, canDelete } = usePermissions()
 
 const users = ref<UIUserList[]>([])
 const search = ref('')
@@ -19,11 +20,43 @@ const userToDelete = ref<UIUserList | null>(null)
 // Filter state
 const statusFilter = ref<boolean | null>(null)
 const roleFilter = ref<string>('')
+const campusFilter = ref<string>('')
+
+const campusFilterOptions = [
+  { title: 'All Campuses', value: '' },
+  { title: 'Butuan Campus', value: 'Butuan Campus' },
+  { title: 'Cabadbaran', value: 'Cabadbaran' },
+  { title: 'No Campus Assigned', value: '__none__' },
+]
+
+// Rank labels mapping
+const RANK_LABELS: Record<number, { label: string; color: string }> = {
+  10: { label: 'SuperAdmin', color: 'deep-purple' },
+  15: { label: 'Vice President', color: 'purple' },
+  20: { label: 'Division Chief', color: 'indigo' },
+  30: { label: 'Director', color: 'blue' },
+  40: { label: 'Dean', color: 'cyan' },
+  50: { label: 'Chairperson', color: 'teal' },
+  60: { label: 'Admin Personnel', color: 'green' },
+  70: { label: 'Faculty', color: 'light-green' },
+  80: { label: 'Clerk/Staff', color: 'amber' },
+  90: { label: 'Student', color: 'orange' },
+  100: { label: 'Viewer', color: 'grey' },
+}
+
+function getRankLabel(rankLevel: number): string {
+  return RANK_LABELS[rankLevel]?.label || 'Unknown'
+}
+
+function getRankColor(rankLevel: number): string {
+  return RANK_LABELS[rankLevel]?.color || 'grey'
+}
 
 // Table headers
 const headers = [
   { title: 'Name', key: 'fullName', sortable: true },
   { title: 'Email', key: 'email', sortable: true },
+  { title: 'Rank', key: 'rankLevel', sortable: true },
   { title: 'Roles', key: 'roles', sortable: false },
   { title: 'Status', key: 'isActive', sortable: true },
   { title: 'Last Login', key: 'lastLoginAt', sortable: true },
@@ -114,6 +147,13 @@ const filteredUsers = computed(() => {
     result = result.filter(u => u.roles.includes(roleFilter.value))
   }
 
+  // Campus filter
+  if (campusFilter.value === '__none__') {
+    result = result.filter(u => !u.campus)
+  } else if (campusFilter.value) {
+    result = result.filter(u => u.campus === campusFilter.value)
+  }
+
   return result
 })
 
@@ -146,7 +186,7 @@ onMounted(fetchUsers)
           Manage user accounts and permissions
         </p>
       </div>
-      <v-btn color="primary" prepend-icon="mdi-account-plus" @click="createUser">
+      <v-btn v-if="canAdd('users')" color="primary" prepend-icon="mdi-account-plus" @click="createUser">
         New User
       </v-btn>
     </div>
@@ -176,6 +216,36 @@ onMounted(fetchUsers)
             { title: 'Inactive', value: false }
           ]"
           label="Status"
+          density="compact"
+          variant="outlined"
+          hide-details
+          class="mr-4"
+          style="max-width: 150px"
+        />
+
+        <!-- Campus Filter -->
+        <v-select
+          v-model="campusFilter"
+          :items="campusFilterOptions"
+          label="Campus"
+          density="compact"
+          variant="outlined"
+          hide-details
+          class="mr-4"
+          style="max-width: 180px"
+        />
+
+        <!-- Role Filter -->
+        <v-select
+          v-model="roleFilter"
+          :items="[
+            { title: 'All Roles', value: '' },
+            { title: 'SuperAdmin', value: 'SuperAdmin' },
+            { title: 'Admin', value: 'Admin' },
+            { title: 'Staff', value: 'Staff' },
+            { title: 'Viewer', value: 'Viewer' },
+          ]"
+          label="Role"
           density="compact"
           variant="outlined"
           hide-details
@@ -234,6 +304,17 @@ onMounted(fetchUsers)
           </div>
         </template>
 
+        <!-- Rank Badge -->
+        <template #item.rankLevel="{ item }">
+          <v-chip
+            :color="getRankColor(item.rankLevel)"
+            size="small"
+            variant="tonal"
+          >
+            {{ getRankLabel(item.rankLevel) }}
+          </v-chip>
+        </template>
+
         <!-- Status Chip -->
         <template #item.isActive="{ item }">
           <v-chip
@@ -250,13 +331,46 @@ onMounted(fetchUsers)
           <span class="text-body-2">{{ formatDate(item.lastLoginAt) }}</span>
         </template>
 
-        <!-- Actions -->
+        <!-- Actions (Meatball Menu) -->
         <template #item.actions="{ item }">
-          <div class="d-flex justify-center ga-1">
-            <v-btn icon="mdi-eye" size="small" variant="text" color="primary" @click="viewUser(item)" />
-            <v-btn icon="mdi-pencil" size="small" variant="text" color="warning" @click="editUser(item)" />
-            <v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="confirmDelete(item)" />
-          </div>
+          <v-menu location="start">
+            <template #activator="{ props }">
+              <v-btn
+                icon="mdi-dots-vertical"
+                variant="text"
+                size="small"
+                v-bind="props"
+              />
+            </template>
+            <v-list density="compact" min-width="150">
+              <!-- View -->
+              <v-list-item @click="viewUser(item)" prepend-icon="mdi-eye">
+                <v-list-item-title>View</v-list-item-title>
+              </v-list-item>
+
+              <!-- Edit -->
+              <v-list-item
+                v-if="canEdit('users')"
+                @click="editUser(item)"
+                prepend-icon="mdi-pencil"
+              >
+                <v-list-item-title>Edit</v-list-item-title>
+              </v-list-item>
+
+              <!-- Divider before Delete -->
+              <v-divider v-if="canDelete('users')" class="my-1" />
+
+              <!-- Delete -->
+              <v-list-item
+                v-if="canDelete('users')"
+                @click="confirmDelete(item)"
+                prepend-icon="mdi-delete"
+                class="text-error"
+              >
+                <v-list-item-title>Delete</v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-menu>
         </template>
 
         <!-- Loading State -->

@@ -2,12 +2,18 @@
 import { adaptFundingSources, type UIFundingSource, type BackendFundingSource } from '~/utils/adapters'
 
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const router = useRouter()
 const api = useApi()
 const toast = useToast()
+const { canAdd, canEdit, canDelete } = usePermissions()
+
+// View funding source (edit page doubles as detail for reference data)
+function viewSource(source: UIFundingSource) {
+  router.push(`/funding-sources/edit-${source.id}`)
+}
 
 const fundingSources = ref<UIFundingSource[]>([])
 const search = ref('')
@@ -108,7 +114,7 @@ onMounted(fetchSources)
           Manage funding source records
         </p>
       </div>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="createSource">
+      <v-btn v-if="canAdd('funding-sources')" color="primary" prepend-icon="mdi-plus" @click="createSource">
         New Funding Source
       </v-btn>
     </div>
@@ -164,12 +170,46 @@ onMounted(fetchSources)
           {{ formatDate(item.createdAt) }}
         </template>
 
-        <!-- Actions -->
+        <!-- Actions (Meatball Menu) -->
         <template #item.actions="{ item }">
-          <div class="d-flex justify-center ga-1">
-            <v-btn icon="mdi-pencil" size="small" variant="text" color="warning" @click="editSource(item)" />
-            <v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="confirmDelete(item)" />
-          </div>
+          <v-menu location="start">
+            <template #activator="{ props }">
+              <v-btn
+                icon="mdi-dots-vertical"
+                variant="text"
+                size="small"
+                v-bind="props"
+              />
+            </template>
+            <v-list density="compact" min-width="150">
+              <!-- View -->
+              <v-list-item @click="viewSource(item)" prepend-icon="mdi-eye">
+                <v-list-item-title>View</v-list-item-title>
+              </v-list-item>
+
+              <!-- Edit -->
+              <v-list-item
+                v-if="canEdit('funding-sources')"
+                @click="editSource(item)"
+                prepend-icon="mdi-pencil"
+              >
+                <v-list-item-title>Edit</v-list-item-title>
+              </v-list-item>
+
+              <!-- Divider before Delete -->
+              <v-divider v-if="canDelete('funding-sources')" class="my-1" />
+
+              <!-- Delete -->
+              <v-list-item
+                v-if="canDelete('funding-sources')"
+                @click="confirmDelete(item)"
+                prepend-icon="mdi-delete"
+                class="text-error"
+              >
+                <v-list-item-title>Delete</v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-menu>
         </template>
 
         <!-- Loading State -->

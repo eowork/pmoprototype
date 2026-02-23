@@ -4,3 +4,8 @@ node_modules/
 dist/
 build/
 nul
+
+# Temporary Claude/AI session files
+tmpclaude-*-cwd
+.claude/
+.trae/

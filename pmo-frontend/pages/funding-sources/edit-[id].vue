@@ -2,7 +2,7 @@
 import type { BackendFundingSource } from '~/utils/adapters'
 
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const route = useRoute()
@@ -86,9 +86,9 @@ async function handleSubmit() {
   }
 }
 
-// Navigation
+// Navigation - Use router.back() to return to exact previous context
 function goBack() {
-  router.push('/funding-sources')
+  router.back()
 }
 
 onMounted(fetchData)

@@ -14,7 +14,7 @@ import {
   UseInterceptors,
   UploadedFile,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ConstructionProjectsService } from './construction-projects.service';
 import {
@@ -34,49 +34,130 @@ import { JwtPayload } from '../common/interfaces';
 @ApiBearerAuth('JWT-auth')
 @Controller('construction-projects')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('Admin', 'Staff')
 export class ConstructionProjectsController {
   constructor(private readonly service: ConstructionProjectsService) {}
 
+  // --- Read Operations: All authenticated roles can view ---
+
   @Get()
-  findAll(@Query() query: QueryConstructionProjectDto) {
-    return this.service.findAll(query);
+  @Roles('Admin', 'Staff', 'Viewer')
+  @ApiOperation({ summary: 'List all construction projects (non-Admin only see PUBLISHED)' })
+  findAll(@Query() query: QueryConstructionProjectDto, @CurrentUser() user: JwtPayload) {
+    return this.service.findAll(query, user);
+  }
+
+  @Get('pending-review')
+  @Roles('Admin')
+  @ApiOperation({ summary: 'List drafts pending review (Admin only)' })
+  findPendingReview(@CurrentUser() user: JwtPayload) {
+    return this.service.findPendingReview(user);
+  }
+
+  @Get('my-drafts')
+  @Roles('Admin', 'Staff')
+  @ApiOperation({ summary: 'List current user drafts' })
+  findMyDrafts(@CurrentUser() user: JwtPayload) {
+    return this.service.findMyDrafts(user.sub);
   }
 
   @Get(':id')
+  @Roles('Admin', 'Staff', 'Viewer')
+  @ApiOperation({ summary: 'Get construction project details' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(id);
   }
 
+  // --- Create/Update Operations: Admin and Staff ---
+
   @Post()
+  @Roles('Admin', 'Staff')
   @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create construction project (Admin=PUBLISHED, Staff=DRAFT)' })
   create(@Body() dto: CreateConstructionProjectDto, @CurrentUser() user: JwtPayload) {
-    return this.service.create(dto, user.sub);
+    return this.service.create(dto, user.sub, user);
+  }
+
+  // --- Draft Governance Workflow ---
+
+  @Post(':id/submit-for-review')
+  @Roles('Admin', 'Staff')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Submit draft for admin review (owner only)' })
+  submitForReview(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.submitForReview(id, user.sub);
+  }
+
+  @Post(':id/publish')
+  @Roles('Admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Publish (approve) a draft (Admin only)' })
+  publish(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.publish(id, user.sub, user);
+  }
+
+  @Post(':id/reject')
+  @Roles('Admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reject a draft with notes (Admin only)' })
+  reject(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('notes') notes: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.reject(id, user.sub, notes, user);
+  }
+
+  @Post(':id/withdraw')
+  @Roles('Admin', 'Staff')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Withdraw pending submission (submitter only)' })
+  withdraw(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.withdraw(id, user.sub);
   }
 
   @Patch(':id')
+  @Roles('Admin', 'Staff')
+  @ApiOperation({ summary: 'Update construction project (Admin/Staff)' })
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateConstructionProjectDto,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.service.update(id, dto, user.sub);
+    return this.service.update(id, dto, user.sub, user);
   }
 
+  // --- Delete Operations: Admin only ---
+
   @Delete(':id')
+  @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete construction project (Admin only)' })
   remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
     return this.service.remove(id, user.sub);
   }
 
   // --- Milestones ---
+
   @Get(':id/milestones')
+  @Roles('Admin', 'Staff', 'Viewer')
+  @ApiOperation({ summary: 'List project milestones' })
   findMilestones(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findMilestones(id);
   }
 
   @Post(':id/milestones')
+  @Roles('Admin', 'Staff')
   @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create milestone (Admin/Staff)' })
   createMilestone(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CreateMilestoneDto,
@@ -85,6 +166,8 @@ export class ConstructionProjectsController {
   }
 
   @Patch(':id/milestones/:milestoneId')
+  @Roles('Admin', 'Staff')
+  @ApiOperation({ summary: 'Update milestone (Admin/Staff)' })
   updateMilestone(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('milestoneId', ParseUUIDPipe) milestoneId: string,
@@ -94,7 +177,9 @@ export class ConstructionProjectsController {
   }
 
   @Delete(':id/milestones/:milestoneId')
+  @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete milestone (Admin only)' })
   removeMilestone(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('milestoneId', ParseUUIDPipe) milestoneId: string,
@@ -103,7 +188,10 @@ export class ConstructionProjectsController {
   }
 
   // --- Financials ---
+
   @Get(':id/financials')
+  @Roles('Admin', 'Staff', 'Viewer')
+  @ApiOperation({ summary: 'List project financials' })
   findFinancials(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('fiscal_year') fiscalYear?: number,
@@ -112,7 +200,9 @@ export class ConstructionProjectsController {
   }
 
   @Post(':id/financials')
+  @Roles('Admin', 'Staff')
   @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create financial record (Admin/Staff)' })
   createFinancial(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CreateConstructionFinancialDto,
@@ -122,6 +212,8 @@ export class ConstructionProjectsController {
   }
 
   @Patch(':id/financials/:financialId')
+  @Roles('Admin', 'Staff')
+  @ApiOperation({ summary: 'Update financial record (Admin/Staff)' })
   updateFinancial(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('financialId', ParseUUIDPipe) financialId: string,
@@ -132,7 +224,9 @@ export class ConstructionProjectsController {
   }
 
   @Delete(':id/financials/:financialId')
+  @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete financial record (Admin only)' })
   removeFinancial(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('financialId', ParseUUIDPipe) financialId: string,
@@ -142,7 +236,10 @@ export class ConstructionProjectsController {
   }
 
   // --- Gallery ---
+
   @Get(':id/gallery')
+  @Roles('Admin', 'Staff', 'Viewer')
+  @ApiOperation({ summary: 'List project gallery items' })
   findGallery(
     @Param('id', ParseUUIDPipe) id: string,
     @Query() query: QueryGalleryDto,
@@ -151,6 +248,8 @@ export class ConstructionProjectsController {
   }
 
   @Get(':id/gallery/:galleryId')
+  @Roles('Admin', 'Staff', 'Viewer')
+  @ApiOperation({ summary: 'Get gallery item details' })
   findGalleryItem(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('galleryId', ParseUUIDPipe) galleryId: string,
@@ -159,6 +258,7 @@ export class ConstructionProjectsController {
   }
 
   @Post(':id/gallery')
+  @Roles('Admin', 'Staff')
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(
     FileInterceptor('file', {
@@ -167,6 +267,7 @@ export class ConstructionProjectsController {
       },
     }),
   )
+  @ApiOperation({ summary: 'Upload gallery item (Admin/Staff)' })
   createGalleryItem(
     @Param('id', ParseUUIDPipe) id: string,
     @UploadedFile() file: Express.Multer.File,
@@ -177,6 +278,8 @@ export class ConstructionProjectsController {
   }
 
   @Patch(':id/gallery/:galleryId')
+  @Roles('Admin', 'Staff')
+  @ApiOperation({ summary: 'Update gallery item (Admin/Staff)' })
   updateGalleryItem(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('galleryId', ParseUUIDPipe) galleryId: string,
@@ -187,7 +290,9 @@ export class ConstructionProjectsController {
   }
 
   @Delete(':id/gallery/:galleryId')
+  @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete gallery item (Admin only)' })
   removeGalleryItem(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('galleryId', ParseUUIDPipe) galleryId: string,

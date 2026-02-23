@@ -1,6 +1,6 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateConstructionProjectDto } from './create-construction-project.dto';
-import { IsOptional, IsNumber, Min, Max } from 'class-validator';
+import { IsOptional, IsNumber, Min, Max, IsUUID } from 'class-validator';
 
 export class UpdateConstructionProjectDto extends PartialType(CreateConstructionProjectDto) {
   @IsOptional()
@@ -14,4 +14,9 @@ export class UpdateConstructionProjectDto extends PartialType(CreateConstruction
   @Min(0)
   @Max(100)
   financial_progress?: number;
+
+  // Phase AF: Record-level delegation
+  @IsOptional()
+  @IsUUID()
+  assigned_to?: string;
 }

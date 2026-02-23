@@ -6,6 +6,7 @@ import {
   IsUUID,
   IsNumber,
   IsDateString,
+  IsArray,
 } from 'class-validator';
 import { OperationType, ProjectStatus, Campus } from '../../common/enums';
 
@@ -52,4 +53,15 @@ export class CreateOperationDto {
 
   @IsOptional()
   metadata?: Record<string, any>;
+
+  // Phase AN: Inline assignment during creation (DEPRECATED - use assigned_user_ids)
+  @IsOptional()
+  @IsUUID()
+  assigned_to?: string;
+
+  // Phase AT: Multi-select assignment
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  assigned_user_ids?: string[];
 }

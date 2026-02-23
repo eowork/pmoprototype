@@ -1,0 +1,529 @@
+================================================================================
+RISK SUMMARY: UNIVERSAL DRAFT GOVERNANCE ENFORCEMENT
+================================================================================
+Generated: 2026-02-15
+Governance: ACE v2.4 Phase 1 Research → Phase 2 Planning
+Research Reference: docs/research.md Section 1.29
+Plan Reference: docs/plan.md
+================================================================================
+
+EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+GOVERNANCE VIOLATION CONFIRMED: Admin and SuperAdmin users bypass draft
+workflow entirely. Records auto-publish on creation with no review step.
+
+STAFF ROLE NON-FUNCTIONAL: Frontend blocks all creation/edit operations despite
+backend allowing draft submissions. Staff role rendered unusable.
+
+ROOT CAUSE: Intentional role-based auto-publish logic in 3 service create()
+methods. Frontend permission lockdown conflates "add PUBLISHED" with "add DRAFT".
+
+REMEDIATION COMPLEXITY: MEDIUM (service layer + permission model + workflow API)
+
+DEPLOYMENT RISK: MEDIUM (no schema changes, but affects all project creation)
+
+================================================================================
+
+RISK MATRIX
+--------------------------------------------------------------------------------
+
+| Risk Category                    | Likelihood | Impact   | Current State          |
+|----------------------------------|-----------|----------|------------------------|
+| Governance Bypass (Auto-Publish) | CONFIRMED | HIGH     | Admin → PUBLISHED      |
+| Staff Productivity Lockout       | CONFIRMED | CRITICAL | Cannot create/edit     |
+| Approval Workflow Incomplete     | CONFIRMED | MEDIUM   | No submit/approve API  |
+| State Transition Gaps            | CONFIRMED | MEDIUM   | Partial validation     |
+| Permission Misconfiguration      | HIGH      | MEDIUM   | Binary override only   |
+| Frontend-Only Authorization      | LOW       | MEDIUM   | Backend trusts role    |
+| Audit Trail Gaps                 | CONFIRMED | HIGH     | Admin records: no audit|
+| Regression Risk                  | MEDIUM    | MEDIUM   | Core workflow changes  |
+
+================================================================================
+
+CRITICAL RISKS (P0 - BLOCKING)
+--------------------------------------------------------------------------------
+
+RISK-001: GOVERNANCE BYPASS (ADMIN AUTO-PUBLISH)
+-------------------------------------------------
+Severity: HIGH
+Status: CONFIRMED
+Impact: Admin/SuperAdmin bypass review workflow entirely
+
+Evidence:
+- construction-projects.service.ts:198-203
+- repair-projects.service.ts:226-231
+- university-operations.service.ts:188-193
+
+Code Pattern:
+```typescript
+const isTrustedAdmin = await this.isAdminFromDatabase(userId);
+const publicationStatus: PublicationStatus = isTrustedAdmin ? 'PUBLISHED' : 'DRAFT';
+```
+
+Violation:
+Expected: ALL users create → DRAFT
+Actual: Admin/SuperAdmin create → PUBLISHED
+
+Business Impact:
+- Cannot enforce "approval required" policy for any user
+- Admin can self-approve without oversight
+- No audit trail for Admin-created records (submitted_by = null)
+- Rank-based approval escalation impossible (Admin already published)
+- Inconsistent governance between Staff and Admin users
+
+Technical Debt:
+- Auto-publish logic embedded in 3 services
+- Security validation (isAdminFromDatabase) used for wrong purpose
+- Migration 007 defaults to 'PUBLISHED' (contradicts draft governance)
+
+Remediation: Phase A (MUST)
+Action: Remove auto-publish logic, force DRAFT for all roles
+Complexity: LOW (single method change × 3 services)
+Verification: Admin POST → status=DRAFT, submitted_by=admin_id, submitted_at=timestamp
+
+--------------------------------------------------------------------------------
+
+RISK-002: STAFF PRODUCTIVITY LOCKOUT
+-------------------------------------
+Severity: CRITICAL
+Status: CONFIRMED (manual testing)
+Impact: Staff role completely non-functional
+
+Evidence:
+- usePermissions.ts:50 → Staff: { canAdd: false, canEdit: false }
+- permission.ts:30-65 → Route guards redirect Staff to /dashboard
+- All module index pages → "New" and "Edit" buttons hidden via v-if="canAdd()"
+
+Backend vs Frontend Mismatch:
+| Module                | Backend POST     | Frontend canAdd | Mismatch? |
+|-----------------------|-----------------|----------------|-----------|
+| Construction Projects | @Roles('Admin', 'Staff') | false | YES |
+| Repair Projects       | @Roles('Admin', 'Staff') | false | YES |
+| University Operations | @Roles('Admin', 'Staff') | false | YES |
+
+Result:
+- Backend would accept Staff requests
+- Frontend blocks all attempts (buttons hidden, routes guarded)
+- Staff cannot create drafts (intended capability)
+- Staff cannot edit own drafts (intended capability)
+
+Business Impact:
+- Staff users cannot perform job functions
+- Draft workflow broken at source (no draft creation)
+- Pending review queue empty (no submissions)
+- Staff role rendered useless
+
+Root Cause:
+- Permission model does not distinguish "add DRAFT" from "add PUBLISHED"
+- Frontend lockdown intended to prevent "add PUBLISHED"
+- Unintended consequence: prevents "add DRAFT" as well
+
+Remediation: Phase B (MUST)
+Action: Update Staff permissions to canAdd: true, canEdit: true
+Rationale: Backend enforces DRAFT status for Staff submissions
+Verification: Staff creates record → status=DRAFT
+
+--------------------------------------------------------------------------------
+
+RISK-003: APPROVAL WORKFLOW INCOMPLETE
+---------------------------------------
+Severity: MEDIUM
+Status: CONFIRMED
+Impact: Draft governance exists in schema but not in API/UI
+
+Missing Components:
+1. Submit for Review Action
+   - Endpoint: POST /:id/submit
+   - Transition: DRAFT → PENDING_REVIEW
+   - Status: NOT IMPLEMENTED
+
+2. Publish Action
+   - Endpoint: POST /:id/publish
+   - Transition: PENDING_REVIEW → PUBLISHED
+   - Status: NOT IMPLEMENTED
+
+3. Reject Action
+   - Endpoint: POST /:id/reject
+   - Transition: PENDING_REVIEW → REJECTED
+   - Status: NOT IMPLEMENTED
+
+Current Workaround:
+- Direct PATCH with publication_status in body
+- No workflow enforcement
+- Can skip PENDING_REVIEW state
+
+Business Impact:
+- Cannot enforce approval chain
+- No separation of duties (submitter vs approver)
+- Admin can directly publish any DRAFT (including own)
+- No review notes for rejections
+
+Remediation: Phases C, D (MUST)
+Action: Implement submit, publish, reject endpoints
+Verification: Full workflow DRAFT → PENDING → PUBLISHED/REJECTED functional
+
+================================================================================
+
+HIGH RISKS (P1 - ARCHITECTURAL)
+--------------------------------------------------------------------------------
+
+RISK-004: STATE TRANSITION VALIDATION GAPS
+-------------------------------------------
+Severity: MEDIUM
+Status: PARTIAL VALIDATION
+Impact: Governance rules partially enforced, exploitable gaps
+
+Current Validation Coverage:
+
+| Transition              | Validated? | Enforcement Point |
+|-------------------------|-----------|-------------------|
+| DRAFT → PENDING_REVIEW  | ❌         | Not implemented   |
+| DRAFT → PUBLISHED       | ❌         | Direct PATCH allowed |
+| PENDING_REVIEW → PUBLISHED | ✅      | Phase C validation |
+| PENDING_REVIEW → REJECTED  | ✅      | Phase C validation |
+| PUBLISHED → DRAFT       | ✅         | Phase C validation |
+| PUBLISHED → PENDING_REVIEW | ❌      | Not validated     |
+| REJECTED → DRAFT        | ❌         | Not validated     |
+| REJECTED → PUBLISHED    | ❌         | Not validated     |
+
+Coverage: 3 of 8 transitions validated (37.5%)
+
+Exploitable Gaps:
+- Can PATCH DRAFT directly to PUBLISHED (skips approval)
+- Can PATCH PUBLISHED to PENDING_REVIEW (invalid revert)
+- Can PATCH REJECTED directly to PUBLISHED (skips resubmission)
+
+Business Impact:
+- Governance rules partially bypassed
+- State machine not fully enforced
+- Audit trail incomplete
+
+Remediation: Phase E (MUST)
+Action: Lock down direct status updates, force workflow endpoints
+Verification: All 8 transitions validated, invalid transitions return 400
+
+--------------------------------------------------------------------------------
+
+RISK-005: AUDIT TRAIL GAPS
+---------------------------
+Severity: HIGH
+Status: CONFIRMED
+Impact: Admin-created records have no submission/review audit trail
+
+Evidence:
+Admin create() sets:
+```typescript
+const submittedBy = publicationStatus === 'DRAFT' ? userId : null;
+const submittedAt = publicationStatus === 'DRAFT' ? new Date() : null;
+```
+
+When Admin creates record:
+- publication_status = 'PUBLISHED'
+- submitted_by = null (no submitter tracked)
+- submitted_at = null (no submission timestamp)
+- reviewed_by = null (no reviewer tracked)
+- reviewed_at = null (no review timestamp)
+
+Consequence:
+- Cannot answer "Who submitted this record?"
+- Cannot answer "Who approved this record?"
+- Cannot answer "When was this submitted/approved?"
+- Audit compliance failure
+
+Business Impact:
+- Regulatory audit failures
+- Cannot trace approval chain
+- Accountability gap for Admin actions
+
+Remediation: Phase A (MUST)
+Action: Force DRAFT for all users, populate submitted_by/submitted_at
+Verification: All records have complete audit trail (submitted_by, submitted_at, reviewed_by, reviewed_at)
+
+================================================================================
+
+MEDIUM RISKS (P2 - NON-CRITICAL)
+--------------------------------------------------------------------------------
+
+RISK-006: PERMISSION MISCONFIGURATION
+--------------------------------------
+Severity: MEDIUM
+Status: CONFIRMED
+Impact: Cannot grant granular CRUD access
+
+Schema Limitation:
+- user_permission_overrides has single can_access boolean
+- No can_view, can_add, can_edit, can_delete, can_publish columns
+
+Consequence:
+Cannot configure:
+- "Staff user can View + Create drafts, but not Edit or Delete"
+- "Admin can Edit but not Publish (requires higher rank)"
+- "Staff user can edit Contractors reference data (exception to role default)"
+
+Current System:
+- Override = true → Full CRUD based on role
+- Override = false → No access at all
+- Override = undefined → Role default
+
+Business Impact:
+- Over-permissive (grant all CRUD to enable one action)
+- Over-restrictive (deny all access to prevent one action)
+- Cannot implement principle of least privilege
+
+Remediation: Phase F (DEFERRED)
+Reason: Universal draft model can function with binary overrides
+Future: Migration 010 to add CRUD granularity columns
+
+--------------------------------------------------------------------------------
+
+RISK-007: FRONTEND-ONLY AUTHORIZATION
+--------------------------------------
+Severity: MEDIUM
+Status: CONFIRMED
+Impact: Backend does not re-validate CRUD permissions
+
+Evidence:
+- Frontend: usePermissions.ts computes canAdd/canEdit/canDelete
+- Backend: Only checks @Roles() decorator (role-based, not permission-based)
+- Backend: No service-layer permission resolution
+
+Attack Vector:
+Direct API call with valid JWT but insufficient permissions:
+```bash
+# Staff user with "can_access: false" for COI module
+# Frontend blocks access, but backend allows if @Roles('Staff') matches
+curl -H "Authorization: Bearer $STAFF_JWT" -X POST /api/construction-projects
+→ 201 Created (permission override ignored)
+```
+
+Business Impact:
+- Permission overrides only enforced on frontend
+- API tools can bypass permission restrictions
+- Security relies on frontend enforcement (weak)
+
+Remediation: Phase F (DEFERRED - Future Enhancement)
+Action: Backend permission resolver service
+Priority: LOW (requires valid JWT, limited attack surface)
+
+--------------------------------------------------------------------------------
+
+RISK-008: REGRESSION DURING IMPLEMENTATION
+-------------------------------------------
+Severity: MEDIUM
+Status: POTENTIAL
+Impact: Breaking existing functionality during remediation
+
+Risk Factors:
+- Changing core workflow logic (auto-publish removal)
+- Affects all 3 project modules
+- Staff permission changes impact UI visibility
+- New workflow endpoints change API contract
+
+Mitigation Strategy:
+- Phase G: Full regression test matrix before deployment
+- Test all CRUD operations for all roles
+- Verify existing GET/PATCH/DELETE endpoints unaffected
+- Maintain existing API test results (201/403/200/400)
+
+Test Scope:
+- 3 modules × 5 operations × 3 roles = 45 test cases
+- Plus workflow actions (submit, publish, reject)
+- Plus state transition validation
+
+Remediation: Phase G (MUST)
+Action: Execute comprehensive regression test matrix
+Verification: Zero regressions, all existing tests pass
+
+================================================================================
+
+LOW RISKS (P3 - INFORMATIONAL)
+--------------------------------------------------------------------------------
+
+RISK-009: MIGRATION DEFAULT CONTRADICTION
+------------------------------------------
+Severity: LOW
+Status: DOCUMENTED
+Impact: Migration 007 defaults to PUBLISHED, contradicts universal draft
+
+Evidence:
+Migration 007 (database/migrations/007_add_draft_governance.sql):
+```sql
+ALTER TABLE construction_projects
+  ADD COLUMN publication_status publication_status_enum DEFAULT 'PUBLISHED';
+```
+
+Contradiction:
+- Schema default = 'PUBLISHED'
+- Service layer = 'DRAFT' (after Phase A)
+- Service layer overrides schema default
+
+Business Impact:
+- Minimal (service layer always specifies publication_status explicitly)
+- Confusing for new developers reading migration
+
+Remediation: DOCUMENT ONLY
+- For existing deployments: Service layer override sufficient
+- For new deployments: Update migration 007 default to 'DRAFT'
+- Document discrepancy in research.md
+
+Conclusion: NO ACTION REQUIRED
+
+================================================================================
+
+REMEDIATION PRIORITY SEQUENCE
+--------------------------------------------------------------------------------
+
+PHASE A: UNIVERSAL DRAFT ENFORCEMENT [MUST - P0]
+- Remove auto-publish logic from 3 service create() methods
+- Mitigates: RISK-001, RISK-005
+- Complexity: LOW
+- ETA: 1 hour
+- Blocking: Yes (all subsequent phases depend on this)
+
+PHASE B: STAFF FUNCTIONALITY RESTORATION [MUST - P0]
+- Update Staff role permissions (canAdd: true, canEdit: true)
+- Mitigates: RISK-002
+- Complexity: LOW
+- ETA: 30 minutes
+- Blocking: Yes (Staff must be functional)
+
+PHASE C: EXPLICIT PUBLISH/REJECT ACTIONS [MUST - P1]
+- Add publish() and reject() methods + endpoints
+- Mitigates: RISK-003 (partial)
+- Complexity: MEDIUM
+- ETA: 2 hours
+- Blocking: No (but required for complete workflow)
+
+PHASE D: SUBMIT FOR REVIEW ACTION [MUST - P1]
+- Add submitForReview() method + endpoint
+- Mitigates: RISK-003 (complete)
+- Complexity: MEDIUM
+- ETA: 1 hour
+- Blocking: No (but required for complete workflow)
+
+PHASE E: STATE MACHINE VALIDATION [MUST - P1]
+- Lock down direct status updates, validate all transitions
+- Mitigates: RISK-004
+- Complexity: MEDIUM
+- ETA: 2 hours
+- Blocking: No (enhancement to workflow)
+
+PHASE G: FULL REGRESSION TEST MATRIX [MUST - P0]
+- Execute 45+ test cases across all modules
+- Mitigates: RISK-008
+- Complexity: HIGH
+- ETA: 4 hours
+- Blocking: Yes (quality gate)
+
+PHASE F: PERMISSION RESOLVER [DEFERRED - P3]
+- CRUD granularity schema + backend resolver
+- Mitigates: RISK-006, RISK-007
+- Complexity: HIGH
+- ETA: 8+ hours
+- Blocking: No (future enhancement)
+
+================================================================================
+
+DEPLOYMENT CONSIDERATIONS
+--------------------------------------------------------------------------------
+
+PRE-DEPLOYMENT CHECKLIST:
+- [ ] Phase A implementation complete (universal DRAFT enforced)
+- [ ] Phase B implementation complete (Staff permissions restored)
+- [ ] Phase C implementation complete (publish/reject endpoints)
+- [ ] Phase D implementation complete (submit endpoint)
+- [ ] Phase E implementation complete (state validation)
+- [ ] Phase G test matrix 100% pass rate
+- [ ] Backend logs clean (no errors)
+- [ ] No regression in existing API tests
+
+DEPLOYMENT RISK: MEDIUM
+- No database migrations required (schema already supports workflow)
+- Service layer logic changes (core workflow modification)
+- Frontend permission changes (UI visibility impact)
+- New API endpoints (backward compatible, additive only)
+
+ROLLBACK STRATEGY:
+- Git revert to commit before Phase A implementation
+- No data loss risk (no schema changes)
+- Existing DRAFT records remain valid
+- Existing PUBLISHED records unaffected
+
+POST-DEPLOYMENT MONITORING:
+- Watch for DRAFT records created by Admin (expect 100%)
+- Monitor submission rate (DRAFT → PENDING_REVIEW)
+- Monitor approval rate (PENDING_REVIEW → PUBLISHED)
+- Track Staff user creation rate (expect increase from zero)
+- Verify audit trail completeness (submitted_by never null)
+
+DATA MIGRATION (if needed):
+- Existing PUBLISHED records created by Admin have submitted_by = null
+- Consider backfill script to set submitted_by = created_by for audit trail
+- Not critical, but improves historical data quality
+
+================================================================================
+
+ACCEPTANCE CRITERIA
+--------------------------------------------------------------------------------
+
+MUST PASS (Blocking Deployment):
+✅ Admin POST → record created with status=DRAFT (not PUBLISHED)
+✅ SuperAdmin POST → record created with status=DRAFT
+✅ Staff POST → record created with status=DRAFT
+✅ All created records have submitted_by = creator_user_id (not null)
+✅ All created records have submitted_at = timestamp (not null)
+✅ Staff sees "New" button on project modules
+✅ Staff can create and edit own DRAFT records
+✅ POST /:id/submit transitions DRAFT → PENDING_REVIEW (200 OK)
+✅ POST /:id/publish transitions PENDING_REVIEW → PUBLISHED (200 OK, Admin only)
+✅ POST /:id/reject transitions PENDING_REVIEW → REJECTED (200 OK, Admin only)
+✅ PATCH with publication_status returns 400 BadRequest
+✅ Full regression test matrix passes (100%)
+
+SHOULD PASS (High Priority):
+◯ Invalid transitions return clear error messages
+◯ State machine validates all 8 transition rules
+◯ Ownership validation prevents cross-user submissions
+◯ Audit trail complete for all published records
+
+MAY DEFER (Post-Deployment):
+◯ CRUD granularity schema migration
+◯ Backend permission resolver service
+◯ Rank-based approval escalation
+◯ Module assignment filtering
+
+================================================================================
+
+RISK OWNER ASSIGNMENT
+--------------------------------------------------------------------------------
+
+RISK-001 to RISK-003: Backend Systems Engineer (CRITICAL PATH)
+RISK-004 to RISK-005: Governance Systems Engineer (ARCHITECTURAL)
+RISK-006 to RISK-007: Frontend Engineer + Backend Engineer (DEFERRED)
+RISK-008: QA Engineer (TESTING)
+RISK-009: Technical Documentation (INFORMATIONAL)
+
+================================================================================
+
+CONCLUSION
+--------------------------------------------------------------------------------
+
+OVERALL RISK LEVEL: HIGH (due to governance violation and Staff lockout)
+
+REMEDIATION COMPLEXITY: MEDIUM (service layer changes + workflow API + permissions)
+
+DEPLOYMENT RISK: MEDIUM (core workflow changes, no schema migrations)
+
+RECOMMENDED ACTION: Proceed with Phases A-E implementation immediately
+
+SUCCESS PROBABILITY: HIGH (clear root causes, well-defined remediation)
+
+ESTIMATED TIME TO RESOLUTION: 6-10 hours (implementation + testing)
+
+GOVERNANCE IMPACT: CRITICAL FIX - restores audit trail and approval workflow
+
+BUSINESS VALUE: HIGH - enables draft governance, unblocks Staff role
+
+================================================================================
+END OF RISK SUMMARY
+================================================================================
