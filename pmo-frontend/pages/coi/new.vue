@@ -1,6 +1,6 @@
 <script setup lang="ts">
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const router = useRouter()
@@ -9,6 +9,9 @@ const toast = useToast()
 
 const loading = ref(false)
 const submitting = ref(false)
+
+// Phase AO: Staff users for assignment dropdown
+const staffUsers = ref<{ id: string; first_name: string; last_name: string }[]>([])
 
 // Form data
 const form = ref({
@@ -30,6 +33,8 @@ const form = ref({
   floor_area: null as number | null,
   number_of_floors: null as number | null,
   beneficiaries: '',
+  // Phase AW: Multi-select assignment
+  assigned_user_ids: [] as string[],
 })
 
 // Dropdown options
@@ -55,6 +60,7 @@ const contractors = ref<{ id: string; name: string }[]>([])
 const rules = {
   required: (v: string) => !!v || 'This field is required',
   positiveNumber: (v: number | null) => v === null || v >= 0 || 'Must be a positive number',
+  projectCode: (v: string) => !v || /^CP-\d{4}-\d{3}$/.test(v) || 'Format: CP-YYYY-NNN (e.g., CP-2026-001)',
 }
 
 // Fetch lookup data
@@ -99,6 +105,8 @@ async function handleSubmit() {
       floor_area: form.value.floor_area || undefined,
       number_of_floors: form.value.number_of_floors || undefined,
       beneficiaries: form.value.beneficiaries || undefined,
+      // Phase AW: Multi-select assignment
+      assigned_user_ids: form.value.assigned_user_ids.length > 0 ? form.value.assigned_user_ids : undefined,
     }
 
     console.log('[COI Create] Submitting:', payload)
@@ -119,7 +127,23 @@ function goBack() {
   router.push('/coi')
 }
 
-onMounted(fetchLookups)
+// Phase AV: Fetch eligible staff once on mount (global, no campus filter)
+async function fetchEligibleStaff() {
+  try {
+    const res = await api.get<{ id: string; first_name: string; last_name: string }[]>(
+      '/api/users/eligible-for-assignment'
+    )
+    staffUsers.value = Array.isArray(res) ? res : []
+  } catch (err) {
+    console.error('[COI Create] Failed to fetch eligible staff:', err)
+    staffUsers.value = []
+  }
+}
+
+onMounted(() => {
+  fetchLookups()
+  fetchEligibleStaff()
+})
 </script>
 
 <template>
@@ -156,8 +180,11 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-text-field
                     v-model="form.project_code"
-                    label="Project Code"
-                    :rules="[rules.required]"
+                    label="Project Code *"
+                    placeholder="CP-2026-001"
+                    hint="Format: CP-YYYY-NNN"
+                    persistent-hint
+                    :rules="[rules.required, rules.projectCode]"
                     required
                     variant="outlined"
                     density="comfortable"
@@ -166,7 +193,7 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.campus"
-                    label="Campus"
+                    label="Campus *"
                     :items="campusOptions"
                     :rules="[rules.required]"
                     required
@@ -177,7 +204,8 @@ onMounted(fetchLookups)
                 <v-col cols="12">
                   <v-text-field
                     v-model="form.title"
-                    label="Project Title"
+                    label="Project Title *"
+                    placeholder="New Building Construction"
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -188,6 +216,7 @@ onMounted(fetchLookups)
                   <v-textarea
                     v-model="form.description"
                     label="Description"
+                    placeholder="Describe the project scope and objectives..."
                     rows="3"
                     variant="outlined"
                     density="comfortable"
@@ -196,7 +225,7 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.status"
-                    label="Status"
+                    label="Status *"
                     :items="statusOptions"
                     :rules="[rules.required]"
                     required
@@ -208,6 +237,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.beneficiaries"
                     label="Beneficiaries"
+                    placeholder="e.g., Students, Faculty, Community"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -225,7 +255,7 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.funding_source_id"
-                    label="Funding Source"
+                    label="Funding Source *"
                     :items="fundingSources"
                     item-title="name"
                     item-value="id"
@@ -251,6 +281,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.contract_number"
                     label="Contract Number"
+                    placeholder="e.g., CON-2026-001"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -260,6 +291,7 @@ onMounted(fetchLookups)
                     v-model.number="form.contract_amount"
                     label="Contract Amount (PHP)"
                     type="number"
+                    placeholder="1000000.00"
                     :rules="[rules.positiveNumber]"
                     prefix="₱"
                     variant="outlined"
@@ -281,6 +313,8 @@ onMounted(fetchLookups)
                     v-model="form.start_date"
                     label="Start Date"
                     type="date"
+                    hint="Expected project start"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -290,6 +324,8 @@ onMounted(fetchLookups)
                     v-model="form.target_completion_date"
                     label="Target Completion Date"
                     type="date"
+                    hint="Estimated completion date"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -317,6 +353,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.project_engineer"
                     label="Project Engineer"
+                    placeholder="Engr. Juan Dela Cruz"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -325,6 +362,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.project_manager"
                     label="Project Manager"
+                    placeholder="Engr. Maria Santos"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -344,6 +382,7 @@ onMounted(fetchLookups)
               <v-text-field
                 v-model="form.building_type"
                 label="Building Type"
+                placeholder="e.g., Academic, Administrative"
                 variant="outlined"
                 density="comfortable"
                 class="mb-3"
@@ -352,6 +391,7 @@ onMounted(fetchLookups)
                 v-model.number="form.floor_area"
                 label="Floor Area (sqm)"
                 type="number"
+                placeholder="500"
                 :rules="[rules.positiveNumber]"
                 variant="outlined"
                 density="comfortable"
@@ -361,7 +401,31 @@ onMounted(fetchLookups)
                 v-model.number="form.number_of_floors"
                 label="Number of Floors"
                 type="number"
+                placeholder="3"
                 :rules="[rules.positiveNumber]"
+                variant="outlined"
+                density="comfortable"
+              />
+            </v-card-text>
+          </v-card>
+
+          <!-- Phase AW: Multi-select Assignment Card -->
+          <v-card class="mb-4">
+            <v-card-title>Assigned Staff</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <v-autocomplete
+                v-model="form.assigned_user_ids"
+                label="Assign To"
+                :items="staffUsers"
+                :item-title="(item: any) => `${item.last_name}, ${item.first_name}`"
+                item-value="id"
+                multiple
+                chips
+                closable-chips
+                clearable
+                hint="Search and assign one or more staff members"
+                persistent-hint
                 variant="outlined"
                 density="comfortable"
               />

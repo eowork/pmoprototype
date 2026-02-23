@@ -22,6 +22,7 @@ import { DepartmentsModule } from './departments/departments.module';
 import { RepairTypesModule } from './repair-types/repair-types.module';
 import { ConstructionSubcategoriesModule } from './construction-subcategories/construction-subcategories.module';
 import { SettingsModule } from './settings/settings.module';
+import { CommonModule } from './common/common.module';
 import { JwtAuthGuard } from './auth/guards';
 
 @Module({
@@ -39,6 +40,8 @@ import { JwtAuthGuard } from './auth/guards';
     ]),
     // Database connection
     DatabaseModule,
+    // Common services (shared across modules)
+    CommonModule,
     // Authentication
     AuthModule,
     // Health check endpoint

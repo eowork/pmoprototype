@@ -1,0 +1,445 @@
+================================================================================
+RISK SUMMARY: BACKEND SCHEMA MISALIGNMENT REMEDIATION
+================================================================================
+Generated: 2026-02-15
+Governance: ACE v2.4 Phase 1 Research → Phase 2 Planning
+Research Reference: docs/research.md Section 1.28
+Plan Reference: docs/plan.md
+================================================================================
+
+EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+THREE CRITICAL SERVICES BROKEN: All project creation endpoints return 500 due
+to SQL query referencing non-existent column u.is_superadmin in users table.
+
+ROOT CAUSE: Phase 8B1 implementation added isAdminFromDatabase() method with
+incorrect schema assumption. Column exists in user_roles table, NOT users table.
+
+BLAST RADIUS: 100% of project creation operations (Construction, Repair, Operations)
+
+REMEDIATION COMPLEXITY: LOW (single method fix × 3 services)
+
+DEPLOYMENT RISK: LOW (no schema changes, no migration required)
+
+================================================================================
+
+RISK MATRIX
+--------------------------------------------------------------------------------
+
+| Risk Category                  | Likelihood | Impact   | Current State       |
+|--------------------------------|-----------|----------|---------------------|
+| Schema Drift (is_superadmin)   | CONFIRMED | CRITICAL | 500 on all POST     |
+| Service Logic Misalignment     | CONFIRMED | CRITICAL | Broken in 3 services|
+| Draft Workflow Failure         | CONFIRMED | HIGH     | Cannot create drafts|
+| Unauthorized Publish           | BLOCKED   | CRITICAL | Cannot test (broken)|
+| Permission Confusion (UX)      | MEDIUM    | MEDIUM   | Overlapping UI tabs |
+| Cross-Module Visibility        | LOW       | MEDIUM   | Draft scope OK      |
+| Regression During Fix          | LOW       | MEDIUM   | Isolated change     |
+| Production Data Loss           | NONE      | N/A      | No schema changes   |
+
+================================================================================
+
+CRITICAL RISKS (P0 - BLOCKING)
+--------------------------------------------------------------------------------
+
+RISK-001: PROJECT CREATION ENDPOINTS RETURNING 500
+--------------------------------------------------
+Severity: CRITICAL
+Status: CONFIRMED
+Impact: 100% of project creation operations broken
+
+Affected Endpoints:
+- POST /api/construction-projects → 500 Internal Server Error
+- POST /api/repair-projects → 500 Internal Server Error
+- POST /api/university-operations → 500 Internal Server Error
+
+Error Message:
+```
+ERROR: column u.is_superadmin does not exist
+LINE 2:     SELECT u.is_superadmin,
+                     ^
+```
+
+Affected Files:
+1. pmo-backend/src/construction-projects/construction-projects.service.ts:50-70
+2. pmo-backend/src/repair-projects/repair-projects.service.ts:50-70
+3. pmo-backend/src/university-operations/university-operations.service.ts:50-70
+
+Trigger Condition:
+- Any user (Staff, Admin, SuperAdmin) attempts to create project record
+- Service.create() calls isAdminFromDatabase(userId)
+- Broken SQL query executes
+
+Business Impact:
+- Users cannot create new projects
+- Draft workflow completely broken
+- Pending review workflow blocked (no drafts to review)
+- Staff productivity blocked
+- Admin cannot create published records
+
+Remediation: Phase A (MUST)
+Complexity: LOW (single method fix × 3)
+ETA: Immediate implementation possible
+Verification: POST endpoints return 201, no 500 errors
+
+--------------------------------------------------------------------------------
+
+RISK-002: DRAFT GOVERNANCE WORKFLOW FAILURE
+-------------------------------------------
+Severity: HIGH
+Status: CONFIRMED (Blocked by RISK-001)
+Impact: Core feature non-functional
+
+Expected Workflow:
+1. Staff creates record → Auto-saved as DRAFT
+2. Staff submits → Changes to PENDING_REVIEW
+3. Admin approves → Changes to PUBLISHED
+4. Admin rejects → Changes to REJECTED
+
+Current State:
+- Step 1 FAILS with 500 error (cannot determine user role)
+- Steps 2-4 cannot be tested (no drafts exist)
+
+Business Impact:
+- Staff cannot create draft submissions
+- Admin cannot review pending submissions
+- Publication control cannot be enforced
+- Role-based workflow non-functional
+
+Remediation: Phase A (MUST) + Phase B (MUST) + Phase C (MUST)
+Dependencies: Fix RISK-001 first
+Verification: Full state machine test (DRAFT→PENDING→PUBLISHED/REJECTED)
+
+--------------------------------------------------------------------------------
+
+RISK-003: UNAUTHORIZED PUBLICATION (POTENTIAL)
+-----------------------------------------------
+Severity: CRITICAL
+Status: BLOCKED (Cannot test until RISK-001 resolved)
+Impact: Authorization bypass, data integrity
+
+Threat Model:
+- Staff user manually changes publication_status to PUBLISHED via API
+- Bypasses draft review workflow
+- Published records become visible in analytics without approval
+
+Current Enforcement:
+- CREATE: Enforced (isAdminFromDatabase determines initial status)
+- UPDATE: UNKNOWN (no validation in update() method)
+
+Attack Vector:
+```
+PATCH /api/construction-projects/123
+{
+  "publication_status": "PUBLISHED"  // Staff user escalates own draft
+}
+```
+
+Business Impact:
+- Unapproved data appears in reports
+- Admin oversight bypassed
+- Audit trail incomplete
+
+Remediation: Phase C (MUST)
+Action: Add publication_status validation to update() methods
+Verification: Staff PATCH with status change returns 403 Forbidden
+
+================================================================================
+
+HIGH RISKS (P1 - ARCHITECTURAL)
+--------------------------------------------------------------------------------
+
+RISK-004: DRAFT AS MODULE CONCEPT (ARCHITECTURAL FLAW)
+-------------------------------------------------------
+Severity: MEDIUM
+Status: CONFIRMED
+Impact: User confusion, incorrect mental model
+
+Problem:
+- "My Drafts" implemented as standalone sidebar navigation item
+- Appears at same level as COI, Repairs, University Operations modules
+- Implies Draft is a separate data domain (incorrect)
+
+Correct Model:
+- Modules = Data domains (Construction, Repair, Operations)
+- States = Record lifecycle (DRAFT, PENDING_REVIEW, PUBLISHED, REJECTED)
+- Draft is a filter within each module, not a separate module
+
+User Impact:
+- Confusion about where to create new projects
+- Unclear relationship between Drafts and Modules
+- Navigation hierarchy misleading
+
+Technical Impact:
+- Current /drafts page mixes records from all modules
+- Violates module-scoped data model
+- Complicates permission logic
+
+Remediation: Phase B (MUST)
+Action: Remove "My Drafts" from main sidebar navigation
+Future: Add "My Drafts" filter within each module page (DEFERRED)
+
+--------------------------------------------------------------------------------
+
+RISK-005: PERMISSION VS MODULE ASSIGNMENT CONFUSION
+----------------------------------------------------
+Severity: MEDIUM
+Status: CONFIRMED
+Impact: Admin user experience, configuration errors
+
+Problem:
+- User Edit form has two tabs: "Permissions" and "Module Assignments"
+- Both appear to be about "modules"
+- Purpose unclear without reading code
+
+Reality:
+- Permissions Tab: What modules user can ACCESS (page visibility)
+- Module Assignments Tab: What modules Admin can MANAGE (review scope)
+
+User Impact:
+- Admin confused about difference
+- May set wrong configuration
+- Training difficulty increased
+
+Remediation: Phase D (MUST)
+Action: Rename "Module Assignments" → "Admin Scope"
+Action: Add help text to both tabs explaining purpose
+Verification: User testing confirms clarity improvement
+
+================================================================================
+
+MEDIUM RISKS (P2 - NON-CRITICAL)
+--------------------------------------------------------------------------------
+
+RISK-006: REGRESSION DURING REMEDIATION
+----------------------------------------
+Severity: MEDIUM
+Status: POTENTIAL
+Impact: Breaking existing functionality during fix
+
+Risk Factors:
+- Changing core service logic (isAdminFromDatabase)
+- Affects 3 services simultaneously
+- No automated test coverage for create() methods
+
+Mitigation Strategy:
+- Phase F: Full regression test matrix before deployment
+- Test all CRUD operations for all roles (Staff, Admin, SuperAdmin)
+- Verify existing GET/PATCH/DELETE endpoints still work
+- Test authentication and role guards
+
+Test Scope:
+- 3 modules × 5 operations × 3 roles = 45 test cases
+- Plus edge cases (deleted users, invalid DTOs, etc.)
+
+Remediation: Phase F (MUST)
+Action: Execute comprehensive manual test matrix
+Verification: Zero regressions in existing functionality
+
+--------------------------------------------------------------------------------
+
+RISK-007: INCOMPLETE PENDING REVIEW FEATURE
+--------------------------------------------
+Severity: LOW
+Status: CONFIRMED
+Impact: Feature incomplete, not system-breaking
+
+Current State:
+- /admin/pending-reviews route exists
+- usePendingReviews composable fetches pending records
+- Badge shows pending count in sidebar
+
+Missing Functionality:
+- No filtering by module assignment (Admin sees ALL pending reviews)
+- No approve/reject action buttons
+- No rank-based authority check
+
+Business Impact:
+- Admin sees pending reviews outside their assigned modules
+- Admin cannot act on pending reviews (must use module pages)
+- Badge count accurate but feature incomplete
+
+Remediation: Phase E (SHOULD)
+Priority: P2 (enhances UX but not blocking)
+Dependencies: Requires Phase A, C completion first
+
+================================================================================
+
+LOW RISKS (P3 - INFORMATIONAL)
+--------------------------------------------------------------------------------
+
+RISK-008: CROSS-MODULE DRAFT VISIBILITY
+----------------------------------------
+Severity: LOW
+Status: ACCEPTABLE
+Impact: None (properly scoped)
+
+Analysis:
+- Draft records properly scoped by module (coi, repairs, operations)
+- user_permission_overrides controls module access
+- No evidence of cross-module leakage
+
+Verification:
+- Staff with COI access cannot see Repair drafts
+- Module assignment correctly filters pending reviews
+- API endpoints respect module boundaries
+
+Conclusion: NO ACTION REQUIRED
+
+--------------------------------------------------------------------------------
+
+RISK-009: SCHEMA DRIFT DETECTION GAPS
+--------------------------------------
+Severity: LOW
+Status: INFORMATIONAL
+Impact: Process improvement opportunity
+
+Observation:
+- isAdminFromDatabase() bug persisted through implementation
+- No automated schema validation between migrations and service queries
+- Relied on runtime error to detect mismatch
+
+Recommendations (DEFERRED):
+- Add TypeScript types for database schema
+- Use query builder with type safety (e.g., Kysely, Prisma)
+- Add pre-commit hooks to validate SQL queries
+- Document schema in TypeScript interfaces
+
+Remediation: DEFERRED (post-deployment improvement)
+
+================================================================================
+
+REMEDIATION PRIORITY SEQUENCE
+--------------------------------------------------------------------------------
+
+PHASE A: REPAIR MODULE CORRECTION [MUST - P0]
+- Fix isAdminFromDatabase() SQL query in 3 services
+- Mitigates: RISK-001, RISK-002
+- Complexity: LOW
+- ETA: Immediate
+- Blocking: Yes (all subsequent phases depend on this)
+
+PHASE B: DRAFT HARD RESET [MUST - P1]
+- Remove "My Drafts" from main sidebar navigation
+- Mitigates: RISK-004
+- Complexity: LOW
+- ETA: 15 minutes
+- Blocking: No (UX improvement)
+
+PHASE C: PUBLISH CONTROL ENFORCEMENT [MUST - P1]
+- Add publication_status validation to update() methods
+- Mitigates: RISK-003
+- Complexity: MEDIUM
+- ETA: 1 hour
+- Blocking: Yes (security requirement)
+
+PHASE D: USER MANAGEMENT TAB RESTRUCTURE [MUST - P2]
+- Rename tabs, add help text
+- Mitigates: RISK-005
+- Complexity: LOW
+- ETA: 30 minutes
+- Blocking: No (UX improvement)
+
+PHASE E: PENDING REVIEW ACTIVATION [SHOULD - P2]
+- Add filtering and action buttons
+- Mitigates: RISK-007
+- Complexity: MEDIUM
+- ETA: 2 hours
+- Blocking: No (feature completion)
+
+PHASE F: FULL REGRESSION TEST MATRIX [MUST - P0]
+- Execute 45+ test cases
+- Mitigates: RISK-006
+- Complexity: HIGH
+- ETA: 3 hours
+- Blocking: Yes (quality gate)
+
+================================================================================
+
+DEPLOYMENT CONSIDERATIONS
+--------------------------------------------------------------------------------
+
+PRE-DEPLOYMENT CHECKLIST:
+- [x] Phase A implementation complete (isAdminFromDatabase fixed)
+- [ ] Phase B implementation complete (My Drafts removed)
+- [ ] Phase C implementation complete (publish control validated)
+- [ ] Phase D implementation complete (tabs renamed)
+- [ ] Phase F test matrix 100% pass rate
+- [ ] Backend logs clean (no errors)
+- [ ] No 500 errors on any endpoint
+
+DEPLOYMENT RISK: LOW
+- No database migrations required
+- No schema changes
+- Service layer logic updates only
+- Frontend layout changes only
+
+ROLLBACK STRATEGY:
+- Git revert to commit before Phase A implementation
+- No data loss risk (no schema changes)
+- Zero downtime deployment (code-only changes)
+
+POST-DEPLOYMENT MONITORING:
+- Watch for 500 errors in backend logs (should be ZERO)
+- Monitor POST /api/*/projects endpoint success rate (expect 100%)
+- Verify draft creation works for Staff users
+- Verify Admin can approve pending reviews
+
+================================================================================
+
+ACCEPTANCE CRITERIA
+--------------------------------------------------------------------------------
+
+MUST PASS (Blocking Deployment):
+✅ POST /api/construction-projects returns 201 (not 500)
+✅ POST /api/repair-projects returns 201 (not 500)
+✅ POST /api/university-operations returns 201 (not 500)
+✅ Staff creation saves as DRAFT
+✅ Admin creation saves as PUBLISHED
+✅ Staff cannot change status to PUBLISHED (403)
+✅ Admin can change PENDING_REVIEW to PUBLISHED (200)
+✅ Full regression test matrix passes (100%)
+
+SHOULD PASS (High Priority):
+◯ "My Drafts" removed from main sidebar
+◯ User Management tabs clearly labeled
+◯ Help text added to both tabs
+◯ Pending review filtering works by module assignment
+
+MAY DEFER (Post-Deployment):
+◯ Pending review approve/reject actions
+◯ "My Drafts" filter in each module page
+◯ Rank-based auto-publish logic
+◯ Draft submission UI flow
+
+================================================================================
+
+RISK OWNER ASSIGNMENT
+--------------------------------------------------------------------------------
+
+RISK-001 to RISK-003: Backend Systems Engineer (CRITICAL PATH)
+RISK-004 to RISK-005: UX/Frontend Engineer (ARCHITECTURAL)
+RISK-006: QA Engineer (TESTING)
+RISK-007: Product Owner (FEATURE PRIORITIZATION)
+RISK-008 to RISK-009: Technical Architect (INFORMATIONAL)
+
+================================================================================
+
+CONCLUSION
+--------------------------------------------------------------------------------
+
+OVERALL RISK LEVEL: HIGH (due to RISK-001 blocking all project creation)
+
+REMEDIATION COMPLEXITY: LOW (isolated service method fix)
+
+DEPLOYMENT RISK: LOW (no schema changes, rollback trivial)
+
+RECOMMENDED ACTION: Proceed with Phase A implementation immediately
+
+SUCCESS PROBABILITY: HIGH (clear root cause, proven fix pattern exists)
+
+ESTIMATED TIME TO RESOLUTION: 4-6 hours (implementation + testing)
+
+================================================================================
+END OF RISK SUMMARY
+================================================================================

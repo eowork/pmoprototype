@@ -15,4 +15,17 @@ export class QueryUserDto extends PaginationDto {
   @IsOptional()
   @IsString()
   role?: string;
+
+  @IsOptional()
+  @IsString()
+  campus?: string;
+}
+
+export class QueryEligibleUsersDto {
+  @IsString()
+  module: string;
+
+  @IsOptional()
+  @IsString()
+  campus?: string;
 }

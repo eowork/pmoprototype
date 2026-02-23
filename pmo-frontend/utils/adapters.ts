@@ -6,20 +6,54 @@
  * and frontend UI expectations without requiring backend changes.
  */
 
-// Types matching backend DTOs
+// Publication status type for draft governance
+export type PublicationStatus = 'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'REJECTED'
+
+// Approval metadata interface for draft governance workflow
+export interface ApprovalMetadata {
+  createdBy: string | null
+  createdByName: string | null
+  createdAt: string | null
+  submittedBy: string | null
+  submittedByName: string | null
+  submittedAt: string | null
+  reviewedBy: string | null
+  reviewedByName: string | null
+  reviewedAt: string | null
+  reviewNotes: string | null
+}
+
+// Types matching backend DTOs (flat fields from SQL JOIN)
 export interface BackendProject {
   id: string
   title: string
-  campus?: { name: string }
+  campus?: string
   status: string
   contract_amount?: number
   physical_progress?: number
-  fund_source?: { name: string }
-  contractor?: { name: string }
+  funding_source_id?: string
+  funding_source_name?: string
+  contractor_id?: string
+  contractor_name?: string
   start_date?: string
   end_date?: string
+  publication_status?: PublicationStatus
+  created_by?: string
   created_at: string
   updated_at: string
+  // Approval metadata fields
+  submitted_by?: string
+  submitted_by_name?: string
+  submitted_at?: string
+  reviewed_by?: string
+  reviewed_by_name?: string
+  reviewed_at?: string
+  review_notes?: string
+  // Phase AE: Record-level delegation (legacy single)
+  assigned_to?: string
+  assigned_to_name?: string
+  // Phase AW: Multi-select assignment
+  assigned_users?: { id: string; name: string }[]
 }
 
 export interface BackendUser {
@@ -29,6 +63,10 @@ export interface BackendUser {
   last_name: string
   is_superadmin: boolean
   permissions: string[]
+  module_overrides?: Record<string, boolean>
+  module_assignments?: string[]
+  rank_level?: number
+  campus?: string  // Phase Y: Office-scoped visibility
   role?: { name: string }
 }
 
@@ -44,8 +82,16 @@ export interface UIProject {
   contractor: string
   startDate: string
   endDate: string
+  publicationStatus: PublicationStatus
+  createdBy: string
   createdAt: string
   updatedAt: string
+  approvalMetadata: ApprovalMetadata
+  // Phase AE: Record-level delegation (legacy)
+  delegatedTo: string
+  delegatedToName: string
+  // Phase AW: Multi-select assignment
+  assignedUsers: { id: string; name: string }[]
 }
 
 export interface UIUser {
@@ -56,6 +102,10 @@ export interface UIUser {
   fullName: string
   isSuperAdmin: boolean
   permissions: string[]
+  moduleOverrides: Record<string, boolean>
+  moduleAssignments: string[]
+  rankLevel: number
+  campus: string  // Phase Y: Office-scoped visibility
   roleName: string
 }
 
@@ -66,16 +116,35 @@ export function adaptProject(backend: BackendProject): UIProject {
   return {
     id: backend.id,
     projectName: backend.title,
-    campus: backend.campus?.name || '',
+    campus: backend.campus || '',
     status: backend.status,
     totalContractAmount: backend.contract_amount || 0,
     physicalAccomplishment: backend.physical_progress || 0,
-    fundSource: backend.fund_source?.name || '',
-    contractor: backend.contractor?.name || '',
+    fundSource: backend.funding_source_name || '',
+    contractor: backend.contractor_name || '',
     startDate: backend.start_date || '',
     endDate: backend.end_date || '',
+    publicationStatus: backend.publication_status || 'PUBLISHED',
+    createdBy: backend.created_by || '',
     createdAt: backend.created_at,
     updatedAt: backend.updated_at,
+    approvalMetadata: {
+      createdBy: backend.created_by || null,
+      createdByName: backend.created_by_name || null,
+      createdAt: backend.created_at || null,
+      submittedBy: backend.submitted_by || null,
+      submittedByName: backend.submitted_by_name || null,
+      submittedAt: backend.submitted_at || null,
+      reviewedBy: backend.reviewed_by || null,
+      reviewedByName: backend.reviewed_by_name || null,
+      reviewedAt: backend.reviewed_at || null,
+      reviewNotes: backend.review_notes || null,
+    },
+    // Phase AE: Record-level delegation (legacy)
+    delegatedTo: backend.assigned_to || '',
+    delegatedToName: backend.assigned_to_name || '',
+    // Phase AW: Multi-select assignment
+    assignedUsers: backend.assigned_users || [],
   }
 }
 
@@ -98,6 +167,10 @@ export function adaptUser(backend: BackendUser): UIUser {
     fullName: `${backend.first_name} ${backend.last_name}`,
     isSuperAdmin: backend.is_superadmin,
     permissions: backend.permissions || [],
+    moduleOverrides: backend.module_overrides || {},
+    moduleAssignments: backend.module_assignments || [],
+    rankLevel: backend.rank_level ?? 100,
+    campus: backend.campus || '',  // Phase Y: Office-scoped visibility
     roleName: backend.role?.name || '',
   }
 }
@@ -263,8 +336,23 @@ export interface BackendUniversityOperation {
   actual_value?: number
   budget_allocated?: number
   budget_utilized?: number
+  publication_status?: PublicationStatus
+  created_by?: string
   created_at: string
   updated_at: string
+  // Approval metadata fields
+  submitted_by?: string
+  submitted_by_name?: string
+  submitted_at?: string
+  reviewed_by?: string
+  reviewed_by_name?: string
+  reviewed_at?: string
+  review_notes?: string
+  // Phase AE: Record-level delegation (legacy single)
+  assigned_to?: string
+  assigned_to_name?: string
+  // Phase AW: Multi-select assignment
+  assigned_users?: { id: string; name: string }[]
 }
 
 export interface UIUniversityOperation {
@@ -283,8 +371,16 @@ export interface UIUniversityOperation {
   actualValue: number
   budgetAllocated: number
   budgetUtilized: number
+  publicationStatus: PublicationStatus
+  createdBy: string
   createdAt: string
   updatedAt: string
+  approvalMetadata: ApprovalMetadata
+  // Phase AE: Record-level delegation (legacy)
+  delegatedTo: string
+  delegatedToName: string
+  // Phase AW: Multi-select assignment
+  assignedUsers: { id: string; name: string }[]
 }
 
 export function adaptUniversityOperation(backend: BackendUniversityOperation): UIUniversityOperation {
@@ -304,8 +400,27 @@ export function adaptUniversityOperation(backend: BackendUniversityOperation): U
     actualValue: backend.actual_value || 0,
     budgetAllocated: backend.budget_allocated || 0,
     budgetUtilized: backend.budget_utilized || 0,
+    publicationStatus: backend.publication_status || 'PUBLISHED',
+    createdBy: backend.created_by || '',
     createdAt: backend.created_at,
     updatedAt: backend.updated_at,
+    approvalMetadata: {
+      createdBy: backend.created_by || null,
+      createdByName: backend.created_by_name || null,
+      createdAt: backend.created_at || null,
+      submittedBy: backend.submitted_by || null,
+      submittedByName: backend.submitted_by_name || null,
+      submittedAt: backend.submitted_at || null,
+      reviewedBy: backend.reviewed_by || null,
+      reviewedByName: backend.reviewed_by_name || null,
+      reviewedAt: backend.reviewed_at || null,
+      reviewNotes: backend.review_notes || null,
+    },
+    // Phase AE: Record-level delegation (legacy)
+    delegatedTo: backend.assigned_to || '',
+    delegatedToName: backend.assigned_to_name || '',
+    // Phase AW: Multi-select assignment
+    assignedUsers: backend.assigned_users || [],
   }
 }
 
@@ -319,7 +434,7 @@ export function adaptUniversityOperations(backendOps: BackendUniversityOperation
 
 export interface BackendRepairProject {
   id: string
-  repair_code: string
+  project_code: string
   title: string
   description?: string
   location: string
@@ -330,15 +445,30 @@ export interface BackendRepairProject {
   inspection_date?: string
   approval_date?: string
   start_date?: string
-  completion_date?: string
-  estimated_cost?: number
+  end_date?: string
+  budget?: number
   actual_cost?: number
+  created_by?: string
+  // Approval metadata fields
+  submitted_by?: string
+  submitted_by_name?: string
+  submitted_at?: string
+  reviewed_by?: string
+  reviewed_by_name?: string
+  reviewed_at?: string
+  review_notes?: string
   reported_by?: string
-  assigned_to?: string
+  assigned_technician?: string
   physical_progress?: number
   financial_progress?: number
+  publication_status?: PublicationStatus
   created_at: string
   updated_at: string
+  // Phase AE: Record-level delegation (legacy single)
+  assigned_to?: string
+  assigned_to_name?: string
+  // Phase AW: Multi-select assignment
+  assigned_users?: { id: string; name: string }[]
 }
 
 export interface UIRepairProject {
@@ -361,14 +491,22 @@ export interface UIRepairProject {
   assignedTo: string
   physicalProgress: number
   financialProgress: number
+  publicationStatus: PublicationStatus
+  createdBy: string
   createdAt: string
   updatedAt: string
+  approvalMetadata: ApprovalMetadata
+  // Phase AE: Record-level delegation (legacy)
+  delegatedTo: string
+  delegatedToName: string
+  // Phase AW: Multi-select assignment
+  assignedUsers: { id: string; name: string }[]
 }
 
 export function adaptRepairProject(backend: BackendRepairProject): UIRepairProject {
   return {
     id: backend.id,
-    repairCode: backend.repair_code,
+    repairCode: backend.project_code,
     title: backend.title,
     description: backend.description || '',
     location: backend.location,
@@ -379,20 +517,138 @@ export function adaptRepairProject(backend: BackendRepairProject): UIRepairProje
     inspectionDate: backend.inspection_date || '',
     approvalDate: backend.approval_date || '',
     startDate: backend.start_date || '',
-    completionDate: backend.completion_date || '',
-    estimatedCost: backend.estimated_cost || 0,
+    completionDate: backend.end_date || '',
+    estimatedCost: backend.budget || 0,
     actualCost: backend.actual_cost || 0,
     reportedBy: backend.reported_by || '',
-    assignedTo: backend.assigned_to || '',
+    assignedTo: backend.assigned_technician || '',
     physicalProgress: backend.physical_progress || 0,
     financialProgress: backend.financial_progress || 0,
+    publicationStatus: backend.publication_status || 'PUBLISHED',
+    createdBy: backend.created_by || '',
     createdAt: backend.created_at,
     updatedAt: backend.updated_at,
+    approvalMetadata: {
+      createdBy: backend.created_by || null,
+      createdByName: backend.created_by_name || null,
+      createdAt: backend.created_at || null,
+      submittedBy: backend.submitted_by || null,
+      submittedByName: backend.submitted_by_name || null,
+      submittedAt: backend.submitted_at || null,
+      reviewedBy: backend.reviewed_by || null,
+      reviewedByName: backend.reviewed_by_name || null,
+      reviewedAt: backend.reviewed_at || null,
+      reviewNotes: backend.review_notes || null,
+    },
+    // Phase AE: Record-level delegation (legacy)
+    delegatedTo: backend.assigned_to || '',
+    delegatedToName: backend.assigned_to_name || '',
+    // Phase AW: Multi-select assignment
+    assignedUsers: backend.assigned_users || [],
   }
 }
 
 export function adaptRepairProjects(backendRepairs: BackendRepairProject[]): UIRepairProject[] {
   return backendRepairs.map(adaptRepairProject)
+}
+
+// ============================================================
+// REPAIR PROJECT DETAIL (Extended with nested objects for edit forms)
+// ============================================================
+
+export interface BackendRepairProjectDetail extends BackendRepairProject {
+  repair_type_id?: string
+  repair_type_name?: string
+  building_name?: string
+  floor_number?: string
+  room_number?: string
+  specific_location?: string
+  is_emergency?: boolean
+}
+
+export interface UIRepairDetail {
+  id: string
+  project_code: string
+  title: string
+  description: string
+  building_name: string
+  floor_number: string
+  room_number: string
+  specific_location: string
+  repair_type_id: string
+  urgency_level: string
+  is_emergency: boolean
+  campus: string
+  status: string
+  reported_by: string
+  inspection_date: string
+  start_date: string
+  end_date: string
+  budget: number | null
+  actual_cost: number | null
+  assigned_technician: string
+  // Draft governance fields (for detail view)
+  repairCode: string
+  createdBy: string
+  publicationStatus: PublicationStatus
+  approvalMetadata: ApprovalMetadata
+  // Phase AE: Record-level delegation (legacy)
+  delegatedTo: string
+  delegatedToName: string
+  // Phase AW: Multi-select assignment
+  assignedUsers: { id: string; name: string }[]
+  assignedUserIds: string[]
+}
+
+/**
+ * Transform backend repair detail to frontend form shape
+ * Used for edit forms to extract nested object IDs
+ */
+export function adaptRepairDetail(backend: BackendRepairProjectDetail): UIRepairDetail {
+  return {
+    id: backend.id,
+    project_code: backend.project_code || '',
+    title: backend.title || '',
+    description: backend.description || '',
+    building_name: backend.building_name || backend.location || '',
+    floor_number: backend.floor_number || '',
+    room_number: backend.room_number || '',
+    specific_location: backend.specific_location || '',
+    repair_type_id: backend.repair_type_id || '',
+    urgency_level: backend.urgency_level || '',
+    is_emergency: backend.is_emergency || false,
+    campus: backend.campus || '',
+    status: backend.status || '',
+    reported_by: backend.reported_by || '',
+    inspection_date: backend.inspection_date ? backend.inspection_date.split('T')[0] : '',
+    start_date: backend.start_date ? backend.start_date.split('T')[0] : '',
+    end_date: backend.end_date ? backend.end_date.split('T')[0] : '',
+    budget: backend.budget || null,
+    actual_cost: backend.actual_cost || null,
+    assigned_technician: backend.assigned_technician || '',
+    // Draft governance fields
+    repairCode: backend.project_code || '',
+    createdBy: backend.created_by || '',
+    publicationStatus: backend.publication_status || 'PUBLISHED',
+    approvalMetadata: {
+      createdBy: backend.created_by || null,
+      createdByName: backend.created_by_name || null,
+      createdAt: backend.created_at || null,
+      submittedBy: backend.submitted_by || null,
+      submittedByName: backend.submitted_by_name || null,
+      submittedAt: backend.submitted_at || null,
+      reviewedBy: backend.reviewed_by || null,
+      reviewedByName: backend.reviewed_by_name || null,
+      reviewedAt: backend.reviewed_at || null,
+      reviewNotes: backend.review_notes || null,
+    },
+    // Phase AE: Record-level delegation (legacy)
+    delegatedTo: backend.assigned_to || '',
+    delegatedToName: backend.assigned_to_name || '',
+    // Phase AW: Multi-select assignment
+    assignedUsers: (backend as any).assigned_users || [],
+    assignedUserIds: ((backend as any).assigned_users || []).map((u: { id: string }) => u.id),
+  }
 }
 
 // ============================================================
@@ -445,4 +701,193 @@ export function adaptGADParity(backend: BackendGADParity): UIGADParity {
 
 export function adaptGADParityList(backendList: BackendGADParity[]): UIGADParity[] {
   return backendList.map(adaptGADParity)
+}
+
+// ============================================================
+// CONTRACTORS (Reference Data)
+// ============================================================
+
+export interface BackendContractor {
+  id: string
+  name: string
+  contact_person?: string
+  email?: string
+  phone?: string
+  address?: string
+  tin_number?: string
+  registration_number?: string
+  validity_date?: string
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface UIContractor {
+  id: string
+  name: string
+  contactPerson: string
+  email: string
+  phone: string
+  address: string
+  tinNumber: string
+  registrationNumber: string
+  validityDate: string
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export function adaptContractor(backend: BackendContractor): UIContractor {
+  return {
+    id: backend.id,
+    name: backend.name,
+    contactPerson: backend.contact_person || '',
+    email: backend.email || '',
+    phone: backend.phone || '',
+    address: backend.address || '',
+    tinNumber: backend.tin_number || '',
+    registrationNumber: backend.registration_number || '',
+    validityDate: backend.validity_date ? backend.validity_date.split('T')[0] : '',
+    status: backend.status,
+    createdAt: backend.created_at,
+    updatedAt: backend.updated_at,
+  }
+}
+
+export function adaptContractors(backendList: BackendContractor[]): UIContractor[] {
+  return backendList.map(adaptContractor)
+}
+
+export function reverseAdaptContractor(ui: Partial<UIContractor>): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+
+  if (ui.name !== undefined) result.name = ui.name
+  if (ui.contactPerson !== undefined) result.contact_person = ui.contactPerson || undefined
+  if (ui.email !== undefined) result.email = ui.email || undefined
+  if (ui.phone !== undefined) result.phone = ui.phone || undefined
+  if (ui.address !== undefined) result.address = ui.address || undefined
+  if (ui.tinNumber !== undefined) result.tin_number = ui.tinNumber || undefined
+  if (ui.registrationNumber !== undefined) result.registration_number = ui.registrationNumber || undefined
+  if (ui.validityDate !== undefined) result.validity_date = ui.validityDate || undefined
+  if (ui.status !== undefined) result.status = ui.status
+
+  return result
+}
+
+// ============================================================
+// FUNDING SOURCES (Reference Data)
+// ============================================================
+
+export interface BackendFundingSource {
+  id: string
+  name: string
+  description?: string
+  source_type?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface UIFundingSource {
+  id: string
+  name: string
+  description: string
+  sourceType: string
+  createdAt: string
+  updatedAt: string
+}
+
+export function adaptFundingSource(backend: BackendFundingSource): UIFundingSource {
+  return {
+    id: backend.id,
+    name: backend.name,
+    description: backend.description || '',
+    sourceType: backend.source_type || '',
+    createdAt: backend.created_at,
+    updatedAt: backend.updated_at,
+  }
+}
+
+export function adaptFundingSources(backendList: BackendFundingSource[]): UIFundingSource[] {
+  return backendList.map(adaptFundingSource)
+}
+
+export function reverseAdaptFundingSource(ui: Partial<UIFundingSource>): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+
+  if (ui.name !== undefined) result.name = ui.name
+  if (ui.description !== undefined) result.description = ui.description || undefined
+  if (ui.sourceType !== undefined) result.source_type = ui.sourceType || undefined
+
+  return result
+}
+
+// ============================================================
+// USERS (User Management)
+// ============================================================
+
+export interface BackendUserRole {
+  id: string
+  name: string
+  is_superadmin: boolean
+}
+
+export interface BackendUserList {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  phone?: string
+  avatar_url?: string
+  is_active: boolean
+  last_login_at?: string
+  rank_level?: number
+  campus?: string
+  created_at: string
+  updated_at: string
+  roles: BackendUserRole[]
+}
+
+export interface UIUserList {
+  id: string
+  email: string
+  firstName: string
+  lastName: string
+  fullName: string
+  phone: string
+  avatarUrl: string
+  isActive: boolean
+  lastLoginAt: string
+  rankLevel: number
+  campus: string
+  createdAt: string
+  updatedAt: string
+  roles: string[]
+  isSuperAdmin: boolean
+}
+
+export function adaptUserList(backend: BackendUserList): UIUserList {
+  const roleNames = backend.roles?.map(r => r.name) || []
+  const isSuperAdmin = backend.roles?.some(r => r.is_superadmin) || false
+
+  return {
+    id: backend.id,
+    email: backend.email,
+    firstName: backend.first_name,
+    lastName: backend.last_name,
+    fullName: `${backend.first_name} ${backend.last_name}`,
+    phone: backend.phone || '',
+    avatarUrl: backend.avatar_url || '',
+    isActive: backend.is_active,
+    lastLoginAt: backend.last_login_at || '',
+    rankLevel: backend.rank_level || 100,
+    campus: backend.campus || '',
+    createdAt: backend.created_at,
+    updatedAt: backend.updated_at,
+    roles: roleNames,
+    isSuperAdmin,
+  }
+}
+
+export function adaptUsersList(backendList: BackendUserList[]): UIUserList[] {
+  return backendList.map(adaptUserList)
 }

@@ -3,6 +3,7 @@ export interface JwtPayload {
   email: string;
   roles: string[];
   is_superadmin: boolean;
+  campus?: string;  // Phase Y: Office-scoped visibility
   iat?: number;
   exp?: number;
 }

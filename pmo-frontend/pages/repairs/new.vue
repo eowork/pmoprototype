@@ -1,6 +1,6 @@
 <script setup lang="ts">
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const router = useRouter()
@@ -9,6 +9,9 @@ const toast = useToast()
 
 const loading = ref(false)
 const submitting = ref(false)
+
+// Phase AO: Staff users for assignment dropdown
+const staffUsers = ref<{ id: string; first_name: string; last_name: string }[]>([])
 
 // Form data
 const form = ref({
@@ -27,6 +30,8 @@ const form = ref({
   reported_by: '',
   budget: null as number | null,
   assigned_technician: '',
+  // Phase AW: Multi-select assignment
+  assigned_user_ids: [] as string[],
 })
 
 // Dropdown options
@@ -96,6 +101,8 @@ async function handleSubmit() {
       reported_by: form.value.reported_by || undefined,
       budget: form.value.budget || undefined,
       assigned_technician: form.value.assigned_technician || undefined,
+      // Phase AW: Multi-select assignment
+      assigned_user_ids: form.value.assigned_user_ids.length > 0 ? form.value.assigned_user_ids : undefined,
     }
 
     console.log('[Repairs Create] Submitting:', payload)
@@ -116,7 +123,23 @@ function goBack() {
   router.push('/repairs')
 }
 
-onMounted(fetchLookups)
+// Phase AV: Fetch eligible staff once on mount (global, no campus filter)
+async function fetchEligibleStaff() {
+  try {
+    const res = await api.get<{ id: string; first_name: string; last_name: string }[]>(
+      '/api/users/eligible-for-assignment'
+    )
+    staffUsers.value = Array.isArray(res) ? res : []
+  } catch (err) {
+    console.error('[Repairs Create] Failed to fetch eligible staff:', err)
+    staffUsers.value = []
+  }
+}
+
+onMounted(() => {
+  fetchLookups()
+  fetchEligibleStaff()
+})
 </script>
 
 <template>
@@ -153,7 +176,10 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-text-field
                     v-model="form.project_code"
-                    label="Repair Code"
+                    label="Repair Code *"
+                    placeholder="RP-2026-001"
+                    hint="Unique repair identifier"
+                    persistent-hint
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -163,12 +189,13 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.repair_type_id"
-                    label="Repair Type"
+                    label="Repair Type *"
                     :items="repairTypes"
                     item-title="name"
                     item-value="id"
                     :rules="[rules.required]"
                     required
+                    placeholder="Select repair type"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -176,7 +203,8 @@ onMounted(fetchLookups)
                 <v-col cols="12">
                   <v-text-field
                     v-model="form.title"
-                    label="Title"
+                    label="Title *"
+                    placeholder="e.g., Ceiling Repair in Room 101"
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -187,6 +215,7 @@ onMounted(fetchLookups)
                   <v-textarea
                     v-model="form.description"
                     label="Description"
+                    placeholder="Describe the repair issue and scope of work..."
                     rows="3"
                     variant="outlined"
                     density="comfortable"
@@ -205,7 +234,7 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.campus"
-                    label="Campus"
+                    label="Campus *"
                     :items="campusOptions"
                     :rules="[rules.required]"
                     required
@@ -216,7 +245,8 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-text-field
                     v-model="form.building_name"
-                    label="Building Name"
+                    label="Building Name *"
+                    placeholder="e.g., Admin Building"
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -227,6 +257,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.floor_number"
                     label="Floor Number"
+                    placeholder="e.g., 2nd Floor"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -235,6 +266,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.room_number"
                     label="Room Number"
+                    placeholder="e.g., 101"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -243,6 +275,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.specific_location"
                     label="Specific Location"
+                    placeholder="e.g., Near window"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -260,7 +293,7 @@ onMounted(fetchLookups)
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.status"
-                    label="Status"
+                    label="Status *"
                     :items="statusOptions"
                     :rules="[rules.required]"
                     required
@@ -272,6 +305,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.reported_by"
                     label="Reported By"
+                    placeholder="Name of person who reported"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -280,6 +314,7 @@ onMounted(fetchLookups)
                   <v-text-field
                     v-model="form.assigned_technician"
                     label="Assigned Technician"
+                    placeholder="Name of assigned personnel"
                     variant="outlined"
                     density="comfortable"
                   />
@@ -289,6 +324,7 @@ onMounted(fetchLookups)
                     v-model.number="form.budget"
                     label="Estimated Budget (PHP)"
                     type="number"
+                    placeholder="50000"
                     :rules="[rules.positiveNumber]"
                     prefix="₱"
                     variant="outlined"
@@ -309,7 +345,7 @@ onMounted(fetchLookups)
             <v-card-text>
               <v-select
                 v-model="form.urgency_level"
-                label="Urgency Level"
+                label="Urgency Level *"
                 :items="urgencyOptions"
                 :rules="[rules.required]"
                 required
@@ -321,7 +357,30 @@ onMounted(fetchLookups)
                 v-model="form.is_emergency"
                 label="This is an emergency"
                 color="error"
-                hide-details
+                hint="Check if immediate attention required"
+              />
+            </v-card-text>
+          </v-card>
+
+          <!-- Phase AW: Multi-select Assignment Card -->
+          <v-card class="mb-4">
+            <v-card-title>Assigned Staff</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <v-autocomplete
+                v-model="form.assigned_user_ids"
+                label="Assign To"
+                :items="staffUsers"
+                :item-title="(item: any) => `${item.last_name}, ${item.first_name}`"
+                item-value="id"
+                multiple
+                chips
+                closable-chips
+                clearable
+                hint="Search and assign one or more staff members"
+                persistent-hint
+                variant="outlined"
+                density="comfortable"
               />
             </v-card-text>
           </v-card>

@@ -18,14 +18,17 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
-  async validateUser(email: string, password: string): Promise<any> {
+  async validateUser(identifier: string, password: string): Promise<any> {
+    // Support login by email or username (case-insensitive)
+    // Uses proper username column (indexed) for O(log n) performance
     const result = await this.db.query(
-      `SELECT u.id, u.email, u.password_hash, u.is_active, u.google_id,
+      `SELECT u.id, u.email, u.username, u.password_hash, u.is_active, u.google_id,
               u.failed_login_attempts, u.account_locked_until,
-              u.first_name, u.last_name
+              u.first_name, u.last_name, u.rank_level, u.campus
        FROM users u
-       WHERE u.email = $1 AND u.deleted_at IS NULL`,
-      [email],
+       WHERE (LOWER(u.email) = LOWER($1) OR LOWER(u.username) = LOWER($1))
+         AND u.deleted_at IS NULL`,
+      [identifier],
     );
 
     if (result.rows.length === 0) {
@@ -79,7 +82,7 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.validateUser(dto.email, dto.password);
+    const user = await this.validateUser(dto.identifier, dto.password);
 
     if (!user) {
       throw new UnauthorizedException('INVALID_CREDENTIALS');
@@ -97,14 +100,45 @@ export class AuthService {
     const roles = rolesResult.rows.map((r) => r.name);
     const is_superadmin = rolesResult.rows.some((r) => r.is_superadmin);
 
+    // Get permissions for the user (via role_permissions)
+    const permsResult = await this.db.query(
+      `SELECT DISTINCT p.name
+       FROM role_permissions rp
+       JOIN permissions p ON rp.permission_id = p.id
+       JOIN user_roles ur ON rp.role_id = ur.role_id
+       WHERE ur.user_id = $1`,
+      [user.id],
+    );
+    const permissions = permsResult.rows.map((p) => p.name);
+
+    // Get module permission overrides for sidebar filtering
+    const overridesResult = await this.db.query(
+      `SELECT module_key, can_access
+       FROM user_permission_overrides
+       WHERE user_id = $1`,
+      [user.id],
+    );
+    const module_overrides = overridesResult.rows.reduce((acc, row) => {
+      acc[row.module_key] = row.can_access;
+      return acc;
+    }, {} as Record<string, boolean>);
+
+    // Get module assignments for approval visibility
+    const moduleAssignmentsResult = await this.db.query(
+      `SELECT module FROM user_module_assignments WHERE user_id = $1`,
+      [user.id],
+    );
+    const module_assignments = moduleAssignmentsResult.rows.map((row) => row.module);
+
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
       roles,
       is_superadmin,
+      campus: user.campus || undefined,  // Phase Y: Office-scoped visibility
     };
 
-    this.logger.log(`LOGIN_SUCCESS: user_id=${user.id}`);
+    this.logger.log(`LOGIN_SUCCESS: user_id=${user.id}, superadmin=${is_superadmin}`);
 
     return {
       access_token: this.jwtService.sign(payload),
@@ -114,13 +148,20 @@ export class AuthService {
         first_name: user.first_name,
         last_name: user.last_name,
         roles,
+        is_superadmin,
+        permissions,
+        module_overrides,
+        module_assignments,
+        rank_level: user.rank_level,
+        campus: user.campus,  // Phase Y: Office-scoped visibility
+        role: roles.length > 0 ? { name: roles[0] } : undefined,
       },
     };
   }
 
   async getProfile(userId: string) {
     const result = await this.db.query(
-      `SELECT u.id, u.email, u.first_name, u.last_name, u.avatar_url
+      `SELECT u.id, u.email, u.username, u.first_name, u.last_name, u.avatar_url, u.rank_level, u.campus
        FROM users u
        WHERE u.id = $1 AND u.deleted_at IS NULL`,
       [userId],
@@ -151,11 +192,34 @@ export class AuthService {
       [userId],
     );
 
+    // Get module permission overrides for sidebar filtering
+    const overridesResult = await this.db.query(
+      `SELECT module_key, can_access
+       FROM user_permission_overrides
+       WHERE user_id = $1`,
+      [userId],
+    );
+    const module_overrides = overridesResult.rows.reduce((acc, row) => {
+      acc[row.module_key] = row.can_access;
+      return acc;
+    }, {} as Record<string, boolean>);
+
+    // Get module assignments for approval visibility
+    const moduleAssignmentsResult = await this.db.query(
+      `SELECT module FROM user_module_assignments WHERE user_id = $1`,
+      [userId],
+    );
+    const module_assignments = moduleAssignmentsResult.rows.map((row) => row.module);
+
     return {
       ...user,
       roles: rolesResult.rows.map((r) => ({ id: r.id, name: r.name })),
       is_superadmin: rolesResult.rows.some((r) => r.is_superadmin),
       permissions: permsResult.rows.map((p) => p.name),
+      module_overrides,
+      module_assignments,
+      rank_level: user.rank_level,
+      campus: user.campus,  // Phase Y: Office-scoped visibility
     };
   }
 

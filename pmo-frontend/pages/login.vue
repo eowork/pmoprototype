@@ -8,7 +8,7 @@ const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 
-const email = ref('')
+const identifier = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const errorMessage = ref('')
@@ -16,19 +16,19 @@ const errorMessage = ref('')
 async function handleLogin() {
   errorMessage.value = ''
 
-  if (!email.value || !password.value) {
-    errorMessage.value = 'Please enter email and password'
+  if (!identifier.value || !password.value) {
+    errorMessage.value = 'Please enter email/username and password'
     return
   }
 
   try {
-    await authStore.login(email.value, password.value)
+    await authStore.login(identifier.value, password.value)
     const redirect = route.query.redirect as string
     router.push(redirect || '/dashboard')
   } catch (error: unknown) {
     const err = error as { message?: string; statusCode?: number }
     if (err.statusCode === 401) {
-      errorMessage.value = 'Invalid email or password'
+      errorMessage.value = 'Invalid credentials'
     } else if (err.statusCode === 503) {
       errorMessage.value = 'Backend server not running. Please start the backend first.'
     } else {
@@ -102,15 +102,15 @@ async function handleLogin() {
         <!-- Login Form -->
         <v-form @submit.prevent="handleLogin" class="login-form">
           <div class="input-group">
-            <label class="input-label">Email Address</label>
+            <label class="input-label">Email or Username</label>
             <v-text-field
-              v-model="email"
-              type="email"
-              placeholder="you@carsu.edu.ph"
+              v-model="identifier"
+              type="text"
+              placeholder="you@carsu.edu.ph or john.doe"
               variant="outlined"
               density="comfortable"
               hide-details="auto"
-              autocomplete="email"
+              autocomplete="username"
               required
               bg-color="white"
             />

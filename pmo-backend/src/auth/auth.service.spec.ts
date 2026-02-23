@@ -100,7 +100,7 @@ describe('AuthService', () => {
       mockDbService.query.mockResolvedValueOnce({ rows: [] });
 
       await expect(
-        service.login({ email: 'invalid@test.com', password: 'wrong' }),
+        service.login({ identifier: 'invalid@test.com', password: 'wrong' }),
       ).rejects.toThrow(UnauthorizedException);
     });
   });

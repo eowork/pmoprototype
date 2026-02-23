@@ -3,20 +3,85 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { DatabaseService } from '../database/database.service';
 import { createPaginatedResponse, PaginatedResponse } from '../common/dto';
-import { CreateUserDto, UpdateUserDto, QueryUserDto, AssignRoleDto } from './dto';
+import { CreateUserDto, UpdateUserDto, QueryUserDto, AssignRoleDto, SetPermissionOverrideDto, PermissionOverride, BulkPermissionUpdateDto, BulkPermissionResult } from './dto';
+import { JwtPayload } from '../common/interfaces';
+
+// Rank hierarchy constants (lower = higher authority)
+export const RANK_LEVELS = {
+  SUPER_ADMIN: 10,
+  SENIOR_ADMIN: 20,
+  MODULE_ADMIN: 30,
+  SENIOR_STAFF: 50,
+  JUNIOR_STAFF: 70,
+  VIEWER: 100,
+} as const;
 
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
   private readonly SALT_ROUNDS = 12;
-  private readonly ALLOWED_SORTS = ['created_at', 'email', 'first_name', 'last_name', 'is_active'];
+  private readonly ALLOWED_SORTS = ['created_at', 'email', 'first_name', 'last_name', 'is_active', 'rank_level'];
 
   constructor(private readonly db: DatabaseService) {}
+
+  /**
+   * Get actor's rank level and superadmin status
+   */
+  private async getActorRank(actorId: string): Promise<{ rank_level: number; is_superadmin: boolean }> {
+    const result = await this.db.query(
+      `SELECT u.rank_level, COALESCE(
+         (SELECT TRUE FROM user_roles ur WHERE ur.user_id = u.id AND ur.is_superadmin = TRUE LIMIT 1),
+         FALSE
+       ) as is_superadmin
+       FROM users u
+       WHERE u.id = $1 AND u.deleted_at IS NULL`,
+      [actorId],
+    );
+    if (result.rows.length === 0) {
+      return { rank_level: RANK_LEVELS.VIEWER, is_superadmin: false };
+    }
+    return {
+      rank_level: result.rows[0].rank_level || RANK_LEVELS.VIEWER,
+      is_superadmin: result.rows[0].is_superadmin,
+    };
+  }
+
+  /**
+   * Check if actor can modify target user based on rank hierarchy
+   * SuperAdmin can modify anyone, others can only modify users with lower authority (higher rank_level)
+   */
+  private async canModifyUser(actorId: string, targetId: string): Promise<boolean> {
+    // Use the PostgreSQL function we created in migration
+    const result = await this.db.query(
+      `SELECT can_modify_user($1, $2) as can_modify`,
+      [actorId, targetId],
+    );
+    return result.rows[0]?.can_modify === true;
+  }
+
+  /**
+   * Validate that actor can assign the given rank level
+   * Actor can only assign ranks lower than their own (higher rank_level number)
+   */
+  private async validateRankAssignment(actorId: string, targetRank: number): Promise<void> {
+    const actor = await this.getActorRank(actorId);
+
+    // SuperAdmin can assign any rank
+    if (actor.is_superadmin) return;
+
+    // Non-SuperAdmin can only assign ranks lower than their own
+    if (targetRank <= actor.rank_level) {
+      throw new ForbiddenException(
+        `Cannot assign rank ${targetRank}. You can only assign ranks lower than your own (>${actor.rank_level}).`,
+      );
+    }
+  }
 
   async findAll(query: QueryUserDto): Promise<PaginatedResponse<any>> {
     const { page = 1, limit = 20, sort = 'created_at', order = 'desc' } = query;
@@ -45,6 +110,11 @@ export class UsersService {
       params.push(query.role);
     }
 
+    if (query.campus) {
+      conditions.push(`u.campus = $${paramIndex++}`);
+      params.push(query.campus);
+    }
+
     const whereClause = conditions.join(' AND ');
 
     const countResult = await this.db.query(
@@ -55,7 +125,7 @@ export class UsersService {
 
     const dataResult = await this.db.query(
       `SELECT u.id, u.email, u.first_name, u.last_name, u.phone, u.avatar_url,
-              u.is_active, u.last_login_at, u.created_at, u.updated_at,
+              u.is_active, u.last_login_at, u.rank_level, u.campus, u.created_at, u.updated_at,
               COALESCE(
                 (SELECT json_agg(json_build_object('id', r.id, 'name', r.name, 'is_superadmin', ur.is_superadmin))
                  FROM user_roles ur JOIN roles r ON ur.role_id = r.id
@@ -72,11 +142,49 @@ export class UsersService {
     return createPaginatedResponse(dataResult.rows, total, page, limit);
   }
 
+  /**
+   * Map record campus value (MAIN/CABADBARAN/BOTH) to user campus value (Butuan Campus/Cabadbaran).
+   * Phase AM: Resolves taxonomy mismatch between record and user campus fields.
+   * Returns null when no campus filter should be applied (BOTH, null, or unmapped value).
+   */
+  private normalizeRecordCampusToUserCampus(recordCampus?: string): string | null {
+    if (!recordCampus || recordCampus === 'BOTH') return null;
+    if (recordCampus === 'MAIN') return 'Butuan Campus';
+    if (recordCampus === 'CABADBARAN') return 'Cabadbaran';
+    return null;
+  }
+
+  /**
+   * Find users eligible for record assignment.
+   * Phase AL: Replaces INNER JOIN on user_module_assignments with role-based filter.
+   * Phase AV: REMOVED campus filtering — global searchable assignment across all campuses.
+   *           Assignment does NOT grant module access; visibility enforced by backend rules.
+   * Eligible = active, non-deleted users with role Staff, Admin, or SuperAdmin.
+   */
+  async findEligibleForAssignment(): Promise<any[]> {
+    const result = await this.db.query(
+      `SELECT u.id, u.first_name, u.last_name, u.campus
+       FROM users u
+       WHERE u.deleted_at IS NULL
+         AND u.is_active = true
+         AND EXISTS (
+           SELECT 1 FROM user_roles ur
+           JOIN roles r ON ur.role_id = r.id
+           WHERE ur.user_id = u.id
+             AND r.name IN ('Staff', 'Admin', 'SuperAdmin')
+         )
+       ORDER BY u.last_name, u.first_name`,
+      [],
+    );
+
+    return result.rows;
+  }
+
   async findOne(id: string): Promise<any> {
     const result = await this.db.query(
       `SELECT u.id, u.email, u.first_name, u.last_name, u.phone, u.avatar_url,
               u.is_active, u.last_login_at, u.failed_login_attempts,
-              u.account_locked_until, u.metadata, u.created_at, u.updated_at
+              u.account_locked_until, u.rank_level, u.campus, u.metadata, u.created_at, u.updated_at
        FROM users u
        WHERE u.id = $1 AND u.deleted_at IS NULL`,
       [id],
@@ -116,35 +224,52 @@ export class UsersService {
 
   async create(dto: CreateUserDto, adminId: string): Promise<any> {
     // Check for duplicate email
-    const existing = await this.db.query(
+    const existingEmail = await this.db.query(
       `SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL`,
       [dto.email],
     );
 
-    if (existing.rows.length > 0) {
+    if (existingEmail.rows.length > 0) {
       throw new ConflictException(`User with email ${dto.email} already exists`);
     }
+
+    // Check for duplicate username
+    const existingUsername = await this.db.query(
+      `SELECT id FROM users WHERE LOWER(username) = LOWER($1) AND deleted_at IS NULL`,
+      [dto.username],
+    );
+
+    if (existingUsername.rows.length > 0) {
+      throw new ConflictException(`User with username ${dto.username} already exists`);
+    }
+
+    // Rank-Based Permission: Validate rank assignment
+    const targetRank = dto.rank_level !== undefined ? dto.rank_level : RANK_LEVELS.VIEWER;
+    await this.validateRankAssignment(adminId, targetRank);
 
     // Hash password
     const passwordHash = await bcrypt.hash(dto.password, this.SALT_ROUNDS);
 
     const result = await this.db.query(
-      `INSERT INTO users (email, password_hash, first_name, last_name, phone, avatar_url, is_active, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, email, first_name, last_name, phone, avatar_url, is_active, created_at`,
+      `INSERT INTO users (email, username, password_hash, first_name, last_name, phone, avatar_url, is_active, rank_level, campus, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING id, email, username, first_name, last_name, phone, avatar_url, is_active, rank_level, campus, created_at`,
       [
         dto.email,
+        dto.username.toLowerCase(),
         passwordHash,
         dto.first_name,
         dto.last_name,
         dto.phone || null,
         dto.avatar_url || null,
         dto.is_active !== undefined ? dto.is_active : true,
+        targetRank,
+        dto.campus || null,  // Phase Y: Office-scoped visibility
         dto.metadata ? JSON.stringify(dto.metadata) : null,
       ],
     );
 
-    this.logger.log(`USER_CREATED: id=${result.rows[0].id}, email=${dto.email}, by=${adminId}`);
+    this.logger.log(`USER_CREATED: id=${result.rows[0].id}, email=${dto.email}, rank=${targetRank}, by=${adminId}`);
 
     return result.rows[0];
   }
@@ -152,12 +277,21 @@ export class UsersService {
   async update(id: string, dto: UpdateUserDto, adminId: string): Promise<any> {
     // Verify user exists
     const existing = await this.db.query(
-      `SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL`,
+      `SELECT id, rank_level FROM users WHERE id = $1 AND deleted_at IS NULL`,
       [id],
     );
 
     if (existing.rows.length === 0) {
       throw new NotFoundException(`User with ID ${id} not found`);
+    }
+
+    // Rank-Based Permission: Check if actor can modify this user
+    // Skip check if updating own profile (users can always update their own basic info)
+    if (id !== adminId) {
+      const canModify = await this.canModifyUser(adminId, id);
+      if (!canModify) {
+        throw new ForbiddenException('Cannot modify a user with equal or higher authority');
+      }
     }
 
     const updates: string[] = [];
@@ -195,6 +329,19 @@ export class UsersService {
       values.push(passwordHash);
     }
 
+    // Rank update with validation
+    if (dto.rank_level !== undefined) {
+      await this.validateRankAssignment(adminId, dto.rank_level);
+      updates.push(`rank_level = $${paramIndex++}`);
+      values.push(dto.rank_level);
+    }
+
+    // Phase Y: Campus update for office-scoped visibility
+    if ((dto as any).campus !== undefined) {
+      updates.push(`campus = $${paramIndex++}`);
+      values.push((dto as any).campus);
+    }
+
     if (updates.length === 0) {
       return this.findOne(id);
     }
@@ -204,7 +351,7 @@ export class UsersService {
     const result = await this.db.query(
       `UPDATE users SET ${updates.join(', ')}
        WHERE id = $${paramIndex} AND deleted_at IS NULL
-       RETURNING id, email, first_name, last_name, phone, avatar_url, is_active, updated_at`,
+       RETURNING id, email, first_name, last_name, phone, avatar_url, is_active, rank_level, campus, updated_at`,
       [...values, id],
     );
 
@@ -214,6 +361,17 @@ export class UsersService {
   }
 
   async remove(id: string, adminId: string): Promise<void> {
+    // Rank-Based Permission: Check if actor can modify this user
+    const canModify = await this.canModifyUser(adminId, id);
+    if (!canModify) {
+      throw new ForbiddenException('Cannot delete a user with equal or higher authority');
+    }
+
+    // Prevent self-deletion
+    if (id === adminId) {
+      throw new ForbiddenException('Cannot delete your own account');
+    }
+
     const result = await this.db.query(
       `UPDATE users SET deleted_at = NOW(), deleted_by = $1
        WHERE id = $2 AND deleted_at IS NULL`,
@@ -239,6 +397,14 @@ export class UsersService {
       throw new NotFoundException(`User with ID ${userId} not found`);
     }
 
+    // Rank-Based Permission: Check if actor can modify this user
+    if (userId !== adminId) {
+      const canModify = await this.canModifyUser(adminId, userId);
+      if (!canModify) {
+        throw new ForbiddenException('Cannot modify roles of a user with equal or higher authority');
+      }
+    }
+
     // Verify role exists
     const roleExists = await this.db.query(
       `SELECT id, name FROM roles WHERE id = $1 AND deleted_at IS NULL`,
@@ -246,6 +412,22 @@ export class UsersService {
     );
     if (roleExists.rows.length === 0) {
       throw new NotFoundException(`Role with ID ${dto.role_id} not found`);
+    }
+
+    // SuperAdmin governance: Prevent self-assignment
+    if (dto.is_superadmin === true && userId === adminId) {
+      throw new BadRequestException('Cannot assign SuperAdmin status to yourself');
+    }
+
+    // SuperAdmin governance: Only existing SuperAdmin can assign SuperAdmin
+    if (dto.is_superadmin === true) {
+      const adminIsSuperAdmin = await this.db.query(
+        `SELECT 1 FROM user_roles WHERE user_id = $1 AND is_superadmin = TRUE`,
+        [adminId],
+      );
+      if (adminIsSuperAdmin.rows.length === 0) {
+        throw new BadRequestException('Only a SuperAdmin can assign SuperAdmin status');
+      }
     }
 
     // Check if already assigned
@@ -262,20 +444,48 @@ export class UsersService {
           [dto.is_superadmin, userId, dto.role_id],
         );
       }
-      this.logger.log(`USER_ROLE_UPDATED: user=${userId}, role=${dto.role_id}, by=${adminId}`);
+      this.logger.log(`USER_ROLE_UPDATED: user=${userId}, role=${dto.role_id}, superadmin=${dto.is_superadmin}, by=${adminId}`);
     } else {
       await this.db.query(
         `INSERT INTO user_roles (user_id, role_id, is_superadmin, assigned_by, created_by)
          VALUES ($1, $2, $3, $4, $4)`,
         [userId, dto.role_id, dto.is_superadmin || false, adminId],
       );
-      this.logger.log(`USER_ROLE_ASSIGNED: user=${userId}, role=${dto.role_id}, by=${adminId}`);
+      this.logger.log(`USER_ROLE_ASSIGNED: user=${userId}, role=${dto.role_id}, superadmin=${dto.is_superadmin}, by=${adminId}`);
     }
 
     return this.findOne(userId);
   }
 
   async removeRole(userId: string, roleId: string, adminId: string): Promise<any> {
+    // Rank-Based Permission: Check if actor can modify this user
+    if (userId !== adminId) {
+      const canModify = await this.canModifyUser(adminId, userId);
+      if (!canModify) {
+        throw new ForbiddenException('Cannot modify roles of a user with equal or higher authority');
+      }
+    }
+
+    // Check if this is a SuperAdmin role being removed
+    const targetRole = await this.db.query(
+      `SELECT is_superadmin FROM user_roles WHERE user_id = $1 AND role_id = $2`,
+      [userId, roleId],
+    );
+
+    if (targetRole.rows.length === 0) {
+      throw new NotFoundException(`Role assignment not found`);
+    }
+
+    // SuperAdmin governance: Prevent removal of last SuperAdmin
+    if (targetRole.rows[0].is_superadmin) {
+      const superAdminCount = await this.db.query(
+        `SELECT COUNT(*) FROM user_roles WHERE is_superadmin = TRUE`,
+      );
+      if (parseInt(superAdminCount.rows[0].count, 10) <= 1) {
+        throw new BadRequestException('Cannot remove the last SuperAdmin. Assign another SuperAdmin first.');
+      }
+    }
+
     const result = await this.db.query(
       `DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2`,
       [userId, roleId],
@@ -331,5 +541,371 @@ export class UsersService {
     }
 
     this.logger.log(`USER_PASSWORD_RESET: id=${userId}, by=${adminId}`);
+  }
+
+  // --- Permission Overrides ---
+
+  async getPermissionOverrides(userId: string): Promise<PermissionOverride[]> {
+    const result = await this.db.query<PermissionOverride>(
+      `SELECT id, user_id, module_key, can_access, created_at, updated_at
+       FROM user_permission_overrides
+       WHERE user_id = $1
+       ORDER BY module_key ASC`,
+      [userId],
+    );
+    return result.rows;
+  }
+
+  async setPermissionOverride(
+    userId: string,
+    dto: SetPermissionOverrideDto,
+    adminId: string,
+  ): Promise<PermissionOverride> {
+    // Verify user exists
+    const userCheck = await this.db.query(
+      'SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL',
+      [userId],
+    );
+    if (userCheck.rowCount === 0) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+
+    // Rank-Based Permission: Check if actor can modify this user
+    if (userId !== adminId) {
+      const canModify = await this.canModifyUser(adminId, userId);
+      if (!canModify) {
+        throw new ForbiddenException('Cannot modify permissions of a user with equal or higher authority');
+      }
+    }
+
+    // Upsert permission override
+    const result = await this.db.query<PermissionOverride>(
+      `INSERT INTO user_permission_overrides (user_id, module_key, can_access, created_by, updated_by)
+       VALUES ($1, $2, $3, $4, $4)
+       ON CONFLICT (user_id, module_key)
+       DO UPDATE SET can_access = $3, updated_by = $4, updated_at = NOW()
+       RETURNING *`,
+      [userId, dto.module_key, dto.can_access, adminId],
+    );
+
+    this.logger.log(`PERMISSION_OVERRIDE_SET: user=${userId}, module=${dto.module_key}, access=${dto.can_access}, by=${adminId}`);
+    return result.rows[0];
+  }
+
+  async removePermissionOverride(
+    userId: string,
+    moduleKey: string,
+    adminId: string,
+  ): Promise<void> {
+    // Rank-Based Permission: Check if actor can modify this user
+    if (userId !== adminId) {
+      const canModify = await this.canModifyUser(adminId, userId);
+      if (!canModify) {
+        throw new ForbiddenException('Cannot modify permissions of a user with equal or higher authority');
+      }
+    }
+
+    const result = await this.db.query(
+      'DELETE FROM user_permission_overrides WHERE user_id = $1 AND module_key = $2',
+      [userId, moduleKey],
+    );
+
+    if (result.rowCount === 0) {
+      throw new NotFoundException(`Permission override not found for user ${userId} and module ${moduleKey}`);
+    }
+
+    this.logger.log(`PERMISSION_OVERRIDE_REMOVED: user=${userId}, module=${moduleKey}, by=${adminId}`);
+  }
+
+  /**
+   * Bulk update permission overrides in a single transaction
+   * This prevents ThrottlerException by reducing N requests to 1
+   */
+  async bulkUpdatePermissions(
+    userId: string,
+    dto: BulkPermissionUpdateDto,
+    adminId: string,
+  ): Promise<BulkPermissionResult> {
+    // Verify user exists
+    const userCheck = await this.db.query(
+      'SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL',
+      [userId],
+    );
+    if (userCheck.rowCount === 0) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+
+    // Rank-Based Permission: Check if actor can modify this user
+    if (userId !== adminId) {
+      const canModify = await this.canModifyUser(adminId, userId);
+      if (!canModify) {
+        throw new ForbiddenException('Cannot modify permissions of a user with equal or higher authority');
+      }
+    }
+
+    // Validate updates array is not empty
+    if (!dto.updates || dto.updates.length === 0) {
+      throw new BadRequestException('Updates array cannot be empty');
+    }
+
+    // SAFETY CHECK 1: Prevent self-access revocation for 'users' module
+    // Admin should not be able to lock themselves out of User Management
+    const isRevokingOwnUsersAccess = userId === adminId &&
+      dto.updates.some(u => u.module_key === 'users' && u.can_access === false);
+    if (isRevokingOwnUsersAccess) {
+      throw new ForbiddenException('Cannot revoke your own access to User Management');
+    }
+
+    // SAFETY CHECK 2: Prevent removing last admin from Users module
+    const isRevokingUsersAccess = dto.updates.some(u => u.module_key === 'users' && u.can_access === false);
+    if (isRevokingUsersAccess) {
+      // Count how many users currently have access to Users module (via role or override)
+      const adminsWithAccessResult = await this.db.query(
+        `SELECT COUNT(DISTINCT u.id) as count
+         FROM users u
+         JOIN user_roles ur ON u.id = ur.user_id
+         JOIN roles r ON ur.role_id = r.id
+         WHERE u.deleted_at IS NULL
+           AND u.is_active = TRUE
+           AND u.id != $1
+           AND (r.name = 'Admin' OR ur.is_superadmin = TRUE)`,
+        [userId],
+      );
+      const remainingAdmins = parseInt(adminsWithAccessResult.rows[0].count, 10);
+      if (remainingAdmins === 0) {
+        throw new ForbiddenException('Cannot remove the last administrator from User Management');
+      }
+    }
+
+    let updatedCount = 0;
+    let deletedCount = 0;
+
+    // Use transaction for atomicity
+    const client = await this.db.getClient();
+    try {
+      await client.query('BEGIN');
+
+      for (const update of dto.updates) {
+        if (update.can_access === null) {
+          // Delete override (reset to role default)
+          const deleteResult = await client.query(
+            'DELETE FROM user_permission_overrides WHERE user_id = $1 AND module_key = $2',
+            [userId, update.module_key],
+          );
+          if (deleteResult.rowCount && deleteResult.rowCount > 0) {
+            deletedCount++;
+          }
+        } else {
+          // Upsert override (grant or revoke)
+          await client.query(
+            `INSERT INTO user_permission_overrides (user_id, module_key, can_access, created_by, updated_by)
+             VALUES ($1, $2, $3, $4, $4)
+             ON CONFLICT (user_id, module_key)
+             DO UPDATE SET can_access = $3, updated_by = $4, updated_at = NOW()`,
+            [userId, update.module_key, update.can_access, adminId],
+          );
+          updatedCount++;
+        }
+      }
+
+      await client.query('COMMIT');
+
+      this.logger.log(
+        `BULK_PERMISSION_UPDATE: user=${userId}, updated=${updatedCount}, deleted=${deletedCount}, by=${adminId}`,
+      );
+
+      return {
+        success: true,
+        updated: updatedCount,
+        deleted: deletedCount,
+      };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      this.logger.error(`BULK_PERMISSION_UPDATE_FAILED: user=${userId}, error=${err.message}`);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  // ============================================================
+  // MODULE ASSIGNMENT MANAGEMENT
+  // ============================================================
+
+  /**
+   * Get user's module assignments
+   */
+  async getModuleAssignments(userId: string): Promise<any[]> {
+    const user = await this.db.query(
+      `SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL`,
+      [userId],
+    );
+    if (user.rows.length === 0) {
+      throw new NotFoundException('User not found');
+    }
+
+    const result = await this.db.query(
+      `SELECT uma.id, uma.user_id, uma.module, uma.assigned_by, uma.assigned_at,
+              u.email as assigned_by_email
+       FROM user_module_assignments uma
+       LEFT JOIN users u ON uma.assigned_by = u.id
+       WHERE uma.user_id = $1
+       ORDER BY uma.module`,
+      [userId],
+    );
+
+    return result.rows;
+  }
+
+  /**
+   * Assign a module to a user
+   */
+  async assignModule(userId: string, module: string, adminId: string): Promise<any> {
+    // Validate user exists
+    const user = await this.db.query(
+      `SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL`,
+      [userId],
+    );
+    if (user.rows.length === 0) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Validate module type
+    const validModules = ['CONSTRUCTION', 'REPAIR', 'OPERATIONS', 'ALL'];
+    if (!validModules.includes(module)) {
+      throw new BadRequestException(`Invalid module type: ${module}`);
+    }
+
+    // Check if assignment already exists
+    const existing = await this.db.query(
+      `SELECT id FROM user_module_assignments WHERE user_id = $1 AND module = $2`,
+      [userId, module],
+    );
+    if (existing.rows.length > 0) {
+      throw new ConflictException(`User already has ${module} module assigned`);
+    }
+
+    // If assigning ALL, remove individual module assignments (they're redundant)
+    if (module === 'ALL') {
+      await this.db.query(
+        `DELETE FROM user_module_assignments WHERE user_id = $1 AND module != 'ALL'`,
+        [userId],
+      );
+    }
+
+    // If assigning individual module and user has ALL, skip (ALL already covers it)
+    if (module !== 'ALL') {
+      const hasAll = await this.db.query(
+        `SELECT id FROM user_module_assignments WHERE user_id = $1 AND module = 'ALL'`,
+        [userId],
+      );
+      if (hasAll.rows.length > 0) {
+        throw new ConflictException('User already has ALL modules assigned');
+      }
+    }
+
+    // Create assignment
+    const result = await this.db.query(
+      `INSERT INTO user_module_assignments (user_id, module, assigned_by)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [userId, module, adminId],
+    );
+
+    this.logger.log(`MODULE_ASSIGN: user=${userId}, module=${module}, by=${adminId}`);
+
+    return result.rows[0];
+  }
+
+  /**
+   * Remove a module assignment from a user
+   */
+  async removeModuleAssignment(userId: string, module: string, adminId: string): Promise<void> {
+    // Validate user exists
+    const user = await this.db.query(
+      `SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL`,
+      [userId],
+    );
+    if (user.rows.length === 0) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Delete assignment
+    const result = await this.db.query(
+      `DELETE FROM user_module_assignments WHERE user_id = $1 AND module = $2`,
+      [userId, module],
+    );
+
+    if (result.rowCount === 0) {
+      throw new NotFoundException(`Module assignment not found: ${module}`);
+    }
+
+    this.logger.log(`MODULE_UNASSIGN: user=${userId}, module=${module}, by=${adminId}`);
+  }
+
+  /**
+   * Bulk update module assignments (replaces all existing assignments)
+   */
+  async bulkUpdateModuleAssignments(
+    userId: string,
+    modules: string[],
+    adminId: string,
+  ): Promise<{ success: boolean; assigned: string[] }> {
+    // Validate user exists
+    const user = await this.db.query(
+      `SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL`,
+      [userId],
+    );
+    if (user.rows.length === 0) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Validate all modules
+    const validModules = ['CONSTRUCTION', 'REPAIR', 'OPERATIONS', 'ALL'];
+    for (const module of modules) {
+      if (!validModules.includes(module)) {
+        throw new BadRequestException(`Invalid module type: ${module}`);
+      }
+    }
+
+    // If ALL is in the list, only keep ALL
+    const finalModules = modules.includes('ALL') ? ['ALL'] : modules;
+
+    const client = await this.db.getClient();
+    try {
+      await client.query('BEGIN');
+
+      // Delete all existing assignments
+      await client.query(
+        `DELETE FROM user_module_assignments WHERE user_id = $1`,
+        [userId],
+      );
+
+      // Insert new assignments
+      for (const module of finalModules) {
+        await client.query(
+          `INSERT INTO user_module_assignments (user_id, module, assigned_by)
+           VALUES ($1, $2, $3)`,
+          [userId, module, adminId],
+        );
+      }
+
+      await client.query('COMMIT');
+
+      this.logger.log(
+        `BULK_MODULE_UPDATE: user=${userId}, modules=[${finalModules.join(',')}], by=${adminId}`,
+      );
+
+      return {
+        success: true,
+        assigned: finalModules,
+      };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      this.logger.error(`BULK_MODULE_UPDATE_FAILED: user=${userId}, error=${err.message}`);
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 }

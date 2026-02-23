@@ -1,6 +1,6 @@
 <script setup lang="ts">
 definePageMeta({
-  middleware: 'auth',
+  middleware: ['auth', 'permission'],
 })
 
 const router = useRouter()
@@ -9,6 +9,9 @@ const toast = useToast()
 
 const loading = ref(false)
 const submitting = ref(false)
+
+// Phase AO: Staff users for assignment dropdown
+const staffUsers = ref<{ id: string; first_name: string; last_name: string }[]>([])
 
 // Form data
 const form = ref({
@@ -21,6 +24,8 @@ const form = ref({
   start_date: '',
   end_date: '',
   budget: null as number | null,
+  // Phase AW: Multi-select assignment
+  assigned_user_ids: [] as string[],
 })
 
 // Dropdown options
@@ -51,6 +56,21 @@ const rules = {
   positiveNumber: (v: number | null) => v === null || v >= 0 || 'Must be a positive number',
 }
 
+// Phase AV: Fetch eligible staff once on mount (global, no campus filter)
+async function fetchEligibleStaff() {
+  try {
+    const res = await api.get<{ id: string; first_name: string; last_name: string }[]>(
+      '/api/users/eligible-for-assignment'
+    )
+    staffUsers.value = Array.isArray(res) ? res : []
+  } catch (err) {
+    console.error('[UniOps Create] Failed to fetch eligible staff:', err)
+    staffUsers.value = []
+  }
+}
+
+onMounted(fetchEligibleStaff)
+
 // Submit form
 async function handleSubmit() {
   submitting.value = true
@@ -66,6 +86,8 @@ async function handleSubmit() {
       start_date: form.value.start_date || undefined,
       end_date: form.value.end_date || undefined,
       budget: form.value.budget || undefined,
+      // Phase AW: Multi-select assignment
+      assigned_user_ids: form.value.assigned_user_ids.length > 0 ? form.value.assigned_user_ids : undefined,
     }
 
     console.log('[UniOps Create] Submitting:', payload)
@@ -81,9 +103,9 @@ async function handleSubmit() {
   }
 }
 
-// Navigation
+// Navigation - Use router.back() for context-aware return
 function goBack() {
-  router.push('/university-operations')
+  router.back()
 }
 </script>
 
@@ -117,6 +139,9 @@ function goBack() {
                   <v-text-field
                     v-model="form.code"
                     label="Operation Code"
+                    placeholder="UO-2026-001"
+                    hint="Unique operation identifier"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -124,7 +149,7 @@ function goBack() {
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.operation_type"
-                    label="Operation Type"
+                    label="Operation Type *"
                     :items="operationTypeOptions"
                     :rules="[rules.required]"
                     required
@@ -135,7 +160,8 @@ function goBack() {
                 <v-col cols="12">
                   <v-text-field
                     v-model="form.title"
-                    label="Title"
+                    label="Title *"
+                    placeholder="e.g., Graduate School Enrollment Drive"
                     :rules="[rules.required]"
                     required
                     variant="outlined"
@@ -146,6 +172,7 @@ function goBack() {
                   <v-textarea
                     v-model="form.description"
                     label="Description"
+                    placeholder="Describe the operation objectives and scope..."
                     rows="3"
                     variant="outlined"
                     density="comfortable"
@@ -154,7 +181,7 @@ function goBack() {
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.campus"
-                    label="Campus"
+                    label="Campus *"
                     :items="campusOptions"
                     :rules="[rules.required]"
                     required
@@ -165,7 +192,7 @@ function goBack() {
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.status"
-                    label="Status"
+                    label="Status *"
                     :items="statusOptions"
                     :rules="[rules.required]"
                     required
@@ -188,6 +215,8 @@ function goBack() {
                     v-model="form.start_date"
                     label="Start Date"
                     type="date"
+                    hint="Operation start date"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -197,6 +226,8 @@ function goBack() {
                     v-model="form.end_date"
                     label="End Date"
                     type="date"
+                    hint="Estimated end date"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -206,6 +237,7 @@ function goBack() {
                     v-model.number="form.budget"
                     label="Budget (PHP)"
                     type="number"
+                    placeholder="500000.00"
                     :rules="[rules.positiveNumber]"
                     prefix="₱"
                     variant="outlined"
@@ -219,6 +251,29 @@ function goBack() {
 
         <!-- Sidebar -->
         <v-col cols="12" md="4">
+          <!-- Phase AW: Multi-select Assignment Card -->
+          <v-card class="mb-4">
+            <v-card-title>Assigned Staff</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <v-autocomplete
+                v-model="form.assigned_user_ids"
+                label="Assign To"
+                :items="staffUsers"
+                :item-title="(item: any) => `${item.last_name}, ${item.first_name}`"
+                item-value="id"
+                multiple
+                chips
+                closable-chips
+                clearable
+                hint="Search and assign one or more staff members"
+                persistent-hint
+                variant="outlined"
+                density="comfortable"
+              />
+            </v-card-text>
+          </v-card>
+
           <!-- Actions -->
           <v-card>
             <v-card-text>

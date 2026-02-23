@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsDateString,
   IsBoolean,
+  IsArray,
 } from 'class-validator';
 import { RepairStatus, UrgencyLevel, Campus } from '../../common/enums';
 
@@ -96,6 +97,10 @@ export class CreateRepairProjectDto {
   budget?: number;
 
   @IsOptional()
+  @IsNumber()
+  actual_cost?: number;
+
+  @IsOptional()
   @IsUUID()
   project_manager_id?: string;
 
@@ -113,4 +118,15 @@ export class CreateRepairProjectDto {
 
   @IsOptional()
   metadata?: Record<string, any>;
+
+  // Phase AN: Inline assignment during creation (DEPRECATED - use assigned_user_ids)
+  @IsOptional()
+  @IsUUID()
+  assigned_to?: string;
+
+  // Phase AT: Multi-select assignment
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  assigned_user_ids?: string[];
 }

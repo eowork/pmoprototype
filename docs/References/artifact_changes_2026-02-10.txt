@@ -1,0 +1,309 @@
+================================================================================
+PMO DASHBOARD - ARTIFACT CHANGES REFERENCE
+================================================================================
+Date: February 10, 2026
+Governance: ACE v2.4 Phase 1 Research + Phase 2 Plan
+Purpose: Document structural changes to living artifacts for team alignment
+
+================================================================================
+SECTION 1: ARTIFACT GOVERNANCE OVERVIEW
+================================================================================
+
+The PMO Dashboard project follows the ACE (Analyze, Contextualize, Execute)
+framework with TWO living documents:
+
+  1. research.md  - Research findings and technical analysis
+  2. plan.md      - Execution contract with actionable steps
+
+All other research files are archived in docs/archive/ with date-based naming.
+
+--------------------------------------------------------------------------------
+CORE PRINCIPLES:
+--------------------------------------------------------------------------------
+
+  1. TWO LIVING DOCUMENTS ONLY
+     - No creating multiple research_*.md files
+     - Consolidate findings into research.md
+     - Archive historical content, don't proliferate
+
+  2. SINGLE SOURCE OF TRUTH
+     - No duplicate information across files
+     - Each fact lives in exactly one place
+     - Cross-reference by section number
+
+  3. COMPACTION OVER PROLIFERATION
+     - Completed work goes into <details> collapsed sections
+     - Active work stays visible
+     - Archive when context window exceeds 200 lines per section
+
+  4. 60-SECOND RULE
+     - Reader must identify next action within 60 seconds
+     - plan.md THE NOW section answers "What do I do next?"
+
+================================================================================
+SECTION 2: RESEARCH.MD STRUCTURE
+================================================================================
+
+The research.md file follows this mandated structure:
+
+--------------------------------------------------------------------------------
+## 1. CURRENT FINDINGS (Active Research)
+--------------------------------------------------------------------------------
+Contains active investigations with status indicators:
+
+  ### 1.1 Artifact Governance & Format Rules (Feb 10, 2026)
+       Status: Living governance reference
+       Content: Core principles, file structures, anti-patterns
+
+  ### 1.2 Sidebar Dropdown UX Gap Analysis (Feb 10, 2026)
+       Status: Implementation gap identified
+       Content: Expected visual hierarchy, current implementation analysis
+
+  ### 1.3 User Management Role & Permission Complexity Analysis (Feb 10, 2026)
+       Status: Architecture research for post-March enhancement
+       Content: Module-scoped roles, permission layers, draft/publish workflow
+
+  ### 1.4 Manual Testing Requirements (Feb 10, 2026)
+       Status: Implementation complete, verification pending
+       Content: Test criteria for completed implementations
+
+--------------------------------------------------------------------------------
+## 2. COMPACTED HISTORY (Read-Only)
+--------------------------------------------------------------------------------
+Contains <details> collapsed sections for resolved research.
+Searchable but not prominently displayed.
+
+Includes: Phase 2O-2R fixes, Phase 2E-2M implementations, historical decisions
+
+--------------------------------------------------------------------------------
+## 3. DEFERRED RESEARCH
+--------------------------------------------------------------------------------
+Topics with explicit conditions to resume:
+
+  | Topic                    | Condition                           |
+  |--------------------------|-------------------------------------|
+  | Permission Management UI | Post-kickoff                        |
+  | Google OAuth             | External dependency                 |
+  | Position/Department      | P2 priority                         |
+  | Test User Seeding        | When testing infrastructure needed  |
+
+--------------------------------------------------------------------------------
+## 4. ARCHIVE MANIFEST
+--------------------------------------------------------------------------------
+Reference table to archived files in docs/archive/:
+
+  | Archive File                                  | Date   | Content            |
+  |-----------------------------------------------|--------|--------------------|
+  | archive/research_2026-02-05_auth_strategy.md  | Feb 5  | Username analysis  |
+  | archive/research_2026-02-09_index_vue_...     | Feb 9  | Routing pattern    |
+  | archive/research_2026-02-10_role_state.md     | Feb 10 | Sidebar/guards     |
+  | (11 total archived files)                     |        |                    |
+
+================================================================================
+SECTION 3: PLAN.MD STRUCTURE
+================================================================================
+
+The plan.md file follows this mandated structure:
+
+--------------------------------------------------------------------------------
+## 1. THE NOW (High-Focus Execution)
+--------------------------------------------------------------------------------
+1-4 immediately executable steps with verification criteria:
+
+  Step 1: Manual test completed implementations
+          Verify: All tests pass per research.md Section 1.4
+
+  Step 2: Verify sidebar dropdown visual hierarchy
+          Verify: Per research.md Section 1.2
+
+  Step 3: Execute index.vue file structure refactor
+          Verify: All 6 modules accessible via nested URLs
+
+  Step 4: Test all 66 routes across 6 modules
+          Verify: No routing regressions
+
+--------------------------------------------------------------------------------
+## 2. THE NEXT (Approved Queue)
+--------------------------------------------------------------------------------
+Approved items awaiting THE NOW completion:
+
+  - University Operations Week 2: Core CRUD
+  - University Operations Week 3: DBM Metrics
+  - University Operations Week 4: Dashboard
+  - Week 5 Buffer: Testing and demo prep
+
+--------------------------------------------------------------------------------
+## 3. THE ICEBOX (Deferred / Stopped)
+--------------------------------------------------------------------------------
+Items with explicit resume conditions:
+
+  [DEFERRED] Permission Management UI
+    Condition: Post-kickoff enhancement
+    Effort: 6-8 hours
+
+  [DEFERRED] Module-Scoped Role Model         <-- NEW
+    Condition: Post-kickoff, requires stable role model
+    Effort: 15-20 hours
+    Reference: research.md Section 1.3
+
+  [DEFERRED] Draft/Publish Workflow           <-- NEW
+    Condition: Post-kickoff, requires module-scoped roles first
+    Effort: 20-30 hours
+    Reference: research.md Section 1.3
+
+  [DEFERRED] Admin Review Queue               <-- NEW
+    Condition: Depends on Draft/Publish Workflow
+    Effort: 8-12 hours
+
+  [STOPPED] Frontend Structure Reorganization
+    Reason: Caused Nuxt routing regression
+    Resolution: Replaced by index.vue sibling pattern
+
+--------------------------------------------------------------------------------
+## 4. COMPACTION HISTORY (Read-Only)
+--------------------------------------------------------------------------------
+<details> collapsed section containing completed phases:
+  - Authentication Core (Jan 2026)
+  - User Management Backend (Jan 2026)
+  - User Management Frontend UI (Feb 9, 2026)
+  - Phases 2E through 2R (Feb 10, 2026)
+
+--------------------------------------------------------------------------------
+## 5. KEY DATES
+--------------------------------------------------------------------------------
+  | Milestone                    | Date           |
+  |------------------------------|----------------|
+  | Week 1 Complete              | Feb 15, 2026   |
+  | University Operations Done   | Mar 8, 2026    |
+  | Sprint Deadline              | Mar 12, 2026   |
+  | Kickoff Target               | May 2026       |
+
+--------------------------------------------------------------------------------
+## 6. ARTIFACT STRUCTURE
+--------------------------------------------------------------------------------
+File tree showing document organization:
+
+  docs/
+  +-- plan.md           <-- Execution contract
+  +-- research.md       <-- Active research
+  +-- References/       <-- This directory
+  |   +-- artifact_changes_2026-02-10.txt
+  +-- archive/          <-- Historical files (read-only)
+      +-- research_2026-02-*.md (11 files)
+
+================================================================================
+SECTION 4: CHANGES MADE THIS SESSION (Feb 10, 2026)
+================================================================================
+
+RESEARCH.MD ADDITIONS:
+----------------------
+1. Section 1.1 - Artifact Governance & Format Rules
+   - Core principles for document management
+   - Mandated structure for both research.md and plan.md
+   - Anti-patterns to avoid
+
+2. Section 1.2 - Sidebar Dropdown UX Gap Analysis
+   - Expected visual hierarchy (ASCII diagram)
+   - Current implementation reference (default.vue:162-184)
+   - Verification criteria
+
+3. Section 1.3 - User Management Role & Permission Complexity Analysis
+   - Current model vs proposed module-scoped roles
+   - Database schema consideration (user_module_roles table)
+   - Permission layer separation table
+   - Draft/Publish workflow states and transitions
+   - Implementation phases for post-March
+
+4. Renumbered Section 1.4 (formerly 1.1) - Manual Testing Requirements
+
+PLAN.MD ADDITIONS:
+------------------
+1. THE NOW - Added Step 2: Verify sidebar dropdown visual hierarchy
+
+2. THE ICEBOX - Added three new deferred items:
+   - Module-Scoped Role Model (15-20 hours)
+   - Draft/Publish Workflow (20-30 hours)
+   - Admin Review Queue (8-12 hours)
+
+PHASE 3 IMPLEMENTATION (Session 2):
+------------------------------------
+1. Verified index.vue sibling pattern refactor is COMPLETE (commit 3730216)
+   - All 6 modules have correct folder structure
+   - Backend builds successfully
+
+2. Updated plan.md:
+   - Marked Step 3 as complete with checkmark
+   - Added index.vue refactor to Compaction History
+   - Corrected route count from 66 to 32 actual routes
+
+3. Updated research.md:
+   - Moved index.vue Routing Refactor to Compacted History section
+   - Updated Next Action to reflect completion
+
+PHASE 1 RESEARCH RESET (Session 3 - Feb 11, 2026):
+---------------------------------------------------
+Based on manual testing observations, returned to Phase 1 Research with
+comprehensive governance updates:
+
+1. Updated research.md with STRICT governance rules:
+   - Section 1.2: Sidebar Dropdown UX - NO indentation rule (flush alignment)
+   - Section 1.3: Sidebar Label Readability - NO truncation rule
+   - Section 1.4: User Management UI Governance Model (COMPREHENSIVE)
+     * Manual admin control requirements
+     * Page-level permission management UI
+     * Function-level (CRUD) permission controls
+     * Draft vs Publish workflow enforcement
+     * Database schema additions documented
+   - Section 1.5: Routing Context Return confirmation
+   - Renumbered Section 1.6: Manual Testing Requirements
+
+2. Updated plan.md with scope-controlled plan:
+   - THE NOW reorganized with MUST/SHOULD/DEFERRED classification
+   - MUST items (4-7 hours): Sidebar normalization, label wrapping, routing verification
+   - SHOULD items (8-12 hours): User Management Permission UI Phase 1
+   - DEFERRED items (60-85 hours): Permission UI Phase 2, Draft/Publish workflow
+
+3. Created scope_control_summary_2026-02-11.txt:
+   - Clear prioritization matrix
+   - Effort estimates per item
+   - Risk assessment (Low/Medium/High)
+   - Implementation order recommendation
+   - Acceptance gate criteria for March 12 deadline
+
+================================================================================
+SECTION 5: ANTI-PATTERNS TO AVOID
+================================================================================
+
+DO NOT:
+  x Create multiple research_*.md files for different topics
+  x Append new phases without compacting completed ones
+  x Mix execution tasks with historical logs in plan.md
+  x Use version numbers in living document filenames (e.g., plan_v2.md)
+  x Duplicate information that exists in research.md into plan.md
+
+DO:
+  + Consolidate findings into single research.md
+  + Archive historical content with date-based naming
+  + Keep plan.md THE NOW section to 1-4 items maximum
+  + Use section references instead of copying content
+  + Compact completed work into <details> sections
+
+================================================================================
+SECTION 6: QUICK REFERENCE
+================================================================================
+
+"What do I do next?"
+  --> Read plan.md Section 1: THE NOW
+
+"Where is the research on [topic]?"
+  --> Search research.md Section 1 (current) or Section 2 (compacted history)
+
+"Where did [historical decision] come from?"
+  --> Check docs/archive/ manifest in research.md Section 4
+
+"How should I structure new findings?"
+  --> Follow research.md Section 1.1 governance rules
+
+================================================================================
+END OF ARTIFACT CHANGES REFERENCE
+================================================================================
