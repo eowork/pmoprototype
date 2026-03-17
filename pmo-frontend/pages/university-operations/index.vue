@@ -1,516 +1,899 @@
 <script setup lang="ts">
-import { adaptUniversityOperations, type UIUniversityOperation, type BackendUniversityOperation, type PublicationStatus } from '~/utils/adapters'
+/**
+ * Phase DA-B + DE-C: University Operations Landing Page with Analytics Dashboard
+ *
+ * This is the main entry point for University Operations.
+ * It displays two category cards:
+ * - Physical Accomplishments (BAR No. 1)
+ * - Financial Accomplishments (BAR No. 2) - DEFERRED
+ *
+ * Phase DE-C: Analytics Dashboard with ApexCharts visualizations
+ * - Pillar accomplishment summary (radial bar)
+ * - Quarterly trend (line chart)
+ * - Yearly comparison (bar chart)
+ */
+
+import VueApexCharts from 'vue3-apexcharts'
 
 definePageMeta({
   middleware: ['auth', 'permission'],
 })
 
 const router = useRouter()
+const route = useRoute()
 const api = useApi()
 const toast = useToast()
-const authStore = useAuthStore()
-const { canAdd, canEdit, canDelete, isAdmin, isStaff } = usePermissions()
+const { canAdd, isAdmin, isSuperAdmin } = usePermissions()
 
-const operations = ref<UIUniversityOperation[]>([])
-const search = ref('')
-const loading = ref(true)
-const deleting = ref(false)
-const deleteDialog = ref(false)
-const operationToDelete = ref<UIUniversityOperation | null>(null)
+// Phase DW-B: Centralized fiscal year store
+import { useFiscalYearStore } from '~/stores/fiscalYear'
+import { storeToRefs } from 'pinia'
 
-// Reject dialog state
-const rejectDialog = ref(false)
-const rejectNotes = ref('')
-const operationToReject = ref<UIUniversityOperation | null>(null)
-const rejecting = ref(false)
+const fiscalYearStore = useFiscalYearStore()
+const { selectedFiscalYear, fiscalYearOptions } = storeToRefs(fiscalYearStore)
 
-// Action state
-const actionLoading = ref<string | null>(null)
+// Phase DW-B: Fiscal year creation permission
+const canCreateFiscalYear = computed(() => {
+  return isSuperAdmin.value || (isAdmin.value && canAdd('operations'))
+})
 
-// Table headers - publication status visible to all users
-const headers = computed(() => {
+// Fixed Pillar Definitions (BAR1 Standard)
+const PILLARS = [
+  { id: 'HIGHER_EDUCATION', name: 'Higher Education', fullName: 'Higher Education Program', icon: 'mdi-school', color: '#1976D2' },
+  { id: 'ADVANCED_EDUCATION', name: 'Advanced Ed', fullName: 'Advanced Education Program', icon: 'mdi-book-education', color: '#7B1FA2' },
+  { id: 'RESEARCH', name: 'Research', fullName: 'Research Program', icon: 'mdi-flask', color: '#00897B' },
+  { id: 'TECHNICAL_ADVISORY', name: 'Extension', fullName: 'Technical Advisory Extension', icon: 'mdi-handshake', color: '#F57C00' },
+] as const
+
+// State
+const analyticsLoading = ref(true)
+
+// Analytics state
+const pillarSummary = ref<any>(null)
+const quarterlyTrend = ref<any>(null)
+const yearlyComparison = ref<any>(null)
+
+// Phase EE-D: Global pillar filter — controls all analytics charts simultaneously
+const selectedGlobalPillar = ref<string>('ALL')
+const globalPillarOptions = computed(() => [
+  { title: 'All Pillars', value: 'ALL' },
+  ...PILLARS.map(p => ({ title: p.name, value: p.id })),
+])
+
+// Phase EE-E: Reporting type selector (Physical / Financial)
+const selectedReportingType = ref<string>('PHYSICAL')
+const reportingTypeOptions = [
+  { title: 'Physical Accomplishments (BAR No. 1)', value: 'PHYSICAL' },
+  { title: 'Financial Accomplishments (BAR No. 2)', value: 'FINANCIAL' },
+]
+
+// Phase DW-B: Fiscal year creation dialog
+const fiscalYearDialog = ref(false)
+const newFiscalYear = ref<number>(new Date().getFullYear() + 1)
+const creatingFiscalYear = ref(false)
+
+// Phase DW-B: Open fiscal year creation dialog
+function openFiscalYearDialog() {
+  newFiscalYear.value = new Date().getFullYear() + 1
+  fiscalYearDialog.value = true
+}
+
+// Phase DW-B: Create new fiscal year
+async function createFiscalYear() {
+  if (!newFiscalYear.value || newFiscalYear.value < 2020 || newFiscalYear.value > 2099) {
+    toast.error('Please enter a valid fiscal year (2020-2099)')
+    return
+  }
+
+  try {
+    creatingFiscalYear.value = true
+    await fiscalYearStore.createFiscalYear(newFiscalYear.value)
+    toast.success(`Fiscal year ${newFiscalYear.value} created successfully`)
+    fiscalYearDialog.value = false
+    newFiscalYear.value = new Date().getFullYear() + 1
+  } catch (error: any) {
+    if (error.statusCode === 409) {
+      toast.error(`Fiscal year ${newFiscalYear.value} already exists`)
+    } else {
+      toast.error(error.message || 'Failed to create fiscal year')
+    }
+  } finally {
+    creatingFiscalYear.value = false
+  }
+
+  // Phase DW-B: Removed local fetchFiscalYears - now handled by store
+}
+
+// Phase DE-C: Fetch analytics data
+async function fetchAnalytics() {
+  analyticsLoading.value = true
+  try {
+    const [summaryRes, trendRes, comparisonRes] = await Promise.all([
+      api.get<any>(`/api/university-operations/analytics/pillar-summary?fiscal_year=${selectedFiscalYear.value}`),
+      api.get<any>(`/api/university-operations/analytics/quarterly-trend?fiscal_year=${selectedFiscalYear.value}${selectedGlobalPillar.value !== 'ALL' ? '&pillar_type=' + selectedGlobalPillar.value : ''}`),
+      api.get<any>(`/api/university-operations/analytics/yearly-comparison?years=${fiscalYearOptions.value.slice(0, 3).join(',')}`),
+    ])
+    pillarSummary.value = summaryRes
+    quarterlyTrend.value = trendRes
+    yearlyComparison.value = comparisonRes
+  } catch (err: any) {
+    console.error('[UniOps Analytics] Failed to fetch:', err)
+    toast.warning('Analytics data unavailable')
+    pillarSummary.value = null
+    quarterlyTrend.value = null
+    yearlyComparison.value = null
+  } finally {
+    analyticsLoading.value = false
+  }
+}
+
+// Phase DE-C + DN-E: Chart configurations with interactive click handlers
+const pillarChartOptions = computed(() => ({
+  chart: {
+    type: 'radialBar' as const,
+    height: 280,
+    toolbar: { show: false },
+    // Phase DN-E: Add click event for pillar drill-down navigation
+    events: {
+      dataPointSelection: (_event: any, _chartContext: any, config: any) => {
+        const pillarIndex = config.dataPointIndex
+        if (pillarIndex >= 0 && pillarIndex < PILLARS.length) {
+          navigateToPhysical(PILLARS[pillarIndex].id)
+        }
+      },
+      legendClick: (_chartContext: any, seriesIndex: number) => {
+        if (seriesIndex >= 0 && seriesIndex < PILLARS.length) {
+          navigateToPhysical(PILLARS[seriesIndex].id)
+        }
+      },
+    },
+  },
+  plotOptions: {
+    radialBar: {
+      offsetY: 0,
+      startAngle: -90,
+      endAngle: 270,
+      hollow: {
+        margin: 5,
+        size: '35%',
+        background: 'transparent',
+      },
+      dataLabels: {
+        name: {
+          show: true,
+          fontSize: '14px',
+        },
+        value: {
+          show: true,
+          fontSize: '16px',
+          formatter: (val: number) => `${val.toFixed(0)}%`,
+        },
+      },
+    },
+  },
+  colors: PILLARS.map(p => p.color),
+  labels: PILLARS.map(p => p.name),
+  legend: {
+    show: true,
+    position: 'bottom' as const,
+    horizontalAlign: 'center' as const,
+  },
+  responsive: [{
+    breakpoint: 480,
+    options: {
+      chart: { height: 260 },
+      legend: { show: false },
+    },
+  }],
+}))
+
+// Phase DR-D: Use rate-based accomplishment_rate_pct for radial bar
+const pillarChartSeries = computed(() => {
+  if (!pillarSummary.value?.pillars) return [0, 0, 0, 0]
+  return PILLARS.map(p => {
+    const pillarData = pillarSummary.value.pillars.find((ps: any) => ps.pillar_type === p.id)
+    return pillarData?.accomplishment_rate_pct || 0
+  })
+})
+
+const quarterlyTrendOptions = computed(() => ({
+  chart: {
+    type: 'line' as const,
+    height: 280,
+    toolbar: { show: false },
+    zoom: { enabled: false },
+  },
+  stroke: {
+    curve: 'smooth' as const,
+    width: 3,
+  },
+  colors: ['#1976D2', '#4CAF50'],
+  xaxis: {
+    categories: ['Q1', 'Q2', 'Q3', 'Q4'],
+  },
+  yaxis: {
+    title: { text: 'Rate Score (Dimensionless)' },
+    min: 0,
+    labels: {
+      formatter: (val: number) => val.toFixed(2),
+    },
+  },
+  legend: {
+    position: 'top' as const,
+    horizontalAlign: 'center' as const,
+  },
+  markers: {
+    size: 5,
+  },
+  tooltip: {
+    shared: true,
+    y: {
+      formatter: (val: number) => val.toFixed(4),
+    },
+  },
+}))
+
+// Phase EB-B: Quarterly trend series with descriptive labels
+const quarterlyTrendSeries = computed(() => {
+  if (!quarterlyTrend.value?.quarters) {
+    return [
+      { name: 'Indicators with Target', data: [0, 0, 0, 0] },
+      { name: 'Achievement Score', data: [0, 0, 0, 0] },
+    ]
+  }
+  const quarters = quarterlyTrend.value.quarters
   return [
-    { title: 'Title', key: 'title', sortable: true },
-    { title: 'Type', key: 'operationType', sortable: true },
-    { title: 'Campus', key: 'campus', sortable: true },
-    { title: 'Status', key: 'status', sortable: true },
-    { title: 'Publication', key: 'publicationStatus', sortable: true },
-    { title: 'Budget', key: 'budgetAllocated', sortable: true, align: 'end' as const },
-    { title: 'Actions', key: 'actions', sortable: false, align: 'center' as const },
+    { name: 'Indicators with Target', data: quarters.map((q: any) => q.target_rate || 0) },
+    { name: 'Achievement Score', data: quarters.map((q: any) => q.actual_rate || 0) },
   ]
 })
 
-// Publication status color mapping
-function getPublicationStatusColor(status: PublicationStatus): string {
-  const colors: Record<PublicationStatus, string> = {
-    DRAFT: 'grey',
-    PENDING_REVIEW: 'orange',
-    PUBLISHED: 'success',
-    REJECTED: 'error',
+// Phase EE-C: YoY chart — all 4 pillars as separate series
+const yearlyComparisonOptions = computed(() => ({
+  chart: {
+    type: 'bar' as const,
+    height: 400,
+    toolbar: { show: false },
+    events: {
+      dataPointSelection: (_event: any, _chartContext: any, config: any) => {
+        const yearIndex = config.dataPointIndex
+        if (yearlyComparison.value?.years && yearIndex >= 0 && yearIndex < yearlyComparison.value.years.length) {
+          const selectedYear = yearlyComparison.value.years[yearIndex]?.fiscal_year
+          if (selectedYear && selectedYear !== selectedFiscalYear.value) {
+            selectedFiscalYear.value = selectedYear
+          }
+        }
+      },
+    },
+  },
+  plotOptions: {
+    bar: {
+      horizontal: false,
+      columnWidth: '60%',
+      borderRadius: 4,
+    },
+  },
+  colors: PILLARS.map(p => p.color),
+  xaxis: {
+    categories: yearlyComparison.value?.years?.map((y: any) => `FY ${y.fiscal_year}`) || [],
+  },
+  yaxis: {
+    title: { text: 'Accomplishment Rate (%)' },
+    min: 0,
+    max: 120,
+    labels: {
+      formatter: (val: number) => val.toFixed(0) + '%',
+    },
+  },
+  // Phase EH-D: 100% target reference line
+  annotations: {
+    yaxis: [{
+      y: 100,
+      borderColor: '#E53935',
+      strokeDashArray: 4,
+      label: {
+        text: 'Target (100%)',
+        position: 'left',
+        style: { color: '#E53935', background: 'transparent', fontSize: '11px' },
+      },
+    }],
+  },
+  legend: {
+    position: 'top' as const,
+    horizontalAlign: 'center' as const,
+  },
+  dataLabels: {
+    enabled: false,
+  },
+  tooltip: {
+    y: {
+      formatter: (val: number) => val.toFixed(1) + '%',
+    },
+  },
+}))
+
+// Phase EE-C: Year-over-Year series — all 4 pillars as separate series
+const yearlyComparisonSeries = computed(() => {
+  if (!yearlyComparison.value?.years || yearlyComparison.value.years.length === 0) {
+    return PILLARS.map(p => ({ name: p.name, data: [] }))
   }
-  return colors[status] || 'grey'
-}
+  const years = yearlyComparison.value.years
 
-// Publication status label mapping
-function getPublicationStatusLabel(status: PublicationStatus): string {
-  const labels: Record<PublicationStatus, string> = {
-    DRAFT: 'Draft',
-    PENDING_REVIEW: 'Pending',
-    PUBLISHED: 'Published',
-    REJECTED: 'Rejected',
+  // When specific pillar selected via global filter, show only that pillar
+  if (selectedGlobalPillar.value !== 'ALL') {
+    const pillar = PILLARS.find(p => p.id === selectedGlobalPillar.value)
+    if (!pillar) return [{ name: 'Accomplishment Rate (%)', data: [] }]
+    return [{
+      name: pillar.name,
+      data: years.map((y: any) => {
+        const pd = y.pillars?.find((p: any) => p.pillar_type === pillar.id)
+        return pd?.accomplishment_rate ?? 0
+      }),
+    }]
   }
-  return labels[status] || status
-}
 
-// Navigation
-function viewOperation(op: UIUniversityOperation) {
-  router.push(`/university-operations/detail-${op.id}`)
-}
-
-function editOperation(op: UIUniversityOperation) {
-  router.push(`/university-operations/edit-${op.id}`)
-}
-
-function createOperation() {
-  router.push('/university-operations/new')
-}
-
-// Delete confirmation
-function confirmDelete(op: UIUniversityOperation) {
-  operationToDelete.value = op
-  deleteDialog.value = true
-}
-
-// --- Meatball Menu Action Visibility ---
-
-// Check if current user is record owner, delegate, or assigned (Phase BM)
-function isOwnerOrAssigned(op: UIUniversityOperation): boolean {
-  const userId = authStore.user?.id
-  if (!userId) return false
-  return (
-    op.createdBy === userId
-    || op.delegatedTo === userId
-    || op.assignedUsers?.some(u => u.id === userId) || false
-  )
-}
-
-// Edit: Owner/assigned can edit own record, Admin can edit any. Editing PENDING_REVIEW auto-reverts to DRAFT.
-function canEditItem(op: UIUniversityOperation): boolean {
-  if (isAdmin.value) return true
-  return isOwnerOrAssigned(op)
-}
-
-// Submit/Resubmit for Review: Owner/assigned + DRAFT or REJECTED status
-function canSubmitForReview(op: UIUniversityOperation): boolean {
-  if (!isStaff.value && !isOwnerOrAssigned(op)) return false
-  if (!isOwnerOrAssigned(op)) return false
-  return op.publicationStatus === 'DRAFT' || op.publicationStatus === 'REJECTED'
-}
-
-// Withdraw: Original submitter + PENDING_REVIEW status only
-function canWithdraw(op: UIUniversityOperation): boolean {
-  if (op.publicationStatus !== 'PENDING_REVIEW') return false
-  return op.approvalMetadata?.submittedBy === authStore.user?.id
-}
-
-// Approve: Admin + PENDING_REVIEW status + NOT self-submitted
-// Self-approval prevention: UI hides button if user is the submitter (backend also enforces)
-function canApproveItem(op: UIUniversityOperation): boolean {
-  if (!isAdmin.value) return false
-  if (op.publicationStatus !== 'PENDING_REVIEW') return false
-  // Prevent self-approval - hide button for own submissions (SuperAdmin excluded from this check)
-  const currentUserId = authStore.user?.id
-  if (!isSuperAdmin.value && op.approvalMetadata?.submittedBy === currentUserId) {
-    return false
-  }
-  return true
-}
-
-// Reject: Admin + PENDING_REVIEW status only
-function canRejectItem(op: UIUniversityOperation): boolean {
-  return isAdmin.value && op.publicationStatus === 'PENDING_REVIEW'
-}
-
-// --- Meatball Menu Actions ---
-
-async function submitForReview(op: UIUniversityOperation) {
-  actionLoading.value = op.id
-  try {
-    await api.post(`/api/university-operations/${op.id}/submit-for-review`, {})
-    toast.success(`"${op.title}" submitted for review`)
-    await fetchOperations()
-  } catch (err: unknown) {
-    const error = err as { message?: string }
-    toast.error(error.message || 'Failed to submit for review')
-  } finally {
-    actionLoading.value = null
-  }
-}
-
-async function withdrawSubmission(op: UIUniversityOperation) {
-  actionLoading.value = op.id
-  try {
-    await api.post(`/api/university-operations/${op.id}/withdraw`, {})
-    toast.success(`"${op.title}" withdrawn successfully`)
-    await fetchOperations()
-  } catch (err: unknown) {
-    const error = err as { message?: string }
-    toast.error(error.message || 'Failed to withdraw submission')
-  } finally {
-    actionLoading.value = null
-  }
-}
-
-async function approveItem(op: UIUniversityOperation) {
-  actionLoading.value = op.id
-  try {
-    await api.post(`/api/university-operations/${op.id}/publish`, {})
-    toast.success(`"${op.title}" published successfully`)
-    await fetchOperations()
-  } catch (err: unknown) {
-    const error = err as { message?: string }
-    toast.error(error.message || 'Failed to publish')
-  } finally {
-    actionLoading.value = null
-  }
-}
-
-function openRejectDialog(op: UIUniversityOperation) {
-  operationToReject.value = op
-  rejectNotes.value = ''
-  rejectDialog.value = true
-}
-
-async function rejectItem() {
-  if (!operationToReject.value) return
-  rejecting.value = true
-  try {
-    await api.post(`/api/university-operations/${operationToReject.value.id}/reject`, {
-      notes: rejectNotes.value || 'Rejected by administrator',
-    })
-    toast.success(`"${operationToReject.value.title}" rejected`)
-    rejectDialog.value = false
-    await fetchOperations()
-  } catch (err: unknown) {
-    const error = err as { message?: string }
-    toast.error(error.message || 'Failed to reject')
-  } finally {
-    rejecting.value = false
-    operationToReject.value = null
-    rejectNotes.value = ''
-  }
-}
-
-async function deleteOperation() {
-  if (!operationToDelete.value) return
-  deleting.value = true
-  try {
-    await api.del(`/api/university-operations/${operationToDelete.value.id}`)
-    const deletedTitle = operationToDelete.value.title
-    operations.value = operations.value.filter(o => o.id !== operationToDelete.value!.id)
-    toast.success(`Operation "${deletedTitle}" deleted successfully`)
-  } catch (err: unknown) {
-    const error = err as { message?: string }
-    toast.error(error.message || 'Failed to delete operation')
-    console.error('Failed to delete operation:', err)
-  } finally {
-    deleting.value = false
-    deleteDialog.value = false
-    operationToDelete.value = null
-  }
-}
-
-// Status color mapping
-function getStatusColor(status: string): string {
-  const colors: Record<string, string> = {
-    PLANNING: 'info',
-    ONGOING: 'primary',
-    COMPLETED: 'success',
-    ON_HOLD: 'warning',
-    CANCELLED: 'error',
-  }
-  return colors[status] || 'grey'
-}
-
-// Format operation type for display
-function formatOperationType(type: string): string {
-  return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
-}
-
-// Format currency
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-PH', {
-    style: 'currency',
-    currency: 'PHP',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
-
-// Filtered operations
-const filteredOperations = computed(() => {
-  if (!search.value) return operations.value
-  const term = search.value.toLowerCase()
-  return operations.value.filter(
-    (o) =>
-      o.title.toLowerCase().includes(term) ||
-      o.operationType.toLowerCase().includes(term) ||
-      o.campus.toLowerCase().includes(term) ||
-      o.status.toLowerCase().includes(term)
-  )
+  // ALL: show all 4 pillars as separate series
+  return PILLARS.map(pillar => ({
+    name: pillar.name,
+    data: years.map((y: any) => {
+      const pd = y.pillars?.find((p: any) => p.pillar_type === pillar.id)
+      return pd?.accomplishment_rate ?? 0
+    }),
+  }))
 })
 
-async function fetchOperations() {
-  loading.value = true
-  try {
-    const response = await api.get<{ data: BackendUniversityOperation[] }>('/api/university-operations')
-    operations.value = adaptUniversityOperations(response.data || [])
-  } catch (err: unknown) {
-    const error = err as { message?: string }
-    toast.error(error.message || 'Failed to load operations')
-    console.error('Failed to fetch operations:', err)
-  } finally {
-    loading.value = false
+// Phase EE-D: Target vs Actual pillar filtering via global filter
+const targetVsActualPillars = computed(() => {
+  return selectedGlobalPillar.value === 'ALL'
+    ? PILLARS
+    : PILLARS.filter(p => p.id === selectedGlobalPillar.value)
+})
+
+// Phase EE-B: Target vs Actual — Achievement Rate (%) visualization
+const targetVsActualOptions = computed(() => ({
+  chart: {
+    type: 'bar' as const,
+    height: 280,
+    toolbar: { show: false },
+    events: {
+      dataPointSelection: (_event: any, _chartContext: any, config: any) => {
+        const pillars = targetVsActualPillars.value
+        const pillarIndex = config.dataPointIndex
+        if (pillarIndex >= 0 && pillarIndex < pillars.length) {
+          navigateToPhysical(pillars[pillarIndex].id)
+        }
+      },
+    },
+  },
+  plotOptions: {
+    bar: {
+      horizontal: false,
+      columnWidth: '55%',
+      borderRadius: 4,
+      dataLabels: {
+        position: 'top',
+      },
+    },
+  },
+  colors: targetVsActualPillars.value.map(p => p.color),
+  xaxis: {
+    categories: targetVsActualPillars.value.map(p => p.name),
+  },
+  yaxis: {
+    title: { text: 'Achievement Rate (%)' },
+    min: 0,
+    max: 120,
+    labels: {
+      formatter: (val: number) => val.toFixed(0) + '%',
+    },
+  },
+  // Phase EH-C: 100% target reference line
+  annotations: {
+    yaxis: [{
+      y: 100,
+      borderColor: '#E53935',
+      strokeDashArray: 4,
+      label: {
+        text: 'Target (100%)',
+        position: 'left',
+        style: { color: '#E53935', background: 'transparent', fontSize: '11px' },
+      },
+    }],
+  },
+  legend: {
+    position: 'top' as const,
+    horizontalAlign: 'center' as const,
+  },
+  dataLabels: {
+    enabled: true,
+    formatter: (val: number) => val.toFixed(1) + '%',
+    offsetY: -20,
+    style: { fontSize: '12px', colors: ['#333'] },
+  },
+  tooltip: {
+    y: {
+      formatter: (val: number) => val.toFixed(1) + '%',
+    },
+  },
+}))
+
+// Phase EE-B: Achievement Rate (%) per pillar — uses accomplishment_rate_pct from pillarSummary
+const targetVsActualSeries = computed(() => {
+  const pillars = targetVsActualPillars.value
+  if (!pillarSummary.value?.pillars) {
+    return [{ name: 'Achievement Rate (%)', data: pillars.map(() => 0) }]
   }
+  return [{
+    name: 'Achievement Rate (%)',
+    data: pillars.map(p => {
+      const pd = pillarSummary.value.pillars.find((ps: any) => ps.pillar_type === p.id)
+      return pd?.accomplishment_rate_pct || 0
+    }),
+  }]
+})
+
+// Phase DW-B: Watch for fiscal year changes from store
+watch(selectedFiscalYear, () => {
+  fetchAnalytics()
+}, { immediate: false })
+
+// Phase EE-D: Watch for global pillar filter — re-fetch quarterly trend with pillar_type
+watch(selectedGlobalPillar, async (newPillar) => {
+  try {
+    const pillarParam = newPillar !== 'ALL' ? `&pillar_type=${newPillar}` : ''
+    const trendRes = await api.get<any>(
+      `/api/university-operations/analytics/quarterly-trend?fiscal_year=${selectedFiscalYear.value}${pillarParam}`
+    )
+    quarterlyTrend.value = trendRes
+  } catch (err: any) {
+    console.error('[UniOps Analytics] Failed to fetch quarterly trend:', err)
+  }
+})
+
+// Navigation
+function navigateToPhysical(pillarId?: string) {
+  router.push({
+    path: '/university-operations/physical',
+    query: {
+      year: selectedFiscalYear.value.toString(),
+      ...(pillarId && { pillar: pillarId })
+    }
+  })
 }
 
-onMounted(fetchOperations)
+function navigateToFinancial() {
+  toast.info('Financial Accomplishments coming soon')
+}
+
+// Phase DW-B: Initialize from store on mount
+onMounted(async () => {
+  await fiscalYearStore.fetchFiscalYears()
+  fetchAnalytics()
+})
 </script>
 
 <template>
   <div>
     <!-- Header -->
-    <div class="d-flex justify-space-between align-center mb-4">
+    <div class="d-flex justify-space-between align-center mb-6">
       <div>
         <h1 class="text-h4 font-weight-bold text-grey-darken-3">
           University Operations
         </h1>
         <p class="text-subtitle-1 text-grey-darken-1">
-          Manage university programs and operations
+          Manage BAR reporting and accomplishment tracking
         </p>
       </div>
-      <v-btn v-if="canAdd('university-operations')" color="primary" prepend-icon="mdi-plus" @click="createOperation">
-        New Operation
-      </v-btn>
-    </div>
-
-    <!-- Data Table Card -->
-    <v-card>
-      <!-- Toolbar -->
-      <v-card-title class="d-flex align-center pa-4">
-        <v-text-field
-          v-model="search"
-          prepend-inner-icon="mdi-magnify"
-          label="Search operations"
-          single-line
-          hide-details
+      <!-- Phase DW-B: Fiscal year controls (selector + Add button) -->
+      <div class="d-flex align-center ga-2">
+        <v-select
+          :model-value="selectedFiscalYear"
+          @update:model-value="fiscalYearStore.setFiscalYear"
+          :items="fiscalYearOptions"
+          label="Fiscal Year"
           density="compact"
           variant="outlined"
-          class="mr-4"
+          hide-details
+          style="width: 130px"
+          prepend-inner-icon="mdi-calendar"
+        />
+        <v-btn
+          v-if="canCreateFiscalYear"
+          color="success"
+          variant="outlined"
+          prepend-icon="mdi-calendar-plus"
+          @click="openFiscalYearDialog"
+        >
+          <span class="d-none d-sm-inline">Add Year</span>
+          <v-icon class="d-sm-none">mdi-calendar-plus</v-icon>
+        </v-btn>
+        <!-- Phase EF-C: Admin navigation to User Management -->
+        <v-btn
+          v-if="isAdmin || isSuperAdmin"
+          color="grey-darken-1"
+          variant="outlined"
+          prepend-icon="mdi-account-cog"
+          @click="$router.push('/users')"
+        >
+          <span class="d-none d-sm-inline">Users</span>
+          <v-icon class="d-sm-none">mdi-account-cog</v-icon>
+        </v-btn>
+      </div>
+    </div>
+
+    <!-- Category Cards -->
+    <v-row class="mb-6">
+      <!-- Physical Accomplishments -->
+      <v-col cols="12" md="6">
+        <v-card
+          class="pa-6 h-100 cursor-pointer"
+          variant="outlined"
+          hover
+          @click="navigateToPhysical"
+        >
+          <div class="d-flex align-center mb-4">
+            <v-avatar color="primary" size="56" class="mr-4">
+              <v-icon size="28" color="white">mdi-chart-bar</v-icon>
+            </v-avatar>
+            <div>
+              <h2 class="text-h5 font-weight-bold">Physical Accomplishments</h2>
+              <p class="text-body-2 text-grey">BAR No. 1</p>
+            </div>
+          </div>
+          <p class="text-body-1 mb-4">
+            Quarterly Physical Report of Operations. Track outcome and output indicators
+            across the four pillars: Higher Education, Advanced Education, Research, and
+            Technical Advisory Extension.
+          </p>
+          <div class="d-flex align-center text-primary">
+            <span class="font-weight-medium">Enter Physical Accomplishments</span>
+            <v-icon end>mdi-arrow-right</v-icon>
+          </div>
+        </v-card>
+      </v-col>
+
+      <!-- Financial Accomplishments (DEFERRED) -->
+      <v-col cols="12" md="6">
+        <v-card
+          class="pa-6 h-100"
+          variant="outlined"
+          disabled
+        >
+          <div class="d-flex align-center mb-4">
+            <v-avatar color="grey" size="56" class="mr-4">
+              <v-icon size="28" color="white">mdi-currency-php</v-icon>
+            </v-avatar>
+            <div>
+              <h2 class="text-h5 font-weight-bold text-grey">Financial Accomplishments</h2>
+              <p class="text-body-2 text-grey">BAR No. 2</p>
+            </div>
+          </div>
+          <p class="text-body-1 mb-4 text-grey">
+            Budget utilization and financial performance tracking. Monitor allotments,
+            obligations, and disbursements across fund types.
+          </p>
+          <div class="d-flex align-center text-grey">
+            <v-chip color="grey" variant="tonal" size="small">
+              <v-icon start size="small">mdi-clock-outline</v-icon>
+              Coming Soon - Phase 2
+            </v-chip>
+          </div>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <!-- Phase DE-C: Analytics Dashboard -->
+    <v-card class="mb-6">
+      <v-card-title class="d-flex align-center flex-wrap ga-2">
+        <v-icon start color="primary">mdi-chart-areaspline</v-icon>
+        Analytics Dashboard - FY {{ selectedFiscalYear }}
+        <v-spacer />
+        <!-- Phase EE-E: Reporting type selector -->
+        <v-select
+          v-model="selectedReportingType"
+          :items="reportingTypeOptions"
+          density="compact"
+          variant="outlined"
+          hide-details
           style="max-width: 300px"
         />
-        <v-spacer />
-        <v-chip color="primary" variant="tonal">
-          {{ filteredOperations.length }} operations
-        </v-chip>
+        <!-- Phase EE-D: Global pillar filter -->
+        <v-select
+          v-model="selectedGlobalPillar"
+          :items="globalPillarOptions"
+          density="compact"
+          variant="outlined"
+          hide-details
+          style="max-width: 200px"
+        />
       </v-card-title>
 
       <v-divider />
 
-      <!-- Table -->
-      <v-data-table
-        :key="operations.length"
-        :headers="headers"
-        :items="filteredOperations"
-        :loading="loading"
-        :search="search"
-        item-value="id"
-        hover
-        class="elevation-0"
-      >
-        <!-- Title -->
-        <template #item.title="{ item }">
-          <span class="font-weight-medium">{{ item.title }}</span>
+      <!-- Analytics Loading State -->
+      <v-card-text v-if="analyticsLoading" class="text-center py-8">
+        <v-progress-circular indeterminate color="primary" size="48" />
+        <div class="mt-4 text-grey">Loading analytics...</div>
+      </v-card-text>
+
+      <!-- Analytics Charts -->
+      <v-card-text v-else>
+        <!-- Phase EE-A: Analytics Guide — visible by default, ABOVE charts -->
+        <!-- Phase EH-B: Analytics Guide collapsed by default (users expand on demand) -->
+        <v-expansion-panels variant="accordion" class="mb-4">
+          <v-expansion-panel>
+            <v-expansion-panel-title class="text-body-2">
+              <v-icon start size="small" color="info">mdi-information-outline</v-icon>
+              Analytics Guide — How to Read These Charts
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <div class="text-body-2">
+                <p class="font-weight-bold mb-1">Achievement Rate by Pillar (%)</p>
+                <p class="mb-3">
+                  Displays the <em>Achievement Rate</em> for each pillar, computed as (Total Actual &divide; Total Target) &times; 100. A value above 100% indicates the pillar exceeded its targets. Values are computed dynamically for display — original stored data is never modified.
+                </p>
+
+                <p class="font-weight-bold mb-1">Pillar Accomplishment Rates</p>
+                <p class="mb-3">
+                  Shows the percentage accomplishment rate for each pillar as a radial gauge. A value of 100% means all indicators with targets have fully met their targets on average.
+                </p>
+
+                <p class="font-weight-bold mb-1">Quarterly Trend</p>
+                <p class="mb-3">
+                  Plots the Target Rate and Achievement Score per quarter (Q1–Q4). Use the global pillar filter to see trends for a specific pillar. This reveals whether performance is improving, stable, or declining throughout the fiscal year.
+                </p>
+
+                <p class="font-weight-bold mb-1">Year-over-Year Comparison</p>
+                <p class="mb-0">
+                  Displays all four pillars as separate series across fiscal years, showing each pillar's accomplishment rate (%). This allows direct comparison of pillar performance trends over time. Use the global pillar filter to focus on a specific pillar.
+                </p>
+              </div>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
+
+        <!-- Phase EE-E: Physical accomplishments analytics (active) -->
+        <template v-if="selectedReportingType === 'PHYSICAL'">
+        <!-- Phase DR-C1: Pillar Completion Overview (FIRST analytics section) -->
+        <v-row class="mb-4" v-if="pillarSummary?.pillars">
+          <v-col cols="12">
+            <div class="text-subtitle-1 font-weight-medium mb-3 d-flex align-center">
+              <v-icon start size="small" color="primary">mdi-view-dashboard</v-icon>
+              Pillar Completion Overview
+            </div>
+          </v-col>
+          <v-col v-for="pillar in PILLARS" :key="pillar.id" cols="6" md="3">
+            <v-card
+              variant="outlined"
+              class="h-100 cursor-pointer"
+              hover
+              @click="navigateToPhysical(pillar.id)"
+            >
+              <v-card-text class="pa-3">
+                <div class="d-flex align-center mb-2">
+                  <v-avatar :color="pillar.color" size="32" class="mr-2">
+                    <v-icon size="18" color="white">{{ pillar.icon }}</v-icon>
+                  </v-avatar>
+                  <span class="text-subtitle-2 font-weight-medium">{{ pillar.name }}</span>
+                </div>
+                <div
+                  v-if="pillarSummary?.pillars?.find((p: any) => p.pillar_type === pillar.id)"
+                  class="d-flex flex-column"
+                >
+                  <div class="d-flex justify-space-between text-caption mb-1">
+                    <span class="text-grey">Indicators:</span>
+                    <span class="font-weight-medium">
+                      {{ pillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.indicators_with_data || 0 }}
+                      / {{ pillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.total_taxonomy_indicators || 0 }}
+                    </span>
+                  </div>
+                  <div class="d-flex justify-space-between text-caption mb-1">
+                    <span class="text-grey">Outcomes:</span>
+                    <span>{{ pillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.outcome_indicators || 0 }}</span>
+                  </div>
+                  <div class="d-flex justify-space-between text-caption">
+                    <span class="text-grey">Outputs:</span>
+                    <span>{{ pillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.output_indicators || 0 }}</span>
+                  </div>
+                  <div class="d-flex ga-1 mt-2 flex-wrap">
+                    <v-chip
+                      :color="(pillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.completion_rate || 0) >= 80 ? 'success' : (pillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.completion_rate || 0) >= 50 ? 'warning' : 'error'"
+                      size="small"
+                      variant="tonal"
+                    >
+                      <v-icon start size="x-small">mdi-check-circle</v-icon>
+                      {{ (pillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.completion_rate || 0).toFixed(0) }}% Data
+                    </v-chip>
+                    <v-chip
+                      :color="(pillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.accomplishment_rate_pct || 0) >= 80 ? 'success' : 'warning'"
+                      size="small"
+                      variant="tonal"
+                    >
+                      {{ (pillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.accomplishment_rate_pct || 0).toFixed(1) }}% Rate
+                    </v-chip>
+                  </div>
+                </div>
+                <div v-else class="text-center text-grey text-caption py-2">
+                  No data
+                </div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <!-- Phase EE-B: Achievement Rate by Pillar (%) — global filter controlled -->
+        <v-row class="mb-4">
+          <v-col cols="12">
+            <v-card variant="tonal" class="h-100">
+              <v-card-title class="text-subtitle-1 d-flex align-center">
+                <v-icon start size="small" color="primary">mdi-chart-bar-stacked</v-icon>
+                Achievement Rate by Pillar (%) - FY {{ selectedFiscalYear }}
+              </v-card-title>
+              <v-card-text>
+                <ClientOnly>
+                  <VueApexCharts
+                    v-if="pillarSummary?.pillars?.length"
+                    type="bar"
+                    height="280"
+                    :options="targetVsActualOptions"
+                    :series="targetVsActualSeries"
+                  />
+                  <div v-else class="text-center py-8 text-grey">
+                    <v-icon size="48">mdi-chart-bar</v-icon>
+                    <div class="mt-2">No pillar data available</div>
+                  </div>
+                </ClientOnly>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <!-- Phase EB-D: Row 2 — Radial + Trend in equal halves -->
+        <v-row class="mb-4">
+          <!-- Pillar Accomplishment Rates -->
+          <v-col cols="12" md="6">
+            <v-card variant="tonal" class="h-100">
+              <v-card-title class="text-subtitle-1 d-flex align-center">
+                <v-icon start size="small" color="primary">mdi-chart-donut</v-icon>
+                Pillar Accomplishment Rates
+              </v-card-title>
+              <v-card-text>
+                <ClientOnly>
+                  <VueApexCharts
+                    type="radialBar"
+                    height="280"
+                    :options="pillarChartOptions"
+                    :series="pillarChartSeries"
+                  />
+                </ClientOnly>
+              </v-card-text>
+            </v-card>
+          </v-col>
+
+          <!-- Quarterly Trend -->
+          <v-col cols="12" md="6">
+            <v-card variant="tonal" class="h-100">
+              <v-card-title class="text-subtitle-1 d-flex align-center">
+                <v-icon start size="small" color="success">mdi-trending-up</v-icon>
+                Quarterly Trend
+              </v-card-title>
+              <v-card-text>
+                <ClientOnly>
+                  <VueApexCharts
+                    type="line"
+                    height="280"
+                    :options="quarterlyTrendOptions"
+                    :series="quarterlyTrendSeries"
+                  />
+                </ClientOnly>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <!-- Phase EE-C: Row 3 — Year-over-Year full width, all pillars as separate series -->
+        <v-row>
+          <v-col cols="12">
+            <v-card variant="tonal" class="h-100">
+              <v-card-title class="text-subtitle-1 d-flex align-center">
+                <v-icon start size="small" color="orange">mdi-chart-bar</v-icon>
+                Year-over-Year Comparison — Accomplishment Rate by Pillar (%)
+              </v-card-title>
+              <v-card-text>
+                <ClientOnly>
+                  <VueApexCharts
+                    v-if="yearlyComparison?.years?.length"
+                    type="bar"
+                    height="400"
+                    :options="yearlyComparisonOptions"
+                    :series="yearlyComparisonSeries"
+                  />
+                  <div v-else class="text-center py-8 text-grey">
+                    <v-icon size="48">mdi-chart-bar</v-icon>
+                    <div class="mt-2">No historical data available</div>
+                  </div>
+                </ClientOnly>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+
         </template>
 
-        <!-- Operation Type -->
-        <template #item.operationType="{ item }">
-          <v-chip size="small" variant="outlined">
-            {{ formatOperationType(item.operationType) }}
-          </v-chip>
+        <!-- Phase EE-E: Financial accomplishments placeholder -->
+        <template v-else>
+          <v-card variant="tonal" class="text-center pa-8">
+            <v-icon size="64" color="grey-lighten-1" class="mb-4">mdi-chart-timeline-variant</v-icon>
+            <h3 class="text-h6 mb-2">Financial Accomplishments Analytics</h3>
+            <p class="text-body-2 text-grey mb-4">
+              BAR No. 2 financial analytics are under development. This module will provide budget utilization tracking, obligation monitoring, and disbursement analysis.
+            </p>
+            <v-chip color="info" variant="tonal">
+              <v-icon start size="small">mdi-clock-outline</v-icon>
+              Coming Soon
+            </v-chip>
+          </v-card>
         </template>
 
-        <!-- Status Chip -->
-        <template #item.status="{ item }">
-          <v-chip
-            :color="getStatusColor(item.status)"
-            size="small"
-            variant="tonal"
-          >
-            {{ item.status }}
-          </v-chip>
-        </template>
-
-        <!-- Publication Status -->
-        <template #item.publicationStatus="{ item }">
-          <v-chip
-            :color="getPublicationStatusColor(item.publicationStatus)"
-            size="small"
-            variant="tonal"
-          >
-            {{ getPublicationStatusLabel(item.publicationStatus) }}
-          </v-chip>
-          <div
-            v-if="item.publicationStatus === 'PENDING_REVIEW' && item.approvalMetadata?.submittedByName"
-            class="text-caption text-medium-emphasis mt-1"
-          >
-            by {{ item.approvalMetadata.submittedByName }}
-          </div>
-        </template>
-
-        <!-- Budget -->
-        <template #item.budgetAllocated="{ item }">
-          {{ formatCurrency(item.budgetAllocated) }}
-        </template>
-
-        <!-- Actions (Meatball Menu) -->
-        <template #item.actions="{ item }">
-          <v-menu location="start">
-            <template #activator="{ props }">
-              <v-btn
-                icon="mdi-dots-vertical"
-                variant="text"
-                size="small"
-                v-bind="props"
-                :loading="actionLoading === item.id"
-              />
-            </template>
-            <v-list density="compact" min-width="180">
-              <!-- View (always visible) -->
-              <v-list-item @click="viewOperation(item)" prepend-icon="mdi-eye">
-                <v-list-item-title>View</v-list-item-title>
-              </v-list-item>
-
-              <!-- Edit (conditional) -->
-              <v-list-item
-                v-if="canEditItem(item)"
-                @click="editOperation(item)"
-                prepend-icon="mdi-pencil"
-              >
-                <v-list-item-title>Edit</v-list-item-title>
-              </v-list-item>
-
-              <!-- Submit for Review (Staff owner + DRAFT) -->
-              <v-list-item
-                v-if="canSubmitForReview(item)"
-                @click="submitForReview(item)"
-                prepend-icon="mdi-send"
-              >
-                <v-list-item-title>Submit for Review</v-list-item-title>
-              </v-list-item>
-
-              <!-- Withdraw Submission (Original submitter + PENDING_REVIEW) -->
-              <v-list-item
-                v-if="canWithdraw(item)"
-                @click="withdrawSubmission(item)"
-                prepend-icon="mdi-undo"
-                class="text-orange"
-              >
-                <v-list-item-title>Withdraw Submission</v-list-item-title>
-              </v-list-item>
-
-              <!-- Approve (Admin + PENDING_REVIEW) -->
-              <v-list-item
-                v-if="canApproveItem(item)"
-                @click="approveItem(item)"
-                prepend-icon="mdi-check-circle"
-                class="text-success"
-              >
-                <v-list-item-title>Approve</v-list-item-title>
-              </v-list-item>
-
-              <!-- Reject (Admin + PENDING_REVIEW) -->
-              <v-list-item
-                v-if="canRejectItem(item)"
-                @click="openRejectDialog(item)"
-                prepend-icon="mdi-close-circle"
-                class="text-warning"
-              >
-                <v-list-item-title>Reject</v-list-item-title>
-              </v-list-item>
-
-              <!-- Divider before Delete -->
-              <v-divider v-if="canDelete('university-operations')" class="my-1" />
-
-              <!-- Delete (Admin only) -->
-              <v-list-item
-                v-if="canDelete('university-operations')"
-                @click="confirmDelete(item)"
-                prepend-icon="mdi-delete"
-                class="text-error"
-              >
-                <v-list-item-title>Delete</v-list-item-title>
-              </v-list-item>
-            </v-list>
-          </v-menu>
-        </template>
-
-        <!-- Loading State -->
-        <template #loading>
-          <v-skeleton-loader type="table-row@5" />
-        </template>
-
-        <!-- Empty State -->
-        <template #no-data>
-          <div class="text-center pa-6">
-            <v-icon icon="mdi-folder-open-outline" size="64" color="grey-lighten-1" class="mb-4" />
-            <p class="text-h6 text-grey-darken-1">No operations found</p>
-            <p class="text-body-2 text-grey">Operations will appear here once added</p>
-          </div>
-        </template>
-      </v-data-table>
+      </v-card-text>
     </v-card>
 
-    <!-- Delete Confirmation Dialog -->
-    <v-dialog v-model="deleteDialog" max-width="400" persistent>
+    <!-- Phase DW-B: Fiscal Year Creation Dialog -->
+    <v-dialog v-model="fiscalYearDialog" max-width="450" persistent>
       <v-card>
-        <v-card-title class="text-h6">Confirm Delete</v-card-title>
-        <v-card-text>
-          Are you sure you want to delete <strong>{{ operationToDelete?.title }}</strong>?
-          This action cannot be undone.
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn variant="text" @click="deleteDialog = false" :disabled="deleting">Cancel</v-btn>
-          <v-btn color="error" variant="flat" @click="deleteOperation" :loading="deleting">Delete</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+        <v-card-title class="text-h6 bg-success text-white">
+          <v-icon class="mr-2">mdi-calendar-plus</v-icon>
+          Add Fiscal Year
+        </v-card-title>
 
-    <!-- Reject Dialog -->
-    <v-dialog v-model="rejectDialog" max-width="500" persistent>
-      <v-card>
-        <v-card-title class="text-h6">Reject Submission</v-card-title>
-        <v-card-text>
-          <p class="mb-4">
-            Reject <strong>{{ operationToReject?.title }}</strong>?
-            The owner will be notified and can edit and resubmit.
+        <v-card-text class="pt-4">
+          <p class="text-body-2 mb-4">
+            Create a new fiscal year configuration for University Operations reporting.
           </p>
-          <v-textarea
-            v-model="rejectNotes"
-            label="Rejection Notes (optional)"
-            placeholder="Provide feedback for the submitter..."
-            rows="3"
+
+          <v-text-field
+            v-model.number="newFiscalYear"
+            type="number"
+            label="Fiscal Year"
+            placeholder="2027"
             variant="outlined"
-            hide-details
+            density="comfortable"
+            :min="2020"
+            :max="2099"
+            prepend-inner-icon="mdi-calendar"
+            hint="Enter a year between 2020 and 2099"
+            persistent-hint
+            autofocus
+            @keydown.enter="createFiscalYear"
           />
         </v-card-text>
+
         <v-card-actions>
           <v-spacer />
-          <v-btn variant="text" @click="rejectDialog = false" :disabled="rejecting">Cancel</v-btn>
-          <v-btn color="warning" variant="flat" @click="rejectItem" :loading="rejecting">Reject</v-btn>
+          <v-btn
+            variant="text"
+            @click="fiscalYearDialog = false"
+            :disabled="creatingFiscalYear"
+          >
+            Cancel
+          </v-btn>
+          <v-btn
+            color="success"
+            variant="flat"
+            prepend-icon="mdi-check"
+            :loading="creatingFiscalYear"
+            @click="createFiscalYear"
+          >
+            Create
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
   </div>
 </template>
+
+<style scoped>
+.cursor-pointer {
+  cursor: pointer;
+}
+</style>

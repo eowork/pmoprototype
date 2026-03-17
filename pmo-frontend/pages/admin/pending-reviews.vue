@@ -35,10 +35,38 @@ interface PendingItem {
   created_at: string
   submitter_name: string
   module: 'coi' | 'repairs' | 'university_operations'
+  // Phase EM-E: Distinguish quarterly reports from legacy per-pillar entries
+  // Phase GOV-UI: 'unlock_request' for pending unlock requests
+  source?: 'quarterly_report' | 'legacy' | 'unlock_request'
+  // Phase GOV-UI: Unlock request metadata
+  unlock_request_reason?: string
+  unlock_requested_at?: string
+}
+
+// Phase GOV-D: Versioned submission history items
+interface ArchivedItem {
+  id: string
+  quarterly_report_id: string
+  fiscal_year: number
+  quarter: string
+  title: string
+  version: number
+  event_type: 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'REVERTED' | 'UNLOCKED'
+  current_status: string
+  submitter_name?: string
+  submitted_at?: string
+  reviewed_by_name?: string
+  reviewed_at?: string
+  review_notes?: string
+  actioned_by_name: string
+  actioned_at: string
+  reason?: string
+  module: 'university_operations'
 }
 
 const loading = ref(true)
 const pendingItems = ref<PendingItem[]>([])
+const archivedItems = ref<ArchivedItem[]>([])
 const activeTab = ref('all')
 
 // Action states
@@ -47,6 +75,12 @@ const rejectDialog = ref(false)
 const itemToReject = ref<PendingItem | null>(null)
 const rejectNotes = ref('')
 const rejecting = ref(false)
+
+// Phase EN-D: Multi-select batch actions
+const selectedItems = ref<PendingItem[]>([])
+const batchLoading = ref<'approve' | 'reject' | null>(null)
+const batchRejectDialog = ref(false)
+const batchRejectNotes = ref('')
 
 // Module labels
 const moduleLabels: Record<string, string> = {
@@ -75,29 +109,56 @@ async function fetchPendingItems() {
   pendingItems.value = []
 
   try {
-    // Fetch from all three endpoints in parallel
-    const [coiPending, repairsPending, opsPending] = await Promise.all([
+    // Phase EM-E: Fetch quarterly reports for University Operations instead of per-pillar entries
+    // Phase GOV-UI: Also fetch pending unlock requests
+    // Phase GOV-D: Fetch versioned submission history for archive
+    const [coiPending, repairsPending, quarterlyPending, unlockPending, historyItems] = await Promise.all([
       api.get<any[]>('/api/construction-projects/pending-review').catch(() => []),
       api.get<any[]>('/api/repair-projects/pending-review').catch(() => []),
-      api.get<any[]>('/api/university-operations/pending-review').catch(() => []),
+      api.get<any[]>('/api/university-operations/quarterly-reports/pending-review').catch(() => []),
+      api.get<any[]>('/api/university-operations/quarterly-reports/pending-unlock').catch(() => []),
+      api.get<any[]>('/api/university-operations/quarterly-reports/submission-history').catch(() => []),
     ])
+
+    // Phase EM-E: Quarter display names
+    const quarterNames: Record<string, string> = {
+      Q1: 'Quarter 1 (Jan–Mar)',
+      Q2: 'Quarter 2 (Apr–Jun)',
+      Q3: 'Quarter 3 (Jul–Sep)',
+      Q4: 'Quarter 4 (Oct–Dec)',
+    }
 
     // Combine and normalize
     const combined: PendingItem[] = [
       ...coiPending.map(d => ({
         ...d,
         module: 'coi' as const,
+        source: 'legacy' as const,
         title: d.title || d.project_code || 'Untitled',
       })),
       ...repairsPending.map(d => ({
         ...d,
         module: 'repairs' as const,
+        source: 'legacy' as const,
         title: d.title || 'Untitled',
       })),
-      ...opsPending.map(d => ({
+      // Phase EM-E: Quarterly reports shown as single entries per quarter
+      ...quarterlyPending.map(d => ({
         ...d,
         module: 'university_operations' as const,
-        title: d.title || 'Untitled',
+        source: 'quarterly_report' as const,
+        title: d.title || `${quarterNames[d.quarter] || d.quarter} — FY ${d.fiscal_year}`,
+      })),
+      // Phase GOV-UI: Unlock requests shown with special source type
+      ...unlockPending.map(d => ({
+        ...d,
+        module: 'university_operations' as const,
+        source: 'unlock_request' as const,
+        title: `🔓 Unlock Request: ${quarterNames[d.quarter] || d.quarter} — FY ${d.fiscal_year}`,
+        submitter_name: d.requester_name || 'Unknown',
+        submitted_at: d.unlock_requested_at,
+        unlock_request_reason: d.unlock_request_reason,
+        unlock_requested_at: d.unlock_requested_at,
       })),
     ]
 
@@ -105,6 +166,13 @@ async function fetchPendingItems() {
     pendingItems.value = combined.sort((a, b) =>
       new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime()
     )
+
+    // Phase GOV-D: Populate archived items from versioned submission history
+    archivedItems.value = historyItems.map(d => ({
+      ...d,
+      module: 'university_operations' as const,
+      title: d.title || `${quarterNames[d.quarter] || d.quarter} — FY ${d.fiscal_year}`,
+    }))
   } catch (err) {
     console.error('[PendingReviews] Failed to fetch:', err)
     toast.error('Failed to load pending reviews')
@@ -127,6 +195,13 @@ const tabCounts = computed(() => ({
   university_operations: pendingItems.value.filter(i => i.module === 'university_operations').length,
 }))
 
+// Phase GOV-C: Filtered archived items based on active tab
+const filteredArchivedItems = computed(() => {
+  if (activeTab.value === 'all') return archivedItems.value
+  if (activeTab.value === 'university_operations') return archivedItems.value
+  return [] // Only university_operations has archived items for now
+})
+
 // Format date
 function formatDate(dateStr: string | undefined): string {
   if (!dateStr) return '-'
@@ -139,8 +214,29 @@ function formatDate(dateStr: string | undefined): string {
   })
 }
 
+// Phase GOV-D: Event type color mapping for submission history
+function eventTypeColor(eventType: string): string {
+  const colors: Record<string, string> = {
+    SUBMITTED: 'blue',
+    APPROVED: 'success',
+    REJECTED: 'error',
+    REVERTED: 'orange',
+    UNLOCKED: 'purple',
+  }
+  return colors[eventType] || 'grey'
+}
+
 // Navigate to view item
 function viewItem(item: PendingItem) {
+  // Phase EM-E: Quarterly reports navigate to physical page with FY+quarter context
+  if (item.source === 'quarterly_report') {
+    const qr = item as any
+    router.push({
+      path: '/university-operations/physical',
+      query: { year: qr.fiscal_year?.toString() },
+    })
+    return
+  }
   const routes: Record<string, string> = {
     coi: `/coi/detail-${item.id}`,
     repairs: `/repairs/detail-${item.id}`,
@@ -159,7 +255,10 @@ async function approveItem(item: PendingItem) {
 
   actionLoading.value = item.id
   try {
-    const endpoint = `${moduleEndpoints[item.module]}/${item.id}/publish`
+    // Phase EM-E: Quarterly reports use dedicated approve endpoint
+    const endpoint = item.source === 'quarterly_report'
+      ? `/api/university-operations/quarterly-reports/${item.id}/approve`
+      : `${moduleEndpoints[item.module]}/${item.id}/publish`
     await api.post(endpoint, {})
     toast.success(`"${item.title}" published successfully`)
     await fetchPendingItems()
@@ -189,7 +288,10 @@ async function rejectItem() {
   if (!itemToReject.value) return
   rejecting.value = true
   try {
-    const endpoint = `${moduleEndpoints[itemToReject.value.module]}/${itemToReject.value.id}/reject`
+    // Phase EM-E: Quarterly reports use dedicated reject endpoint
+    const endpoint = itemToReject.value.source === 'quarterly_report'
+      ? `/api/university-operations/quarterly-reports/${itemToReject.value.id}/reject`
+      : `${moduleEndpoints[itemToReject.value.module]}/${itemToReject.value.id}/reject`
     await api.post(endpoint, {
       notes: rejectNotes.value || 'Rejected by administrator',
     })
@@ -203,6 +305,104 @@ async function rejectItem() {
     rejecting.value = false
     itemToReject.value = null
     rejectNotes.value = ''
+  }
+}
+
+// Phase EN-D: Batch approve selected items
+async function approveSelected() {
+  // Phase GOV-C: Exclude unlock_request items from batch actions
+  const batchItems = selectedItems.value.filter(i => i.source !== 'unlock_request')
+  if (batchItems.length === 0) {
+    toast.warning('Unlock requests must be handled individually')
+    return
+  }
+  batchLoading.value = 'approve'
+  let successCount = 0
+  let failCount = 0
+  for (const item of batchItems) {
+    try {
+      const endpoint = item.source === 'quarterly_report'
+        ? `/api/university-operations/quarterly-reports/${item.id}/approve`
+        : `${moduleEndpoints[item.module]}/${item.id}/publish`
+      await api.post(endpoint, {})
+      successCount++
+    } catch {
+      failCount++
+    }
+  }
+  if (successCount > 0) toast.success(`${successCount} item(s) approved`)
+  if (failCount > 0) toast.error(`${failCount} item(s) failed to approve`)
+  selectedItems.value = []
+  batchLoading.value = null
+  await fetchPendingItems()
+}
+
+// Phase EN-D: Open batch reject dialog
+function openBatchRejectDialog() {
+  if (selectedItems.value.length === 0) return
+  batchRejectNotes.value = ''
+  batchRejectDialog.value = true
+}
+
+// Phase EN-D: Batch reject selected items
+async function batchRejectSelected() {
+  // Phase GOV-C: Exclude unlock_request items from batch actions
+  const batchItems = selectedItems.value.filter(i => i.source !== 'unlock_request')
+  if (batchItems.length === 0) {
+    toast.warning('Unlock requests must be handled individually')
+    return
+  }
+  batchLoading.value = 'reject'
+  let successCount = 0
+  let failCount = 0
+  for (const item of batchItems) {
+    try {
+      const endpoint = item.source === 'quarterly_report'
+        ? `/api/university-operations/quarterly-reports/${item.id}/reject`
+        : `${moduleEndpoints[item.module]}/${item.id}/reject`
+      await api.post(endpoint, { notes: batchRejectNotes.value || 'Rejected by administrator' })
+      successCount++
+    } catch {
+      failCount++
+    }
+  }
+  if (successCount > 0) toast.success(`${successCount} item(s) rejected`)
+  if (failCount > 0) toast.error(`${failCount} item(s) failed to reject`)
+  selectedItems.value = []
+  batchRejectDialog.value = false
+  batchLoading.value = null
+  await fetchPendingItems()
+}
+
+// Phase GOV-UI: Approve unlock request (revert to DRAFT)
+async function approveUnlockRequest(item: PendingItem) {
+  actionLoading.value = item.id
+  try {
+    await api.post(`/api/university-operations/quarterly-reports/${item.id}/unlock`, {
+      reason: `Approved unlock request: ${item.unlock_request_reason || 'No reason provided'}`,
+    })
+    toast.success(`Unlock approved — report reverted to Draft`)
+    await fetchPendingItems()
+  } catch (err: unknown) {
+    const error = err as { message?: string }
+    toast.error(error.message || 'Failed to unlock report')
+  } finally {
+    actionLoading.value = null
+  }
+}
+
+// Phase GOV-UI: Deny unlock request
+async function denyUnlockRequest(item: PendingItem) {
+  actionLoading.value = item.id
+  try {
+    await api.post(`/api/university-operations/quarterly-reports/${item.id}/deny-unlock`, {})
+    toast.success(`Unlock request denied`)
+    await fetchPendingItems()
+  } catch (err: unknown) {
+    const error = err as { message?: string }
+    toast.error(error.message || 'Failed to deny unlock request')
+  } finally {
+    actionLoading.value = null
   }
 }
 
@@ -300,7 +500,35 @@ onMounted(() => {
 
     <!-- Pending Reviews Table -->
     <v-card v-else>
+      <!-- Phase EN-D: Batch action toolbar -->
+      <v-toolbar v-if="selectedItems.length > 0" density="compact" color="primary" class="px-2">
+        <span class="text-body-2 font-weight-medium ml-2">{{ selectedItems.length }} selected</span>
+        <v-spacer />
+        <v-btn
+          variant="text"
+          prepend-icon="mdi-check-circle"
+          size="small"
+          :loading="batchLoading === 'approve'"
+          :disabled="!!batchLoading"
+          @click="approveSelected"
+        >
+          Approve Selected
+        </v-btn>
+        <v-btn
+          variant="text"
+          prepend-icon="mdi-close-circle"
+          size="small"
+          color="error"
+          :loading="batchLoading === 'reject'"
+          :disabled="!!batchLoading"
+          @click="openBatchRejectDialog"
+          class="ml-1"
+        >
+          Reject Selected
+        </v-btn>
+      </v-toolbar>
       <v-data-table
+        v-model="selectedItems"
         :headers="[
           { title: 'Title', key: 'title', sortable: true },
           { title: 'Module', key: 'module', sortable: true },
@@ -312,6 +540,9 @@ onMounted(() => {
         :items-per-page="20"
         density="comfortable"
         hover
+        show-select
+        item-value="id"
+        return-object
       >
         <!-- Title -->
         <template #item.title="{ item }">
@@ -370,23 +601,52 @@ onMounted(() => {
 
               <v-divider class="my-1" />
 
-              <!-- Approve -->
-              <v-list-item
-                @click="approveItem(item)"
-                prepend-icon="mdi-check-circle"
-                class="text-success"
-              >
-                <v-list-item-title>Approve</v-list-item-title>
-              </v-list-item>
+              <!-- Phase GOV-UI: Unlock request actions -->
+              <template v-if="item.source === 'unlock_request'">
+                <v-list-item
+                  v-if="item.unlock_request_reason"
+                  prepend-icon="mdi-message-text-outline"
+                  class="text-grey-darken-1"
+                >
+                  <v-list-item-title class="text-body-2">{{ item.unlock_request_reason }}</v-list-item-title>
+                </v-list-item>
+                <v-divider v-if="item.unlock_request_reason" class="my-1" />
+                <v-list-item
+                  @click="approveUnlockRequest(item)"
+                  prepend-icon="mdi-lock-open-check"
+                  class="text-success"
+                >
+                  <v-list-item-title>Approve Unlock</v-list-item-title>
+                </v-list-item>
+                <v-list-item
+                  @click="denyUnlockRequest(item)"
+                  prepend-icon="mdi-lock-remove"
+                  class="text-error"
+                >
+                  <v-list-item-title>Deny Unlock</v-list-item-title>
+                </v-list-item>
+              </template>
 
-              <!-- Reject -->
-              <v-list-item
-                @click="openRejectDialog(item)"
-                prepend-icon="mdi-close-circle"
-                class="text-error"
-              >
-                <v-list-item-title>Reject</v-list-item-title>
-              </v-list-item>
+              <!-- Standard review actions -->
+              <template v-else>
+                <!-- Approve -->
+                <v-list-item
+                  @click="approveItem(item)"
+                  prepend-icon="mdi-check-circle"
+                  class="text-success"
+                >
+                  <v-list-item-title>Approve</v-list-item-title>
+                </v-list-item>
+
+                <!-- Reject -->
+                <v-list-item
+                  @click="openRejectDialog(item)"
+                  prepend-icon="mdi-close-circle"
+                  class="text-error"
+                >
+                  <v-list-item-title>Reject</v-list-item-title>
+                </v-list-item>
+              </template>
             </v-list>
           </v-menu>
         </template>
@@ -434,6 +694,47 @@ onMounted(() => {
       </v-card>
     </v-dialog>
 
+    <!-- Phase EN-D: Batch Reject Dialog -->
+    <v-dialog v-model="batchRejectDialog" max-width="500">
+      <v-card>
+        <v-card-title class="text-h6">
+          Reject {{ selectedItems.length }} Item(s)
+        </v-card-title>
+        <v-card-text>
+          <p class="mb-4">
+            Are you sure you want to reject
+            <strong>{{ selectedItems.length }} selected item(s)</strong>?
+          </p>
+          <v-textarea
+            v-model="batchRejectNotes"
+            label="Rejection Notes"
+            placeholder="Provide feedback for the submitters..."
+            rows="3"
+            variant="outlined"
+            hide-details
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn
+            variant="text"
+            @click="batchRejectDialog = false"
+            :disabled="batchLoading === 'reject'"
+          >
+            Cancel
+          </v-btn>
+          <v-btn
+            color="error"
+            variant="flat"
+            @click="batchRejectSelected"
+            :loading="batchLoading === 'reject'"
+          >
+            Reject All
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Info Card -->
     <v-card class="mt-4 pa-4">
       <div class="text-subtitle-2 mb-2">Review Guidelines</div>
@@ -444,6 +745,70 @@ onMounted(() => {
         <li v-if="!isSuperAdmin">You can only approve items in your assigned modules</li>
       </ul>
     </v-card>
+
+    <!-- Phase GOV-D: Versioned Submission History -->
+    <v-expansion-panels v-if="filteredArchivedItems.length > 0" class="mt-4">
+      <v-expansion-panel>
+        <v-expansion-panel-title>
+          <div class="d-flex align-center ga-2">
+            <v-icon size="small">mdi-history</v-icon>
+            <span class="font-weight-medium">Submission History</span>
+            <v-badge :content="filteredArchivedItems.length" color="grey" inline class="ml-1" />
+          </div>
+        </v-expansion-panel-title>
+        <v-expansion-panel-text>
+          <v-data-table
+            :headers="[
+              { title: 'Ver', key: 'version', sortable: true, width: '60' },
+              { title: 'Event', key: 'event_type', sortable: true, width: '120' },
+              { title: 'FY', key: 'fiscal_year', sortable: true, width: '60' },
+              { title: 'Quarter', key: 'quarter', sortable: true, width: '80' },
+              { title: 'Submitted By', key: 'submitter_name', sortable: true },
+              { title: 'Reviewed By', key: 'reviewed_by_name', sortable: true },
+              { title: 'Action By', key: 'actioned_by_name', sortable: true },
+              { title: 'Date', key: 'actioned_at', sortable: true, width: '140' },
+              { title: 'Notes / Reason', key: 'notes_reason', sortable: false },
+            ]"
+            :items="filteredArchivedItems"
+            :items-per-page="15"
+            density="compact"
+            hover
+            no-data-text="No submission history available"
+          >
+            <template #item.version="{ item }">
+              <span class="font-weight-medium">v{{ item.version }}</span>
+            </template>
+            <template #item.event_type="{ item }">
+              <v-chip
+                :color="eventTypeColor(item.event_type)"
+                size="small"
+                variant="tonal"
+              >
+                {{ item.event_type }}
+              </v-chip>
+            </template>
+            <template #item.submitter_name="{ item }">
+              {{ item.submitter_name || '—' }}
+            </template>
+            <template #item.reviewed_by_name="{ item }">
+              {{ item.reviewed_by_name || '—' }}
+            </template>
+            <template #item.actioned_by_name="{ item }">
+              {{ item.actioned_by_name || '—' }}
+            </template>
+            <template #item.actioned_at="{ item }">
+              {{ formatDate(item.actioned_at) }}
+            </template>
+            <template #item.notes_reason="{ item }">
+              <span v-if="item.review_notes || item.reason" class="text-caption text-grey-darken-1">
+                {{ item.review_notes || item.reason }}
+              </span>
+              <span v-else class="text-caption text-grey">—</span>
+            </template>
+          </v-data-table>
+        </v-expansion-panel-text>
+      </v-expansion-panel>
+    </v-expansion-panels>
   </div>
 
   <!-- Access Denied (fallback, should redirect) -->

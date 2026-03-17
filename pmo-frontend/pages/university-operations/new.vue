@@ -4,11 +4,24 @@ definePageMeta({
 })
 
 const router = useRouter()
+const route = useRoute()
 const api = useApi()
 const toast = useToast()
 
 const loading = ref(false)
 const submitting = ref(false)
+
+// Phase CX-B: Query params from pillar-based navigation
+const pillarParam = computed(() => route.query.pillar as string || '')
+const yearParam = computed(() => route.query.year ? Number(route.query.year) : null)
+
+// Pillar display name mapping
+const pillarDisplayNames: Record<string, string> = {
+  'HIGHER_EDUCATION': 'Higher Education Program',
+  'ADVANCED_EDUCATION': 'Advanced Education Program',
+  'RESEARCH': 'Research Program',
+  'TECHNICAL_ADVISORY': 'Technical Advisory Extension Program',
+}
 
 // Phase AO: Staff users for assignment dropdown
 const staffUsers = ref<{ id: string; first_name: string; last_name: string }[]>([])
@@ -24,6 +37,8 @@ const form = ref({
   start_date: '',
   end_date: '',
   budget: null as number | null,
+  // Phase BD: Fiscal year for BAR1 year-based filtering
+  fiscal_year: null as number | null,
   // Phase AW: Multi-select assignment
   assigned_user_ids: [] as string[],
 })
@@ -69,7 +84,22 @@ async function fetchEligibleStaff() {
   }
 }
 
-onMounted(fetchEligibleStaff)
+onMounted(() => {
+  fetchEligibleStaff()
+
+  // Phase CX-B: Pre-fill form from query params
+  if (pillarParam.value) {
+    form.value.operation_type = pillarParam.value
+  }
+  if (yearParam.value) {
+    form.value.fiscal_year = yearParam.value
+  }
+  // Auto-generate title based on pillar and year
+  if (pillarParam.value && yearParam.value) {
+    const pillarName = pillarDisplayNames[pillarParam.value] || pillarParam.value
+    form.value.title = `${pillarName} - FY ${yearParam.value}`
+  }
+})
 
 // Submit form
 async function handleSubmit() {
@@ -86,14 +116,19 @@ async function handleSubmit() {
       start_date: form.value.start_date || undefined,
       end_date: form.value.end_date || undefined,
       budget: form.value.budget || undefined,
+      // Phase BD: Fiscal year
+      fiscal_year: form.value.fiscal_year || undefined,
       // Phase AW: Multi-select assignment
       assigned_user_ids: form.value.assigned_user_ids.length > 0 ? form.value.assigned_user_ids : undefined,
     }
 
     console.log('[UniOps Create] Submitting:', payload)
-    await api.post('/api/university-operations', payload)
+    const result = await api.post<{ id: string }>('/api/university-operations', payload)
+
     toast.success('Operation created successfully')
-    router.push('/university-operations')
+
+    // Phase DA-D: Redirect to physical view after creation
+    router.push('/university-operations/physical')
   } catch (err: unknown) {
     const apiError = err as { message?: string }
     toast.error(apiError.message || 'Failed to create operation')
@@ -116,13 +151,28 @@ function goBack() {
       <v-btn icon="mdi-arrow-left" variant="text" @click="goBack" />
       <div>
         <h1 class="text-h4 font-weight-bold text-grey-darken-3">
-          New University Operation
+          {{ pillarParam ? `New ${pillarDisplayNames[pillarParam] || pillarParam}` : 'New University Operation' }}
         </h1>
         <p class="text-subtitle-1 text-grey-darken-1">
-          Create a new university operation or program
+          {{ pillarParam && yearParam
+            ? `Create quarterly data entry for FY ${yearParam}`
+            : 'Create a new university operation or program' }}
         </p>
       </div>
     </div>
+
+    <!-- Phase CX-B: Context alert when creating from pillar navigation -->
+    <v-alert
+      v-if="pillarParam && yearParam"
+      type="info"
+      variant="tonal"
+      class="mb-4"
+      closable
+    >
+      <strong>Creating operation for:</strong> {{ pillarDisplayNames[pillarParam] }} - Fiscal Year {{ yearParam }}
+      <br>
+      <span class="text-caption">This operation will be linked to the fixed indicator taxonomy for this pillar.</span>
+    </v-alert>
 
     <!-- Form -->
     <v-form @submit.prevent="handleSubmit">
@@ -155,6 +205,9 @@ function goBack() {
                     required
                     variant="outlined"
                     density="comfortable"
+                    :disabled="!!pillarParam"
+                    :hint="pillarParam ? 'Locked to pillar from navigation' : undefined"
+                    :persistent-hint="!!pillarParam"
                   />
                 </v-col>
                 <v-col cols="12">
@@ -242,6 +295,19 @@ function goBack() {
                     prefix="₱"
                     variant="outlined"
                     density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model.number="form.fiscal_year"
+                    label="Fiscal Year"
+                    type="number"
+                    placeholder="2026"
+                    :hint="yearParam ? 'Locked to fiscal year from navigation' : 'BAR1 reporting fiscal year (e.g. 2026)'"
+                    persistent-hint
+                    variant="outlined"
+                    density="comfortable"
+                    :disabled="!!yearParam"
                   />
                 </v-col>
               </v-row>

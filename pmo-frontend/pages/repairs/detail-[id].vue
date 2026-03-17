@@ -508,7 +508,7 @@ onMounted(() => {
                     {{ repair.approvalMetadata?.createdByName || 'Unknown' }}
                   </div>
                   <div class="text-caption text-grey">
-                    {{ formatDate(repair.approvalMetadata?.createdAt || repair.createdAt || '') }}
+                    {{ formatDate(repair.approvalMetadata?.createdAt || '') }}
                   </div>
                 </v-timeline-item>
 

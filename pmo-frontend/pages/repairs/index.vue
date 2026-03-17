@@ -9,7 +9,7 @@ const router = useRouter()
 const api = useApi()
 const toast = useToast()
 const authStore = useAuthStore()
-const { canAdd, canEdit, canDelete, isAdmin, isStaff } = usePermissions()
+const { canAdd, canEdit, canDelete, isAdmin, isStaff, isSuperAdmin } = usePermissions()
 
 const repairs = ref<UIRepairProject[]>([])
 const search = ref('')

@@ -476,9 +476,9 @@ export class RepairProjectsService {
       );
     }
 
-    // Phase AD: Creator OR assigned user can submit for review
+    // Phase BV: Creator OR assigned user (via junction table) can submit for review
     const isOwner = project.created_by === userId;
-    const isAssigned = project.assigned_to === userId;
+    const isAssigned = await this.isUserAssigned(id, userId);
     if (!isOwner && !isAssigned) {
       throw new ForbiddenException('Only the creator or assigned user can submit this draft for review');
     }

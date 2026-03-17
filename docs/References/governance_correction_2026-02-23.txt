@@ -1,0 +1,143 @@
+================================================================================
+ARTIFACT GOVERNANCE CORRECTION
+================================================================================
+Date: February 23, 2026
+Action: Consolidation of standalone research/plan files into living documents
+
+================================================================================
+GOVERNANCE VIOLATION IDENTIFIED
+================================================================================
+
+Created 4 standalone documents in violation of "TWO LIVING DOCUMENTS ONLY" rule:
+
+  ❌ docs/References/phase_submit_profile_research_2026-02-23.md (600 lines)
+  ❌ docs/References/phase_submit_profile_plan_2026-02-23.md (500 lines)
+  ❌ docs/phase_bp_bq_status.md
+  ❌ docs/phase_3_implementation_complete.md
+
+Violated Principles:
+  1. TWO LIVING DOCUMENTS ONLY (research.md + plan.md)
+  2. SINGLE SOURCE OF TRUTH (no duplicate information)
+  3. COMPACTION OVER PROLIFERATION (archive, don't proliferate)
+
+================================================================================
+CORRECTIVE ACTION TAKEN
+================================================================================
+
+✅ CONSOLIDATED INTO LIVING DOCUMENTS:
+
+1. Added Section 1.54 to research.md:
+   - Submit Authorization & Profile Edit Governance (Feb 23, 2026)
+   - Root cause analysis of submit bug (uses deprecated column)
+   - Profile edit limitations analysis
+   - Governance model specification
+   - Risk assessment
+
+2. Added Phases BU-CA to plan.md Section 2:
+   - Phase BU: Fix submit authorization (Construction) [CRITICAL]
+   - Phase BV: Fix submit authorization (Repairs) [CRITICAL]
+   - Phase BW: Fix submit authorization (University Ops) [CRITICAL]
+   - Phase BX: Submit authorization regression testing [CRITICAL]
+   - Phase BY: Add username edit capability [HIGH]
+   - Phase BZ: Add email edit capability [HIGH]
+   - Phase CA: Enhanced audit logging [HIGH]
+
+3. Archived standalone files:
+   - Moved to docs/archive/ for reference
+   - Detailed content preserved but not primary source
+
+================================================================================
+CURRENT STATE (COMPLIANT)
+================================================================================
+
+✅ TWO LIVING DOCUMENTS:
+   - docs/research.md (6,442 lines) — Active research + Section 1.54
+   - docs/plan.md (3,339 lines) — Active phases + Phases BU-CA
+
+✅ ARCHIVED HISTORICAL FILES:
+   - docs/archive/phase_submit_profile_research_2026-02-23.md
+   - docs/archive/phase_submit_profile_plan_2026-02-23.md
+   - docs/archive/phase_bp_bq_status.md
+   - docs/archive/phase_3_implementation_complete.md
+
+✅ GOVERNANCE COMPLIANCE:
+   - Single source of truth: research.md Section 1.54
+   - Execution contract: plan.md Phases BU-CA
+   - 60-second rule: plan.md shows next action clearly
+   - Historical reference: Archived for detailed lookup
+
+================================================================================
+KEY FINDINGS NOW IN research.md Section 1.54
+================================================================================
+
+CRITICAL BUG IDENTIFIED:
+
+  Submit authorization uses deprecated `assigned_to` column
+  instead of `record_assignments` junction table.
+
+  Impact: Multi-user assignment workflow BROKEN
+  Severity: P0 CRITICAL
+  Blocks: University Operations go-live (March 8)
+
+SECONDARY FINDING:
+
+  Username and email cannot be edited by Admin/SuperAdmin.
+
+  Impact: Requires manual database edits
+  Severity: P1 HIGH
+  Blocks: None (workaround available)
+
+================================================================================
+IMPLEMENTATION PLAN NOW IN plan.md Phases BU-CA
+================================================================================
+
+CRITICAL PATH (3 hours):
+  - Phase BU: Fix Construction submit (1h)
+  - Phase BV: Fix Repairs submit (30min)
+  - Phase BW: Fix University Ops submit (30min)
+  - Phase BX: Regression testing (1h)
+
+HIGH PRIORITY (5 hours — Optional):
+  - Phase BY: Username edit (2h)
+  - Phase BZ: Email edit (2h)
+  - Phase CA: Audit logging (1h)
+
+Total: 8 hours (3 critical + 5 optional)
+
+================================================================================
+NEXT ACTION (60-SECOND RULE)
+================================================================================
+
+Read: plan.md Section 2 → Phases BU-CA
+
+Decision Required:
+  1. Execute critical path only (BU-BX) — 3 hours
+  2. Execute full plan (BU-CA) — 8 hours
+  3. Review and ask questions first
+
+User should approve which phases to execute in Phase 3.
+
+================================================================================
+GOVERNANCE LESSONS LEARNED
+================================================================================
+
+DO:
+  ✓ Consolidate findings into research.md
+  ✓ Add execution phases to plan.md
+  ✓ Archive detailed documents with date-based naming
+  ✓ Follow 60-second rule (next action clear)
+
+DON'T:
+  ✗ Create research_*.md files for different topics
+  ✗ Create standalone plan_*.md files
+  ✗ Duplicate information across files
+  ✗ Proliferate documentation
+
+CORRECT PATTERN:
+  research.md Section 1.X → Findings
+  plan.md Section 2 Phase XX → Implementation
+  docs/archive/ → Historical reference
+
+================================================================================
+END OF GOVERNANCE CORRECTION
+================================================================================

@@ -211,15 +211,20 @@ export class AuthService {
     );
     const module_assignments = moduleAssignmentsResult.rows.map((row) => row.module);
 
+    // Phase CF: Extract roles for reuse in role field
+    const roles = rolesResult.rows.map((r) => ({ id: r.id, name: r.name }));
+
     return {
       ...user,
-      roles: rolesResult.rows.map((r) => ({ id: r.id, name: r.name })),
+      roles,
       is_superadmin: rolesResult.rows.some((r) => r.is_superadmin),
       permissions: permsResult.rows.map((p) => p.name),
       module_overrides,
       module_assignments,
       rank_level: user.rank_level,
       campus: user.campus,  // Phase Y: Office-scoped visibility
+      // Phase CF: Add role field to match login() response format for frontend adapter
+      role: roles.length > 0 ? { name: roles[0].name } : undefined,
     };
   }
 

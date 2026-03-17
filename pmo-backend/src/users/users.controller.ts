@@ -123,9 +123,9 @@ export class UsersController {
   }
 
   @Post(':id/reset-password')
-  @Roles()
+  @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Reset user password (SuperAdmin only)' })
+  @ApiOperation({ summary: 'Reset user password (Admin/SuperAdmin, bypasses complexity for lower-rank users)' })
   resetPassword(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('password') password: string,

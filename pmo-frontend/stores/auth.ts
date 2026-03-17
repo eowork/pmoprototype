@@ -57,12 +57,15 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const backendUser = await api.get<BackendUser>('/api/auth/me')
       user.value = adaptUser(backendUser)
-    } catch {
-      // Token invalid - clear state
-      token.value = null
-      user.value = null
-      if (import.meta.client) {
-        localStorage.removeItem('access_token')
+    } catch (err: any) {
+      if (err?.statusCode === 401) {
+        token.value = null
+        user.value = null
+        if (import.meta.client) {
+          localStorage.removeItem('access_token')
+        }
+      } else {
+        console.warn('[Auth] Failed to fetch user (non-401), preserving token:', err?.message)
       }
     }
   }
