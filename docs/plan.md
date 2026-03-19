@@ -1,8 +1,8 @@
 # [Active Plan] PMO Dashboard - Governance & Hierarchical CRUD
 > **Governance:** ACE v2.4
-> **Phase:** Phase EU — System Development Transition Review
-> **Last Updated:** 2026-03-17
-> **Research Reference:** `research.md` Section 2.00
+> **Phase:** Phase FB — Critical Fix: Quarter Status Isolation Full Repair + Non-Persistent Prior-Quarter Data Prefill
+> **Last Updated:** 2026-03-19
+> **Research Reference:** `research.md` Section 2.08
 
 ---
 
@@ -85,6 +85,28 @@
 | 73 | **`fetchAllPillarOperations()` must filter to known pillar types only** | ✅ Phase EI-E (IMPLEMENTED) |
 | 74 | **`submitAllPillarsForReview()` must respect user ownership before submission** | ✅ Phase EI-F (IMPLEMENTED) |
 | 75 | **Quarter-level submission (per-QN status) requires backend endpoint** | ⏳ Phase EJ (DEFERRED) |
+| 76 | **DN-H regression test matrix must pass before Financial module development** | ✅ Phase ET (CODE-VERIFIED) |
+| 77 | **`expense_class` column required for BAR No. 2 PS/MOOE/CO categorization** | ✅ Phase ET-A (IMPLEMENTED) |
+| 78 | **Financial page must mirror Physical page structure (pillars, quarters, governance)** | ✅ Phase ET-C (IMPLEMENTED) |
+| 79 | **Financial subtotals computed on frontend — no new backend aggregation endpoint** | ✅ Phase ET-C (IMPLEMENTED) |
+| 80 | **Landing page Financial card must be enabled with navigation** | ✅ Phase ET-D (IMPLEMENTED) |
+| 81 | **`api.del()` must be used for DELETE requests (not `api.delete()`)** | ✅ Phase EV-A (IMPLEMENTED) |
+| 82 | **`utilization_rate` is the authoritative computed field name for % Utilization** | ✅ Phase EV-B (IMPLEMENTED) |
+| 83 | **Balance formula must use DBM-standard Unobligated Balance: Appropriation − Obligations** | ✅ Phase EV-C (IMPLEMENTED) |
+| 84 | **Financial page must include collapsible data entry guide** | ✅ Phase EV-D (IMPLEMENTED) |
+| 85 | **Financial hero section must display budget utilization summary** | ✅ Phase EV-E (IMPLEMENTED) |
+| 86 | **Submission workflow must distinguish Financial from Physical quarterly reports** | ✅ Phase EV-F (IMPLEMENTED) |
+| 87 | **Cross-module analytics preparation deferred until Financial data entry is stable** | ⬜ Phase EV-G (DEFERRED/YAGNI) |
+| 88 | **`findAll()` SELECT must include `uo.fiscal_year` — root cause of Financial display failure** | ✅ Phase EW-A (IMPLEMENTED) |
+| 89 | **Hero subtitle must lead with functional description, keep BAR No. 2 as parenthetical** | ✅ Phase EW-B (IMPLEMENTED) |
+| 90 | **Actions column must include explicit Edit button alongside Delete** | ✅ Phase EX-A (IMPLEMENTED) |
+| 91 | **Disbursement field is optional — must include helper text clarifying its role** | ✅ Phase EX-B (IMPLEMENTED) |
+| 92 | **Data entry form must include hint text on key financial fields** | ✅ Phase EX-C (IMPLEMENTED) |
+| 93 | **Financial top controls must be right-aligned with no whitespace gap** | ✅ Phase EX-D (IMPLEMENTED — revised: right-aligned with justify-end) |
+| 94 | **Financial pillar tabs must use fullName and match Physical styling** | ✅ Phase EX-E (IMPLEMENTED) |
+| 95 | **All user-facing BAR No. 2 references must be removed** | ✅ Phase EX-F (IMPLEMENTED) |
+| 96 | **Financial analytics endpoints deferred until data entry is stable** | ⬜ Phase EX-G (DEFERRED/YAGNI) |
+| 97 | **Pending reviews must clearly identify UO quarterly submissions as "Physical & Financial"** | ✅ Phase EY-A (IMPLEMENTED) |
 
 ---
 
@@ -160,9 +182,9 @@
 
 ### PHASE DN: UNIVERSITY OPERATIONS MAIN MODULE UI STABILIZATION [MUST]
 
-**Status:** 🟡 PHASE 3 IN PROGRESS — Steps DN-A through DN-G COMPLETE  
-**Priority:** P1 — Multiple UI/UX and data integrity issues  
-**Research Reference:** `research.md` Section 1.70  
+**Status:** ✅ COMPLETE — Steps DN-A through DN-G IMPLEMENTED, DN-H CODE-VERIFIED (2026-03-17)
+**Priority:** P1 — Multiple UI/UX and data integrity issues
+**Research Reference:** `research.md` Section 1.70
 
 ---
 
@@ -410,7 +432,177 @@ style="width: 120px"
 
 ## SECTION 2 — THE NEXT (Approved Queue)
 
-*No items pending.*
+### PHASE ET: FINANCIAL ACCOMPLISHMENTS PAGE (BAR No. 2) [MUST]
+
+**Status:** ✅ PHASE 3 COMPLETE — ET-A through ET-D IMPLEMENTED (2026-03-19)
+**Priority:** P0 — Stakeholder milestone: April 6, 2026
+**Research Reference:** `research.md` Section 1.99
+**Prerequisite:** DN-H regression verified ✅ (2026-03-17)
+
+---
+
+#### **STEP ET-A: DATABASE MIGRATION — `expense_class` COLUMN** [CRITICAL]
+
+**Scope:** Database migration
+**File:** `database/migrations/029_add_expense_class_column.sql`
+
+**Problem:** `operation_financials` has no column to categorize records as PS, MOOE, or CO. The BAR No. 2 Excel requires every financial line item to be classified by expense class for hierarchical grouping (Program → Campus → Expense Class).
+
+**Change:**
+```sql
+-- Migration 029: Add expense_class column to operation_financials
+-- Required for BAR No. 2 financial reporting (PS/MOOE/CO categorization)
+
+ALTER TABLE operation_financials
+  ADD COLUMN IF NOT EXISTS expense_class VARCHAR(4)
+  CHECK (expense_class IN ('PS', 'MOOE', 'CO'));
+
+CREATE INDEX IF NOT EXISTS idx_of_expense_class
+  ON operation_financials(expense_class);
+
+-- Composite: operation_id + expense_class for pillar-level grouping
+CREATE INDEX IF NOT EXISTS idx_of_operation_expense
+  ON operation_financials(operation_id, expense_class)
+  WHERE deleted_at IS NULL;
+```
+
+**Verification:**
+- [ ] ET-A1: Migration runs without error
+- [ ] ET-A2: `\d operation_financials` shows `expense_class` column with CHECK constraint
+- [ ] ET-A3: Index `idx_of_expense_class` exists
+- [ ] ET-A4: Existing records unaffected (column is NULLABLE)
+
+---
+
+#### **STEP ET-B: BACKEND DTO + SERVICE UPDATE** [CRITICAL]
+
+**Scope:** Backend — DTO and service
+**Files:**
+- `pmo-backend/src/university-operations/dto/create-financial.dto.ts`
+- `pmo-backend/src/university-operations/university-operations.service.ts`
+
+**Change 1 — DTO:** Add `expense_class` field to `CreateFinancialDto`:
+```typescript
+@IsOptional()
+@IsIn(['PS', 'MOOE', 'CO'])
+expense_class?: string;
+```
+
+**Change 2 — Service:** Ensure `createFinancial()` and `updateFinancial()` include `expense_class` in INSERT/UPDATE column lists. Both methods use dynamic column building from `dto` keys, so this should work automatically if the DTO field is added. Verify.
+
+**Change 3 — Service:** Add `expense_class` to `findFinancials()` query filter support:
+```typescript
+if (query.expense_class) {
+  conditions.push(`of.expense_class = $${params.length + 1}`);
+  params.push(query.expense_class);
+}
+```
+
+**Verification:**
+- [ ] ET-B1: POST with `expense_class: 'PS'` creates record correctly
+- [ ] ET-B2: GET with `?expense_class=MOOE` filters correctly
+- [ ] ET-B3: PATCH updates `expense_class` without error
+- [ ] ET-B4: Computed metrics (`computeFinancialMetrics`) unaffected
+
+---
+
+#### **STEP ET-C: FINANCIAL PAGE FRONTEND** [CRITICAL]
+
+**Scope:** Frontend — new page
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue`
+
+**Structure (mirrors Physical page):**
+1. **Header:** Back button, title "Financial Accomplishments — BAR No. 2", FY selector, quarter selector
+2. **Pillar tabs:** Same 4 PILLARS constant (MFO1-4 mapping)
+3. **Pillar header card:** FY chip + publication status chip + submit/withdraw controls (reuses governance workflow)
+4. **Data table:** Per-campus grouped financial records with expense class rows
+5. **Entry dialog:** Create/edit financial record with fields: operations_programs, expense_class, fund_type, allotment, obligation, disbursement, remarks
+6. **Subtotal computation:** Frontend-computed campus subtotals and pillar totals
+7. **Lock/unlock banners:** Same governance UI as Physical page
+
+**Table Layout (per pillar):**
+
+| Program / Line Item | Campus | Expense Class | Appropriation | Obligations | % Utilization | Balance |
+|---|---|---|---|---|---|---|
+| Row data | MAIN/CABADBARAN | PS/MOOE/CO | allotment | obligation | computed | computed |
+| **Campus Sub-Total** | | | **SUM** | **SUM** | **computed** | **SUM** |
+| **Pillar Total** | | | **SUM** | **SUM** | **computed** | **SUM** |
+
+**Key differences from Physical page:**
+- No taxonomy-driven structure (financial records are user-created line items, not static indicators)
+- Grouped by campus → expense_class instead of outcome/output
+- Computed columns: `% Utilization = obligation/allotment*100`, `Balance = allotment - obligation`
+- Entry form has different fields (no quarterly T/A/S — instead: allotment, obligation, disbursement)
+
+**Data flow:**
+1. `findCurrentOperation()` — same as Physical (find operation for pillar + FY)
+2. If no operation, auto-create on first save (same pattern)
+3. `fetchFinancials()` — `GET /api/university-operations/{operationId}/financials?fiscal_year=X&quarter=Q1`
+4. Group results by `department` (campus) → `expense_class`
+5. Compute subtotals in `computed()` properties
+
+**Shared infrastructure (import from Physical page patterns):**
+- `canEditData()` — same permission logic
+- `currentQuarterlyReport` — same quarterly report entity
+- `submitAllPillarsForReview()` / `withdrawAllPillarsSubmission()` — same submit workflow
+- Published edit warning dialog — same governance UI
+- Unlock request workflow — same
+
+**Verification:**
+- [ ] ET-C1: Page renders with 4 pillar tabs
+- [ ] ET-C2: Financial records display grouped by campus → expense class
+- [ ] ET-C3: Subtotals compute correctly
+- [ ] ET-C4: Create financial record with expense_class
+- [ ] ET-C5: Edit financial record updates correctly
+- [ ] ET-C6: Delete financial record (Admin only) works
+- [ ] ET-C7: Published quarterly report locks financial edits
+- [ ] ET-C8: Submit/Withdraw works for quarterly report (shared with Physical)
+
+---
+
+#### **STEP ET-D: LANDING PAGE INTEGRATION** [IMPORTANT]
+
+**Scope:** Frontend — update landing page
+**File:** `pmo-frontend/pages/university-operations/index.vue`
+
+**Changes:**
+1. Enable Financial card (remove `disabled`, update styling)
+2. Update `navigateToFinancial()` to route to `/university-operations/financial`
+3. Pass FY query param: `?year=${selectedFiscalYear.value}`
+
+**Verification:**
+- [ ] ET-D1: Financial card is clickable with proper styling
+- [ ] ET-D2: Navigation routes to financial page with correct FY
+- [ ] ET-D3: Physical card still works unchanged
+
+---
+
+#### **STEP ET-E: REGRESSION TESTING** [CRITICAL]
+
+**Test Matrix:**
+
+| Test ID | Scenario | Expected Result |
+|---------|----------|----------------|
+| ET-E1 | Create financial record with PS expense class | Record saved with correct expense_class |
+| ET-E2 | Switch pillar tabs → correct financial data | No stale/mixed data |
+| ET-E3 | Switch FY → correct data reload | Financial records for new FY |
+| ET-E4 | Submit quarterly report from Financial page | Same quarterly report used by Physical |
+| ET-E5 | Published quarterly report blocks Financial edits | canEditData() enforced |
+| ET-E6 | Physical page unaffected | No regression |
+| ET-E7 | Campus subtotals accurate | SUM of PS+MOOE+CO matches expected |
+| ET-E8 | % Utilization computes correctly | obligation/allotment * 100 |
+
+---
+
+#### **IMPLEMENTATION ORDER:**
+
+```
+ET-A (migration) → ET-B (backend DTO/service) → ET-C (frontend page) → ET-D (landing page) → ET-E (regression)
+```
+
+**Estimated scope:** ~800-1200 lines new frontend code (Financial page), ~20 lines backend changes, ~15 lines migration.
+
+---
 
 ---
 
@@ -1877,6 +2069,637 @@ The Financial page shares the quarterly report entity with the Physical page. Bo
 
 ---
 
+## Phase EV — Financial Accomplishment Module: Data Retrieval Fix, UI Enhancement, and DBM-Aligned Pillar-Based Architecture
+
+**Research Reference:** Section 2.02
+**Date:** 2026-03-19
+**Status:** ✅ PHASE 3 COMPLETE — EV-A through EV-F IMPLEMENTED (2026-03-19)
+**Priority:** P0 — Critical bugs block Financial module usability. Stakeholder milestone: April 6, 2026.
+**Prerequisite:** Phase ET complete ✅ (Financial page created, expense_class column added)
+
+---
+
+### Phase EV Problem Statement
+
+The Financial Accomplishments page (Phase ET) was successfully created but has three confirmed bugs that prevent correct operation: (1) `api.delete()` call crashes at runtime because `useApi` exports `del`, not `delete`; (2) % Utilization column always shows "—" because the template reads `utilization_per_approved_budget` (DB column, never computed) instead of `utilization_rate` (computed by `computeFinancialMetrics()`); (3) Balance formula differs between backend (`allotment - disbursement`) and frontend subtotals (`allotment - obligation`), misaligning with DBM standard "Unobligated Balance" = Appropriation − Obligations. Additionally, the page lacks a data entry guide, has a generic hero section, and doesn't distinguish Financial submissions from Physical in the workflow labels.
+
+---
+
+### Phase EV Steps
+
+#### EV-A: Fix `api.delete` → `api.del` Runtime Error [CRITICAL]
+
+**Scope:** Frontend — single line fix
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` line 528
+**Research:** EV-2
+
+**Problem:** `await api.delete(...)` throws `TypeError: api.delete is not a function` at runtime. The `useApi` composable exports `del`, not `delete`. Every other module in the codebase correctly uses `api.del()`.
+
+**Change:**
+```typescript
+// Current (line 528):
+await api.delete(`/api/university-operations/${currentOperation.value.id}/financials/${record.id}`)
+
+// Fixed:
+await api.del(`/api/university-operations/${currentOperation.value.id}/financials/${record.id}`)
+```
+
+**Verification:**
+- [ ] EV-A1: Deleting a financial record succeeds without TypeError
+- [ ] EV-A2: Record is removed from UI after delete
+- [ ] EV-A3: Record is soft-deleted in database (deleted_at set)
+
+---
+
+#### EV-B: Fix `utilization_per_approved_budget` → `utilization_rate` Field Name Mismatch [CRITICAL]
+
+**Scope:** Frontend — template field references
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` lines 900-933
+**Research:** EV-3
+
+**Problem:** Backend `computeFinancialMetrics()` returns `utilization_rate` (computed: `(obligation / allotment) × 100`). Frontend template reads `rec.utilization_per_approved_budget` — a raw DB column that is never populated during INSERT. Result: % Utilization column always shows "—".
+
+**Change:** Replace ALL references to `utilization_per_approved_budget` with `utilization_rate` in the template section:
+
+```html
+<!-- Current: -->
+<v-chip v-if="rec.utilization_per_approved_budget !== null && rec.utilization_per_approved_budget !== undefined">
+  {{ formatPercent(rec.utilization_per_approved_budget) }}
+</v-chip>
+
+<!-- Fixed: -->
+<v-chip v-if="rec.utilization_rate !== null && rec.utilization_rate !== undefined">
+  {{ formatPercent(rec.utilization_rate) }}
+</v-chip>
+```
+
+**Also fix in `campusSubtotals` computed property** (if it references `utilization_per_approved_budget`): replace with computation from subtotal values: `(totalObligations / totalAllotment) × 100`.
+
+**Verification:**
+- [ ] EV-B1: % Utilization column shows computed percentage when allotment and obligation are non-zero
+- [ ] EV-B2: % Utilization shows "—" only when allotment is zero or null
+- [ ] EV-B3: Subtotal rows show correct aggregated utilization rate
+
+---
+
+#### EV-C: Align Balance Formula with DBM Standard [MUST]
+
+**Scope:** Frontend — computed property + Backend — `computeFinancialMetrics()`
+**Files:** `financial/index.vue` (campusSubtotals), `university-operations.service.ts` (computeFinancialMetrics)
+**Research:** EV-4
+
+**Problem:** Backend computes `balance = allotment - disbursement` ("Undisbursed Allotment"). Frontend subtotals compute `balance = allotment - obligation` ("Unobligated Balance"). DBM BAR No. 2 standard defines "Unobligated Balance" = Appropriation − Obligations.
+
+**Change — Backend `computeFinancialMetrics()`:**
+```typescript
+// Current (service.ts ~line 212):
+balance: allotment !== null && disbursement !== null
+  ? parseFloat((allotment - disbursement).toFixed(2))
+  : null,
+
+// Fixed — align with DBM "Unobligated Balance":
+balance: allotment !== null && obligation !== null
+  ? parseFloat((allotment - obligation).toFixed(2))
+  : null,
+```
+
+**Frontend subtotals:** Already use `allotment - obligation` — no change needed after backend alignment.
+
+**Note:** If `disbursement`-based balance is needed elsewhere, add a separate `undisbursed_allotment` computed field. But per DBM BAR No. 2 and the Continuing Appropriations Excel, "balance" = Unobligated Balance.
+
+**Verification:**
+- [ ] EV-C1: Individual record `balance` = `allotment - obligation`
+- [ ] EV-C2: Subtotal `balance` = sum(allotment) - sum(obligation) per campus/expense class
+- [ ] EV-C3: Backend and frontend balance values match for the same record
+
+---
+
+#### EV-D: Add Collapsible Data Entry Guide [SHOULD]
+
+**Scope:** Frontend — new section in template
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue`
+**Research:** EV-8
+
+**Problem:** The Physical page has a collapsible guidance panel (Phase DX, Directive #43). The Financial page lacks equivalent guidance, leaving users without context for BAR No. 2 data entry.
+
+**Change:** Add a `v-expansion-panels` section below the hero bar (same pattern as Physical page's guidance panel):
+
+**Content:**
+- **Expense Classes:** PS (Personal Services — salaries, wages, benefits), MOOE (Maintenance & Operating Expenses — supplies, utilities), CO (Capital Outlay — equipment, infrastructure)
+- **Key Terms:** Appropriation = Total budget allocation; Obligations = Amounts committed; % Utilization = (Obligations ÷ Appropriation) × 100
+- **Data Entry:** Select the correct pillar tab (MFO1-4), choose campus and expense class, then enter Appropriation and Obligations amounts
+- **Quarterly Reporting:** Each quarter is an independent submission. Submit via the pillar header when data entry is complete.
+
+**Collapsed by default** (consistent with Directive #69).
+
+**Verification:**
+- [ ] EV-D1: Guide panel renders below hero section
+- [ ] EV-D2: Guide is collapsed by default
+- [ ] EV-D3: Expand/collapse toggles correctly
+
+---
+
+#### EV-E: Financial-Focused Hero Section [SHOULD]
+
+**Scope:** Frontend — hero bar content update
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue`
+**Research:** EV-8
+
+**Problem:** Current hero section shows a generic "BAR No. 2 — Financial Accomplishments" label. It should provide at-a-glance budget utilization context for the active pillar.
+
+**Change:** Update the hero bar to display:
+- Title: "Financial Accomplishments — BAR No. 2"
+- Subtitle: Active pillar name (e.g., "MFO1: Higher Education")
+- Summary chips (computed from `financialRecords`):
+  - Total Appropriation: `₱X,XXX,XXX.XX`
+  - Total Obligations: `₱X,XXX,XXX.XX`
+  - Overall Utilization: `XX.XX%`
+  - Record Count: `N records`
+
+**Implementation pattern:** Same as Physical page's pillar header chips (Phase EE-B). Compute from `financialRecords.value` filtered to active pillar.
+
+**Verification:**
+- [ ] EV-E1: Hero shows active pillar name
+- [ ] EV-E2: Summary chips display correct aggregated values
+- [ ] EV-E3: Chips update when switching pillars or quarters
+
+---
+
+#### EV-F: Submission Workflow Label Distinction [SHOULD]
+
+**Scope:** Frontend — label text updates
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue`
+**Research:** EV-8
+
+**Problem:** Financial page submission dialogs/buttons use the same generic "Submit Q1" label as the Physical page. Since both share the same `quarterly_reports` entity, the user should clearly see which module's data they're submitting.
+
+**Change:**
+- Submit button label: "Submit Q1" → "Submit Financial Q1"
+- Submit confirmation dialog text: Reference "Financial Quarterly Report" explicitly
+- Status banner: "Q1 Status: PENDING_REVIEW" → "Financial Q1 Status: PENDING_REVIEW"
+
+**Note:** This is a label-only change. The underlying `quarterly_reports` entity remains shared between Physical and Financial. Both modules submit/approve the same quarterly report. The label distinction prevents user confusion.
+
+**Verification:**
+- [ ] EV-F1: Submit button reads "Submit Financial Q1" (or active quarter)
+- [ ] EV-F2: Status banner includes "Financial" qualifier
+- [ ] EV-F3: Confirmation dialog references Financial data
+
+---
+
+#### EV-G: Cross-Module Analytics Preparation [DEFERRED — YAGNI]
+
+**Scope:** Backend + Frontend — analytics endpoints + dashboard
+**Research:** EV-7
+
+**Problem:** No financial analytics endpoints exist. Physical analytics have pillar-summary, quarterly-trend, and yearly-comparison endpoints.
+
+**Deferred because:**
+1. Financial data entry is not yet stable (EV-A through EV-C must be fixed first)
+2. No financial data exists in production to visualize
+3. April 6 stakeholder milestone focuses on data entry capability, not analytics
+4. YAGNI — build analytics when there's data to analyze
+
+**Pre-conditions for future implementation:**
+- EV-A through EV-F complete and verified
+- At least one quarter of financial data entered across all pillars
+- Stakeholder request for financial analytics specifically
+
+**When implemented, will require:**
+- `findFinancialPillarSummary()` — Appropriation vs Obligation per pillar
+- `findFinancialQuarterlyTrend()` — Utilization rate trend Q1-Q4
+- `findPhysicalVsFinancial()` — Side-by-side pillar comparison (Physical achievement rate vs Financial utilization rate)
+
+---
+
+### Phase EV Governance Directives
+
+| # | Directive | Phase |
+|---|-----------|-------|
+| 81 | **`api.del()` must be used for DELETE requests (not `api.delete()`)** | Phase EV-A |
+| 82 | **`utilization_rate` is the authoritative computed field name for % Utilization** | Phase EV-B |
+| 83 | **Balance formula must use DBM-standard Unobligated Balance: Appropriation − Obligations** | Phase EV-C |
+| 84 | **Financial page must include collapsible data entry guide** | Phase EV-D |
+| 85 | **Financial hero section must display budget utilization summary** | Phase EV-E |
+| 86 | **Submission workflow must distinguish Financial from Physical quarterly reports** | Phase EV-F |
+| 87 | **Cross-module analytics preparation deferred until Financial data entry is stable** | Phase EV-G |
+
+---
+
+### Phase EV Execution Priority
+
+| Priority | Step | Severity | Scope | Key Risk | Status |
+|----------|------|----------|-------|----------|--------|
+| 1 | EV-A: Fix `api.delete` → `api.del` | CRITICAL | Frontend (1 line) | None — trivial fix | ✅ IMPLEMENTED |
+| 2 | EV-B: Fix `utilization_rate` field name | CRITICAL | Frontend (template) | Must find ALL references | ✅ IMPLEMENTED |
+| 3 | EV-C: Align balance formula with DBM | HIGH | Backend + Frontend | Backend change requires restart | ✅ IMPLEMENTED |
+| 4 | EV-D: Add collapsible data entry guide | MEDIUM | Frontend (template) | Follow Physical page pattern | ✅ IMPLEMENTED |
+| 5 | EV-E: Financial-focused hero section | MEDIUM | Frontend (template + computed) | Compute from filtered records | ✅ IMPLEMENTED |
+| 6 | EV-F: Submission workflow label distinction | LOW | Frontend (labels) | Label-only — no logic change | ✅ IMPLEMENTED |
+| 7 | EV-G: Cross-module analytics | LOW | Backend + Frontend | DEFERRED — YAGNI | ⬜ DEFERRED |
+
+---
+
+### Phase EV Feasibility Assessment
+
+| Factor | Assessment |
+|--------|------------|
+| Bug fixes (EV-A, EV-B) | **Trivial** — single-file, exact line numbers known |
+| Balance alignment (EV-C) | **Low risk** — one line in backend, subtotals already correct in frontend |
+| UI enhancements (EV-D, EV-E, EV-F) | **Moderate** — follow established Physical page patterns |
+| Cross-module analytics (EV-G) | **Deferred** — no implementation needed until data entry is stable |
+| Backend restart required | **Yes** — EV-C modifies `computeFinancialMetrics()` |
+| Estimated implementation time | **1 session** — all changes are in 2 files (financial/index.vue + service.ts) |
+
+---
+
+### Phase EV Timeline
+
+| Date | Milestone | Status |
+|------|-----------|--------|
+| 2026-03-19 | Phase EV: Research (Phase 1) + Plan (Phase 2) | ✅ COMPLETE |
+| 2026-03-19–20 | Phase EV: Implementation (Phase 3) | ⬜ AWAITING AUTHORIZATION |
+| 2026-03-21–25 | ET-E regression + Financial page testing | ⬜ PENDING |
+| 2026-03-26–31 | Stabilization, edge cases, data population | ⬜ PENDING |
+| 2026-04-01–04 | Stakeholder presentation prep | ⬜ PENDING |
+| **2026-04-06** | **Stakeholder feedback session (MIS/PMO Directors)** | **⬜ TARGET** |
+
+---
+
+## Phase EW — Financial Accomplishment Module: Data Retrieval Failure Fix, DBM-Aligned Structure, and Pillar-Based UI Refactor
+
+**Research Reference:** Section 2.03
+**Date:** 2026-03-19
+**Status:** ✅ PHASE 3 COMPLETE — EW-A and EW-B IMPLEMENTED (2026-03-19)
+**Priority:** P0 — CRITICAL. Financial records exist in database but are invisible in UI. All Financial module functionality is blocked.
+**Prerequisite:** Phase EV complete ✅ (bug fixes applied, but display failure persists)
+
+---
+
+### Phase EW Problem Statement
+
+Financial records are successfully inserted into the `operation_financials` table (INSERT → SUCCESS), but the UI displays "No Financial Records" (DISPLAY → FAILURE). Root cause: the backend `findAll()` method in `university-operations.service.ts` uses an explicit SELECT column list that **omits `uo.fiscal_year`**. The column was added to the table in migration 014 and the WHERE clause was updated to filter by it, but the SELECT list was never updated.
+
+The frontend `findCurrentOperation()` receives operation objects without `fiscal_year`, then tries `.find(op => ... && Number(op.fiscal_year) === Number(selectedYear))`. Since `op.fiscal_year` is `undefined`, `Number(undefined) = NaN`, and `NaN !== 2026` always evaluates to false. Result: `currentOperation = null` → financial data fetch is skipped → empty UI.
+
+This same bug exists in the Physical page but is masked because Physical indicators are fetched via a separate endpoint that doesn't depend on `currentOperation`.
+
+---
+
+### Phase EW Steps
+
+#### EW-A: Add `uo.fiscal_year` to `findAll()` SELECT [CRITICAL]
+
+**Scope:** Backend — single column addition to SQL SELECT
+**File:** `pmo-backend/src/university-operations/university-operations.service.ts` lines 300-303
+**Research:** EW-1
+
+**Problem:** The `findAll()` SELECT explicitly lists 23 columns but omits `uo.fiscal_year`. The column exists in the table (migration 014), is filtered in the WHERE clause (line 285), but is never returned in the response. This breaks the frontend `.find()` comparison that requires `fiscal_year` to match operations.
+
+**Change:**
+```sql
+-- Current (line 300-303):
+SELECT uo.id, uo.operation_type, uo.title, uo.description, uo.code, uo.start_date, uo.end_date,
+       uo.status, uo.budget, uo.campus, uo.coordinator_id, uo.publication_status, uo.created_at, uo.updated_at,
+       uo.submitted_by, uo.submitted_at, uo.created_by,
+       uo.status_q1, uo.status_q2, uo.status_q3, uo.status_q4,
+
+-- Fixed — add uo.fiscal_year:
+SELECT uo.id, uo.operation_type, uo.title, uo.description, uo.code, uo.start_date, uo.end_date,
+       uo.status, uo.budget, uo.campus, uo.coordinator_id, uo.publication_status, uo.created_at, uo.updated_at,
+       uo.submitted_by, uo.submitted_at, uo.created_by,
+       uo.status_q1, uo.status_q2, uo.status_q3, uo.status_q4,
+       uo.fiscal_year,
+```
+
+**Impact:**
+- Financial page: `findCurrentOperation()` will return the matching operation → `fetchFinancialData()` will fetch and display records
+- Physical page: `findCurrentOperation()` will also start working correctly (was silently broken for governance controls)
+- Landing page: Any code that reads `fiscal_year` from list responses will work
+
+**Verification:**
+- [ ] EW-A1: After save, financial records appear in the UI immediately
+- [ ] EW-A2: Page refresh preserves displayed financial records
+- [ ] EW-A3: Switching pillars loads correct financial records for each pillar
+- [ ] EW-A4: Switching fiscal years loads correct financial records
+- [ ] EW-A5: Switching quarters loads correct financial records
+- [ ] EW-A6: Physical page submit/withdraw continues to work (confirm `currentOperation` is now found)
+
+---
+
+#### EW-B: Reword Hero Subtitle [SHOULD]
+
+**Scope:** Frontend — label text update
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` line 664
+**Research:** EW-5
+
+**Problem:** User requested removal of "irrelevant BAR No. 2 reference." However, BAR No. 2 is the official DBM designation. Solution: lead with functional description, keep BAR No. 2 as parenthetical.
+
+**Change:**
+```html
+<!-- Current: -->
+BAR No. 2 — Budget Utilization and Financial Performance
+
+<!-- Fixed: -->
+Budget Utilization and Financial Performance (BAR No. 2)
+```
+
+**Verification:**
+- [ ] EW-B1: Subtitle reads "Budget Utilization and Financial Performance (BAR No. 2)"
+
+---
+
+### Phase EW Governance Directives
+
+| # | Directive | Phase |
+|---|-----------|-------|
+| 88 | **`findAll()` SELECT must include `uo.fiscal_year` — root cause of Financial display failure** | Phase EW-A |
+| 89 | **Hero subtitle must lead with functional description, keep BAR No. 2 as parenthetical** | Phase EW-B |
+
+---
+
+### Phase EW Execution Priority
+
+| Priority | Step | Severity | Scope | Key Risk | Status |
+|----------|------|----------|-------|----------|--------|
+| 1 | EW-A: Add `uo.fiscal_year` to `findAll()` SELECT | **CRITICAL** | Backend (1 line) | None — additive column, no breaking change | ✅ IMPLEMENTED |
+| 2 | EW-B: Reword hero subtitle | LOW | Frontend (1 line) | None — label only | ✅ IMPLEMENTED |
+
+---
+
+### Phase EW Feasibility Assessment
+
+| Factor | Assessment |
+|--------|------------|
+| Root cause certainty | **HIGH** — code path traced end-to-end with proof |
+| Fix complexity | **Trivial** — add one column to existing SELECT list |
+| Risk of regression | **None** — additive change, no existing behavior altered |
+| Backend restart required | **Yes** — service.ts modification |
+| Estimated implementation time | **< 5 minutes** — 2 lines of code |
+| Unblocks | All Phase EV fixes (EV-A through EV-F), data entry testing, deletion, financial analytics |
+
+---
+
+### Phase EW Impact Chain
+
+```
+EW-A fix (add fiscal_year to SELECT)
+  ↓ Unblocks
+findCurrentOperation() returns matching operation
+  ↓ Unblocks
+fetchFinancialData() fetches financial records via /${operationId}/financials
+  ↓ Unblocks
+financialRecords.value populated → UI renders records
+  ↓ Unblocks
+EV-A (delete), EV-B (utilization %), EV-C (balance), EV-D (guide), EV-E (hero chips), EV-F (labels)
+  ↓ Unblocks
+Data entry testing → Stakeholder demo readiness (April 6, 2026)
+```
+
+---
+
+## Phase EX — Financial Accomplishment Module: UI Consistency, Action Controls, Data Semantics, and Analytics Integration
+
+**Research Reference:** Section 2.04
+**Date:** 2026-03-19
+**Status:** ✅ PHASE 3 COMPLETE — EX-A through EX-F IMPLEMENTED (2026-03-19)
+**Priority:** P1 — UI usability issues block efficient data entry and testing. Stakeholder milestone: April 6, 2026.
+**Prerequisite:** Phase EW complete ✅ (data retrieval fixed)
+
+---
+
+### Phase EX Problem Statement
+
+With data retrieval now working (Phase EW), several UI/UX issues prevent efficient Financial module use: (1) the Actions column shows only a Delete button (admin-only), with no visible Edit button — users must click the row to edit, but nothing communicates this; (2) the Disbursement field lacks context, leaving users uncertain whether it's required; (3) the top controls container is 200px narrower than Physical, creating visible whitespace; (4) pillar tabs use short names without background color, unlike Physical; (5) "BAR No. 2" references remain despite user request for removal; (6) financial analytics endpoints do not exist yet.
+
+---
+
+### Phase EX Steps
+
+#### EX-A: Add Explicit Edit Button to Actions Column [HIGH]
+
+**Scope:** Frontend — template modification
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` lines 960-969, 987-996
+**Research:** EX-1
+
+**Problem:** Actions column only has a Delete button (admin-only). Edit requires clicking the entire row with no visual indicator. Physical page has an explicit pencil button per row.
+
+**Change:** Add an edit (pencil) button before the delete button in both categorized and uncategorized record rows:
+
+```html
+<td v-if="canEditData()" class="text-center">
+  <v-btn
+    icon="mdi-pencil"
+    size="x-small"
+    variant="text"
+    @click.stop="openEditDialog(rec)"
+  />
+  <v-btn
+    v-if="isAdmin"
+    icon="mdi-delete-outline"
+    size="x-small"
+    variant="text"
+    color="error"
+    @click.stop="confirmDelete(rec)"
+  />
+</td>
+```
+
+**Notes:**
+- Edit button visible to ALL users with `canEditData()` permission (not just admins)
+- Delete button remains admin-only (existing behavior)
+- `@click.stop` prevents row click from also firing
+- Apply to both categorized records (line 960) and uncategorized records (line 987)
+
+**Verification:**
+- [ ] EX-A1: Pencil icon visible in Actions column for users with edit permission
+- [ ] EX-A2: Clicking pencil opens edit dialog pre-filled with record data
+- [ ] EX-A3: Delete icon still visible only for admin users
+- [ ] EX-A4: Row click still opens edit dialog (preserved behavior)
+
+---
+
+#### EX-B: Disbursement Field — Add Helper Text and "Optional" Label [MEDIUM]
+
+**Scope:** Frontend — form field update
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` lines 1128-1137
+**Research:** EX-2
+
+**Problem:** Disbursement field has no context. Users don't know if it's required, what it measures, or how it relates to other fields.
+
+**Change:**
+```html
+<v-text-field
+  v-model.number="entryForm.disbursement"
+  label="Disbursement (Optional)"
+  hint="Actual cash payments released. Used to compute Disbursement Rate."
+  persistent-hint
+  variant="outlined"
+  density="compact"
+  type="number"
+  prefix="₱"
+/>
+```
+
+**Verification:**
+- [ ] EX-B1: Label reads "Disbursement (Optional)"
+- [ ] EX-B2: Hint text visible below the field
+
+---
+
+#### EX-C: Data Entry Form — Add Helper Text to Key Fields [MEDIUM]
+
+**Scope:** Frontend — form field hints
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` lines 1108-1137
+**Research:** EX-3
+
+**Change:** Add `hint` and `persistent-hint` to the three financial amount fields:
+
+- **Appropriation:** hint = "Total budget allocation for this line item"
+- **Obligations:** hint = "Amounts committed against the appropriation"
+- **Disbursement:** (covered in EX-B)
+
+**Verification:**
+- [ ] EX-C1: Appropriation field shows hint text
+- [ ] EX-C2: Obligations field shows hint text
+
+---
+
+#### EX-D: Top Controls Container — Match Physical Page Width [MEDIUM]
+
+**Scope:** Frontend — CSS style update
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` line 685
+**Research:** EX-4, EX-6
+
+**Problem:** Financial uses `max-width: 560px`, Physical uses `max-width: 760px`. This creates a visible right-side whitespace gap.
+
+**Change:**
+```html
+<!-- Current: -->
+<div ... style="width: 100%; max-width: 560px">
+
+<!-- Fixed: -->
+<div ... style="width: 100%; max-width: 760px">
+```
+
+**Verification:**
+- [ ] EX-D1: Top controls align with content area — no right whitespace gap
+- [ ] EX-D2: Responsive behavior maintained on mobile
+
+---
+
+#### EX-E: Pillar Tabs — Match Physical Page Styling [MEDIUM]
+
+**Scope:** Frontend — template update
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` lines 747-756
+**Research:** EX-4
+
+**Problem:** Financial pillar tabs use short `pillar.name` and no background color. Physical tabs use `pillar.fullName` inside a `v-card` with `bg-color="primary"`.
+
+**Change:** Wrap tabs in `v-card` and use `fullName`:
+```html
+<v-card class="mb-4">
+  <v-tabs v-model="activePillar" bg-color="primary" show-arrows>
+    <v-tab v-for="pillar in PILLARS" :key="pillar.id" :value="pillar.id">
+      <v-icon start>{{ pillar.icon }}</v-icon>
+      {{ pillar.fullName }}
+    </v-tab>
+  </v-tabs>
+</v-card>
+```
+
+**Verification:**
+- [ ] EX-E1: Pillar tabs have primary background color
+- [ ] EX-E2: Tabs show full MFO names (e.g., "MFO1: Higher Education Services")
+- [ ] EX-E3: Tabs are wrapped in a card consistent with Physical page
+
+---
+
+#### EX-F: Remove All User-Facing "BAR No. 2" References [LOW]
+
+**Scope:** Frontend — label text updates
+**Files:** `financial/index.vue` line 664, `index.vue` (landing) line 67
+**Research:** EX-5
+
+**Change 1 — Financial page subtitle:**
+```
+Current: "Budget Utilization and Financial Performance (BAR No. 2)"
+Fixed:   "Budget Utilization and Financial Performance"
+```
+
+**Change 2 — Landing page reporting type selector:**
+```
+Current: "Financial Accomplishments (BAR No. 2)"
+Fixed:   "Financial Accomplishments"
+```
+
+**Note:** Keep "BAR No. 2" in code comments only (for developer reference).
+
+**Verification:**
+- [ ] EX-F1: Financial page subtitle has no "BAR No. 2" reference
+- [ ] EX-F2: Landing page dropdown has no "BAR No. 2" reference
+
+---
+
+#### EX-G: Financial Analytics Endpoints [DEFERRED — YAGNI]
+
+**Scope:** Backend + Frontend
+**Research:** EX-7
+
+**Deferred because:**
+1. Financial data entry is just now functional (Phase EW fix deployed today)
+2. No meaningful financial data exists to visualize yet
+3. April 6 stakeholder milestone focuses on data entry, not analytics
+4. Landing page selector infrastructure already exists — endpoints can be plugged in later
+
+**When implemented, will require:**
+- `GET /analytics/financial-pillar-summary` — Appropriation vs Obligation per pillar
+- `GET /analytics/financial-quarterly-trend` — Utilization rate trend Q1-Q4
+- `GET /analytics/financial-yearly-comparison` — Budget utilization across FYs
+- Update `fetchAnalytics()` in landing page to call financial endpoints when `selectedReportingType === 'FINANCIAL'`
+
+---
+
+### Phase EX Governance Directives
+
+| # | Directive | Phase |
+|---|-----------|-------|
+| 90 | **Actions column must include explicit Edit button alongside Delete** | Phase EX-A |
+| 91 | **Disbursement field is optional — must include helper text clarifying its role** | Phase EX-B |
+| 92 | **Data entry form must include hint text on key financial fields** | Phase EX-C |
+| 93 | **Financial top controls container must match Physical page width (760px)** | Phase EX-D |
+| 94 | **Financial pillar tabs must use fullName and match Physical styling** | Phase EX-E |
+| 95 | **All user-facing BAR No. 2 references must be removed** | Phase EX-F |
+| 96 | **Financial analytics endpoints deferred until data entry is stable** | Phase EX-G |
+
+---
+
+### Phase EX Execution Priority
+
+| Priority | Step | Severity | Scope | Key Risk | Status |
+|----------|------|----------|-------|----------|--------|
+| 1 | EX-A: Add Edit button to Actions column | HIGH | Frontend (template) | None — button addition | ✅ IMPLEMENTED |
+| 2 | EX-D: Top controls max-width → 760px | MEDIUM | Frontend (CSS) | None — style change | ✅ IMPLEMENTED |
+| 3 | EX-E: Pillar tabs match Physical styling | MEDIUM | Frontend (template) | None — template restructure | ✅ IMPLEMENTED |
+| 4 | EX-B: Disbursement field helper text | MEDIUM | Frontend (form) | None — label + hint | ✅ IMPLEMENTED |
+| 5 | EX-C: Financial field hints | MEDIUM | Frontend (form) | None — hints only | ✅ IMPLEMENTED |
+| 6 | EX-F: Remove "BAR No. 2" references | LOW | Frontend (labels) | None — text only | ✅ IMPLEMENTED |
+| 7 | EX-G: Financial analytics endpoints | LOW | Backend + Frontend | DEFERRED — YAGNI | ⬜ DEFERRED |
+
+---
+
+### Phase EX Feasibility Assessment
+
+| Factor | Assessment |
+|--------|------------|
+| All changes frontend-only | **Yes** — EX-A through EX-F are template/style changes in 2 files |
+| Backend changes | **None** — no service or controller modifications |
+| Backend restart required | **No** |
+| Risk of regression | **Minimal** — additive changes, no logic alteration |
+| Estimated implementation time | **1 session** — all changes in `financial/index.vue` + `index.vue` |
+
+---
+
 ## Phase EU — System Development Transition Review: Physical Accomplishment Stabilization, Artifact Optimization, and Preparation for Financial Accomplishment Module
 
 **Research Reference:** Section 2.00
@@ -2026,3 +2849,597 @@ git push origin refactor/page-structure-feb9 --tags
 | 3 | EU-C: Git commit + milestone tag + push | HIGH | Git | Large commit — review carefully | ⬜ PENDING |
 | 4 | EU-D: Confirm transition readiness for Phase ET | MEDIUM | Planning | Dependencies verified | ✅ CONFIRMED |
 | 5 | EU-E: Timeline validation against April 6 | MEDIUM | Schedule | 14 working days available | ✅ VALIDATED |
+
+---
+
+## Phase EZ — Data Entry Form Refinement, Submission Label Correction, and Analytics Integration
+
+**Research Reference:** `research.md` Section 2.06
+**Date:** 2026-03-19
+**Scope:** 6 implementation steps across frontend form validation, backend DTO hardening, submission label accuracy, financial analytics endpoints, combined analytics, analytics guide, and filter labeling.
+
+---
+
+### EZ-A: Data Entry Form Validation Constraints
+
+**Finding:** EZ-1
+**Files:**
+- `pmo-frontend/pages/university-operations/financial/index.vue` (lines 1123-1157)
+- `pmo-backend/src/university-operations/dto/create-financial.dto.ts`
+
+**Changes:**
+
+1. **Frontend — HTML `min` attribute on all financial inputs:**
+   - Add `min="0"` to `allotment`, `obligation`, `disbursement` `<v-text-field>` elements
+   - This provides immediate browser-level prevention of negative values
+
+2. **Frontend — Cross-field validation warnings:**
+   - Below the live preview (line 1168), add a `v-alert type="warning"` that shows when:
+     - `obligation > allotment` → "Obligations exceed Appropriation — balance will be negative"
+     - `disbursement > obligation` → "Disbursement exceeds Obligations — verify data accuracy"
+   - These are warnings only (soft validation) — user can still save. Hard rejection at this stage would block legitimate corrections.
+
+3. **Backend — DTO `@Min(0)` decorators:**
+   - Add `import { Min } from 'class-validator'`
+   - Add `@Min(0)` to `allotment`, `obligation`, `disbursement` fields in `CreateFinancialDto`
+   - This enforces server-side rejection of negative values via NestJS ValidationPipe
+
+**Governance:** No negative financial values shall pass backend validation. Cross-field warnings are advisory only.
+
+---
+
+### EZ-B: Submission Label Correction (Dynamic Content Detection)
+
+**Finding:** EZ-2
+**Files:**
+- `pmo-backend/src/university-operations/university-operations.service.ts` — `getPendingReviews()` method (~line 2228)
+- `pmo-frontend/pages/admin/pending-reviews.vue` (lines 146-176)
+
+**Changes:**
+
+1. **Backend — Enrich pending review items with content module detection:**
+   In `getPendingReviews()`, after fetching quarterly reports, for each report, run two existence checks:
+   ```sql
+   -- Check for Physical data (indicators with data for any operation in this FY)
+   SELECT EXISTS(
+     SELECT 1 FROM operation_indicators oi
+     JOIN university_operations uo ON uo.id = oi.operation_id
+     WHERE uo.fiscal_year = $1
+       AND (oi.target_q1 IS NOT NULL OR oi.accomplishment_q1 IS NOT NULL
+            OR oi.target_q2 IS NOT NULL OR oi.accomplishment_q2 IS NOT NULL
+            OR oi.target_q3 IS NOT NULL OR oi.accomplishment_q3 IS NOT NULL
+            OR oi.target_q4 IS NOT NULL OR oi.accomplishment_q4 IS NOT NULL)
+       AND oi.deleted_at IS NULL
+   ) as has_physical
+   ```
+   ```sql
+   -- Check for Financial data
+   SELECT EXISTS(
+     SELECT 1 FROM operation_financials
+     WHERE fiscal_year = $1 AND deleted_at IS NULL
+   ) as has_financial
+   ```
+   Add `has_physical` and `has_financial` boolean fields to each returned quarterly report item.
+
+   **Performance note:** These are existence checks (stop at first row) — negligible cost. Batch with a single query using lateral joins for efficiency.
+
+2. **Frontend — Dynamic label based on content flags:**
+   In `pending-reviews.vue`, replace the hardcoded `"(Physical & Financial)"` with:
+   ```typescript
+   function getModuleLabel(item: any): string {
+     if (item.has_physical && item.has_financial) return '(Physical & Financial)'
+     if (item.has_physical) return '(Physical)'
+     if (item.has_financial) return '(Financial)'
+     return '' // No data yet — shouldn't happen for submitted reports
+   }
+   ```
+   Apply to lines 150, 157, and 175 title templates.
+
+**Governance:** Submission labels must reflect actual data content. Never hardcode module assumptions.
+
+---
+
+### EZ-C: Financial Analytics Endpoints (Backend)
+
+**Finding:** EZ-3
+**Files:**
+- `pmo-backend/src/university-operations/university-operations.controller.ts` (after line 134)
+- `pmo-backend/src/university-operations/university-operations.service.ts` (after existing analytics methods)
+
+**New endpoints:**
+
+1. **`GET analytics/financial-pillar-summary?fiscal_year=2026`**
+   - Returns per-pillar aggregation: `{ pillar_type, total_appropriation, total_obligations, total_disbursement, avg_utilization_rate, total_balance, record_count }`
+   - Query: Joins `operation_financials` with `university_operations` on `operation_id`, groups by `uo.operation_type`
+
+2. **`GET analytics/financial-quarterly-trend?fiscal_year=2026`**
+   - Returns per-quarter aggregation: `{ quarter, total_appropriation, total_obligations, total_disbursement, avg_utilization_rate }`
+   - Groups by `quarter`, ordered Q1-Q4
+
+3. **`GET analytics/financial-yearly-comparison?years=2024,2025,2026`**
+   - Returns per-year, per-pillar utilization rate for year-over-year comparison
+   - Same structure as physical `getYearlyComparison()` but using financial metrics
+
+4. **`GET analytics/financial-expense-breakdown?fiscal_year=2026`**
+   - Returns per-expense-class aggregation: `{ expense_class, total_appropriation, total_obligations, pct_of_total }`
+   - Groups by `expense_class`, used for pie/donut chart
+
+**Governance:** All financial analytics endpoints follow the same pattern as Physical analytics — read-only, no side effects, filtered by fiscal_year.
+
+---
+
+### EZ-D: Financial Analytics Frontend (Landing Page)
+
+**Finding:** EZ-3, EZ-4
+**Files:**
+- `pmo-frontend/pages/university-operations/index.vue` (lines 828-842 — replace placeholder)
+
+**Changes:**
+
+1. **Replace placeholder card** (lines 828-842) with actual charts:
+   - **Financial Pillar Summary** — Radial bar chart showing utilization rate per pillar (mirrors Physical's pillar chart)
+   - **Expense Class Breakdown** — Donut chart showing PS/MOOE/CO distribution of obligations
+   - **Financial Quarterly Trend** — Line chart with appropriation, obligations, and utilization rate per quarter
+   - **Financial Year-over-Year** — Grouped bar chart comparing utilization rate across years
+
+2. **Add `fetchFinancialAnalytics()` function:**
+   - Called when `selectedReportingType` changes to `'FINANCIAL'`
+   - Calls the 4 new endpoints from EZ-C
+   - Stores results in reactive refs
+
+3. **Add chart configuration computed properties** for financial charts (ApexCharts options + series)
+
+4. **Watch `selectedReportingType`** — when it changes, fetch the appropriate analytics data
+
+**Governance:** Financial analytics charts must use the same visual language (colors, chart types) as Physical analytics for consistency.
+
+---
+
+### EZ-E: Analytics Guide Enhancement
+
+**Finding:** EZ-5
+**File:** `pmo-frontend/pages/university-operations/index.vue` (lines 636-654)
+
+**Changes:**
+
+Add new sections to the analytics guide expansion panel:
+
+1. **"Financial Analytics" section** (shown when `selectedReportingType === 'FINANCIAL'`):
+   - **Utilization Rate by Pillar:** "Shows the budget utilization rate (Obligations ÷ Appropriation × 100) for each pillar..."
+   - **Expense Class Breakdown:** "Shows the distribution of obligations across PS, MOOE, and CO..."
+   - **Financial Quarterly Trend:** "Tracks appropriation and obligation levels per quarter..."
+   - **Financial Year-over-Year:** "Compares utilization rates across fiscal years..."
+
+2. **Make guide content dynamic** — show Physical descriptions when Physical is selected, Financial when Financial is selected.
+
+**Governance:** Analytics guide content must match the currently visible charts.
+
+---
+
+### EZ-F: Filter UI Labeling Improvements
+
+**Finding:** EZ-6
+**File:** `pmo-frontend/pages/university-operations/index.vue` (lines 597-613)
+
+**Changes:**
+
+1. Add `prepend-inner-icon="mdi-file-chart-outline"` to reporting type selector
+2. Add `prepend-inner-icon="mdi-filter"` to global pillar filter
+3. When `selectedReportingType === 'FINANCIAL'` and pillar filter is active, show a subtle `hint` or chip indicating "Filtering by operation pillar"
+
+**Governance:** All filter controls must have visual affordance indicating their purpose.
+
+---
+
+### Phase EZ Execution Priority
+
+| Priority | Step | Severity | Scope | Key Risk | Status |
+|----------|------|----------|-------|----------|--------|
+| 1 | EZ-A: Data entry form validation | HIGH | Frontend + Backend | Breaks existing entries if @Min too strict — use @IsOptional guard | ✅ DONE |
+| 2 | EZ-B: Submission label correction | MEDIUM | Backend + Frontend | Existence query must handle edge cases (no operations yet) | ✅ DONE |
+| 3 | EZ-C: Financial analytics endpoints | HIGH | Backend | Must follow same patterns as Physical analytics | ✅ DONE |
+| 4 | EZ-D: Financial analytics frontend | HIGH | Frontend | Chart configs must match Physical visual language | ✅ DONE |
+| 5 | EZ-E: Analytics guide enhancement | LOW | Frontend | Content must stay in sync with visible charts | ✅ DONE |
+| 6 | EZ-F: Filter UI labeling | LOW | Frontend | Minimal risk — cosmetic changes only | ✅ DONE |
+
+---
+
+### Phase EZ Governance Directives
+
+| # | Directive | Phase |
+|---|-----------|-------|
+| 108 | **Negative financial values must be rejected by backend DTO validation** | Phase EZ-A |
+| 109 | **Cross-field validation (obligation ≤ appropriation) is advisory, not blocking** | Phase EZ-A |
+| 110 | **Submission labels must reflect actual data content, not hardcoded assumptions** | Phase EZ-B |
+| 111 | **Financial analytics endpoints must mirror Physical analytics patterns** | Phase EZ-C |
+| 112 | **Analytics guide content must be dynamic — match currently visible charts** | Phase EZ-E |
+| 113 | **All filter controls must have visual affordance (icon, label) indicating purpose** | Phase EZ-F |
+
+---
+
+## Phase FA — Quarter Status Isolation, Edit Governance Fix, and Empty-State UI Standardization
+
+**Research Reference:** `research.md` Section 2.07
+**Date:** 2026-03-19
+**Scope:** 5 targeted fixes — frontend state staleness, backend governance gap (2 issues), empty-state UI, instructional guide.
+
+---
+
+### FA-A: Fix Quarter Status Staleness (Frontend)
+
+**Finding:** FA-1
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` — `fetchQuarterlyReport()` (line 247)
+
+**Root cause:** `currentQuarterlyReport.value` is not reset to `null` at the start of `fetchQuarterlyReport()`. During the API call, stale Q1 PUBLISHED data persists and drives all status-dependent UI (banners, submit button, canEditData).
+
+**Change:** Add a single line `currentQuarterlyReport.value = null` immediately after `isLoadingQuarterlyReport.value = true`, before any conditional or async work. This causes:
+- Lock banners: immediately disappear when switching quarter (correct — no report = no lock)
+- `canEditData()`: re-evaluates to allow editing (correct — no published lock on new quarter)
+- `currentQuarterStatus`: immediately shows `'NOT_STARTED'` during load (correct visual state)
+
+**Governance:** UI status must reflect only the data loaded for the current quarter/fiscal year selection. Stale state from prior selections must not persist.
+
+---
+
+### FA-B: Fix Edit Governance Bypass — Pass Quarter to validateOperationEditable (Backend)
+
+**Finding:** FA-2
+**File:** `pmo-backend/src/university-operations/university-operations.service.ts`
+**Methods:** `createFinancial()`, `updateFinancial()`, `removeFinancial()`
+
+**Root cause:** All three methods call `validateOperationEditable(operationId, undefined, user)`. The `undefined` quarter param causes the method to skip the `quarterly_reports.publication_status` check entirely.
+
+**Changes:**
+
+1. **`createFinancial()`** (line 1482):
+   - Change to: `await this.validateOperationEditable(operationId, dto.quarter, user)`
+   - `dto.quarter` is already available as part of `CreateFinancialDto`
+
+2. **`updateFinancial()`** (line 1523):
+   - The DTO is `Partial<CreateFinancialDto>` — `quarter` may not be in the update payload
+   - Before calling `validateOperationEditable`, fetch the existing financial record to get its `quarter`:
+     ```typescript
+     const existing = await this.db.query(
+       `SELECT fiscal_year, quarter FROM operation_financials WHERE id = $1 AND deleted_at IS NULL`,
+       [financialId]
+     )
+     const recordQuarter = existing.rows[0]?.quarter
+     ```
+   - Change to: `await this.validateOperationEditable(operationId, recordQuarter, user)`
+
+3. **`removeFinancial()`** (line 1560):
+   - Same pattern as updateFinancial — fetch quarter from DB before calling validateOperationEditable
+   - Change to: `await this.validateOperationEditable(operationId, recordQuarter, user)`
+
+**Note on order of operations:** The existing record fetch can be combined with or placed before the existing ownership check — no extra round-trip needed since ownership check already exists.
+
+**Governance:** Financial CRUD operations must enforce the same quarterly report publication lock as Physical indicator operations. Passing `undefined` quarter is a structural gap, not an intentional bypass.
+
+---
+
+### FA-C: Wire Up autoRevertQuarterlyReport for Financial CUD (Backend)
+
+**Finding:** FA-3
+**File:** `pmo-backend/src/university-operations/university-operations.service.ts`
+**Methods:** `createFinancial()`, `updateFinancial()`, `removeFinancial()`
+
+**Root cause:** `autoRevertQuarterlyReport()` is called for Physical indicator CUD but never for Financial CUD. Editing financial records on a Published quarterly report leaves it Published — a governance violation.
+
+**Changes:**
+
+1. **`createFinancial()`** — after successful INSERT:
+   ```typescript
+   await this.autoRevertQuarterlyReport(dto.fiscal_year, dto.quarter, userId);
+   ```
+
+2. **`updateFinancial()`** — after successful UPDATE (using the pre-fetched record from FA-B):
+   ```typescript
+   // Use fiscal_year from fetched record (or from dto if provided)
+   const revertFiscalYear = dto.fiscal_year ?? existing.rows[0].fiscal_year;
+   const revertQuarter = dto.quarter ?? existing.rows[0].quarter;
+   await this.autoRevertQuarterlyReport(revertFiscalYear, revertQuarter, userId);
+   ```
+
+3. **`removeFinancial()`** — after soft-delete:
+   - The pre-fetched record from FA-B provides fiscal_year and quarter
+   - Call: `await this.autoRevertQuarterlyReport(record.fiscal_year, record.quarter, userId)`
+
+**Important:** `autoRevertQuarterlyReport()` is a no-op if the quarterly report is already DRAFT — safe to call unconditionally. It only acts when status is non-DRAFT.
+
+**Governance:** Any mutation to financial data (create, update, delete) must revert the associated quarterly report from Published/Pending to Draft. This forces re-review. This mirrors the Physical indicator lifecycle exactly.
+
+---
+
+### FA-D: Empty State — Show Table Structure with Header Row
+
+**Finding:** FA-4
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` (lines 894–910)
+
+**Change:** Replace the icon/text/button empty-state card with a `v-table` that shows:
+1. The complete column header row (Program / Line Item, Class, Appropriation, Obligations, % Utilization, Balance, Actions)
+2. A single `<tr>` spanning all columns with centered, subdued empty-state text: `"No financial records for this quarter — click Add Financial Record to begin."`
+3. Remove the standalone "Add First Record" button (the Add button is already in the pillar header above the table)
+
+**Rationale:** Users need to see what data format is expected even before they enter anything. The DBM BAR No. 2 table structure should be visible upfront. This also prevents confusion about why no data appears after a quarter switch.
+
+**Governance:** The financial table structure must remain visible at all times. Zero-record state must not hide the reporting format.
+
+---
+
+### FA-E: Instructional Guide Rename and Restructure
+
+**Finding:** FA-5
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` (lines 841–872)
+
+**Changes:**
+
+1. **Rename title:** `"Financial Data Entry Guide"` → `"How to Enter Financial Data"`
+
+2. **Replace unstructured paragraphs with numbered steps:**
+   - **Step 1 — Select the correct Pillar tab** (MFO1–MFO4) that corresponds to the budget you are reporting
+   - **Step 2 — Click "Add Financial Record"** to open the data entry form
+   - **Step 3 — Fill in the required fields:**
+     - *Program / Line Item* — name of the budget line (e.g., "Salaries and Wages", "Office Supplies")
+     - *Campus* — Main Campus or Cabadbaran Campus
+     - *Expense Class* — PS (Personal Services), MOOE (Maintenance), or CO (Capital Outlay)
+     - *Appropriation* — total approved budget for this line (e.g., ₱5,000,000.00)
+     - *Obligations* — amount committed or obligated (e.g., ₱3,250,000.00)
+     - *Disbursement (optional)* — actual cash released (e.g., ₱2,800,000.00)
+   - **Step 4 — Submit for review** when all records are complete. Use the Submit button at the top of the pillar section.
+
+3. **Add a definitions callout** for Unobligated Balance:
+   - *Balance (Unobligated) = Appropriation − Obligations* (DBM BAR No. 2 standard)
+   - *% Utilization = (Obligations ÷ Appropriation) × 100*
+
+**Governance:** Instructional content must be action-oriented, use numbered steps, and include sample values to match PMO data entry expectations.
+
+---
+
+### Phase FA Execution Priority
+
+| Priority | Step | Severity | Scope | Key Risk | Status |
+|----------|------|----------|-------|----------|--------|
+| 1 | FA-A: Reset stale quarterly report state | HIGH | Frontend (1 line) | None — safe, immediate | ✅ DONE |
+| 2 | FA-B: Pass quarter to validateOperationEditable | CRITICAL | Backend (3 methods) | Must fetch record before validation in update/delete | ✅ DONE |
+| 3 | FA-C: Wire autoRevertQuarterlyReport for financial CUD | CRITICAL | Backend (3 methods) | Uses same pre-fetched record as FA-B — can be done together | ✅ DONE |
+| 4 | FA-D: Show table headers in empty state | MEDIUM | Frontend (replace empty state block) | None — pure UI change | ✅ DONE |
+| 5 | FA-E: Rename and restructure instructional guide | LOW | Frontend (expansion panel content) | None — content only | ✅ DONE |
+
+---
+
+### Phase FA Governance Directives
+
+| # | Directive | Phase |
+|---|-----------|-------|
+| 114 | **Frontend must reset stale quarterly report state immediately on quarter/FY switch** | Phase FA-A |
+| 115 | **Financial CRUD must pass quarter to validateOperationEditable — no bypass via undefined** | Phase FA-B |
+| 116 | **autoRevertQuarterlyReport must be called after every successful financial CUD operation** | Phase FA-C |
+| 117 | **Table column structure must be visible even when zero records exist** | Phase FA-D |
+| 118 | **Instructional UI must use numbered steps with sample values, not generic bullet paragraphs** | Phase FA-E |
+
+---
+
+## Phase FB — Critical Fix: Quarter Status Isolation Full Repair + Non-Persistent Prior-Quarter Data Prefill
+
+**Research Reference:** `research.md` Section 2.08
+**Date:** 2026-03-19
+**Scope:** 2 implementation steps — (A) complete the status isolation fix in the watchers, (B) implement non-persistent prior-quarter prefill entirely on the frontend.
+
+---
+
+### FB-A: Complete Status Isolation Fix — Reset in Watchers, Not Only in fetchQuarterlyReport()
+
+**Finding:** FB-1, FB-2
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` — watchers section (lines 625–651)
+
+**Problem recap:** FA-A added the null reset inside `fetchQuarterlyReport()`. But `fetchQuarterlyReport()` doesn't start until `fetchFinancialData()` completes (~300ms later). The Pillar Header Card and Lock Advisory Banners are unconditionally rendered — they read `currentQuarterlyReport` during this 300ms window and show the stale Q1 PUBLISHED state.
+
+**Change:** Add `currentQuarterlyReport.value = null` as the **first line** inside both affected watchers, before any `await` call:
+
+1. **`watch(selectedQuarter)`** (line 640):
+   ```typescript
+   watch(selectedQuarter, async () => {
+     if (isInitializing) return
+     currentQuarterlyReport.value = null   // ← ADD: instant clear at t=0
+     await fetchFinancialData()
+     await fetchQuarterlyReport()
+   })
+   ```
+
+2. **`watch(selectedFiscalYear)`** (line 632):
+   ```typescript
+   watch(selectedFiscalYear, async (newYear) => {
+     if (isInitializing) return
+     if (!newYear || newYear < 2020) return
+     currentQuarterlyReport.value = null   // ← ADD: instant clear at t=0
+     router.replace({ query: { ...route.query, year: newYear.toString() } })
+     await fetchFinancialData()
+     await fetchQuarterlyReport()
+   })
+   ```
+
+**Why NOT in `activePillar` watcher:** The quarterly report status is per FY+quarter, not per pillar. Switching pillars while staying in Q1 FY2026 should still show Q1's status. The `activePillar` watcher does not (and should not) call `fetchQuarterlyReport()` — no change needed there.
+
+**Why NOT in `onMounted`:** `currentQuarterlyReport` is initialized as `null` (line 99). On mount it correctly starts null and is populated by `fetchQuarterlyReport()`. No issue on initial load.
+
+**Result:** Status chip, lock banners, and submit buttons all immediately reflect "Not Started" (null state) the moment the user changes quarter or fiscal year — zero stale display window.
+
+**Governance:** Status UI must be consistent with the selected FY+quarter at the instant of selection, not after two sequential API round-trips.
+
+---
+
+### FB-B: Non-Persistent Prior-Quarter Data Prefill
+
+**Finding:** FB-3, FB-4, FB-5, FB-6
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue` — script and template sections
+
+**This is a purely frontend change. Zero backend changes required.**
+
+#### FB-B-1: New State Refs
+
+Add four new refs in the State section (after line 101):
+
+```typescript
+// Phase FB-B: Prior-quarter prefill state (non-persistent)
+const prefillRecords = ref<any[]>([])
+const isPrefillMode = ref(false)
+const prefillSourceQuarter = ref<string | null>(null)
+const prefillLoading = ref(false)
+```
+
+#### FB-B-2: Prior Quarter Map and Fetch Function
+
+Add a constant and async function in the Data Fetching section (after `fetchQuarterlyReport()`):
+
+```typescript
+// Phase FB-B: Prior quarter sequence (same FY, one step back)
+const PRIOR_QUARTER_MAP: Record<string, string | null> = {
+  Q1: null, Q2: 'Q1', Q3: 'Q2', Q4: 'Q3',
+}
+
+// Phase FB-B: Fetch prior quarter records as non-persistent reference
+async function fetchPrefillData() {
+  const priorQ = PRIOR_QUARTER_MAP[selectedQuarter.value]
+  if (!priorQ || !currentOperation.value) {
+    clearPrefill()
+    return
+  }
+  prefillLoading.value = true
+  try {
+    const res = await api.get<any[]>(
+      `/api/university-operations/${currentOperation.value.id}/financials`
+      + `?fiscal_year=${selectedFiscalYear.value}&quarter=${priorQ}`
+    )
+    const records = Array.isArray(res) ? res : (res as any)?.data || []
+    if (records.length > 0) {
+      prefillRecords.value = records
+      isPrefillMode.value = true
+      prefillSourceQuarter.value = priorQ
+    } else {
+      clearPrefill()
+    }
+  } catch {
+    clearPrefill()
+  } finally {
+    prefillLoading.value = false
+  }
+}
+
+function clearPrefill() {
+  prefillRecords.value = []
+  isPrefillMode.value = false
+  prefillSourceQuarter.value = null
+}
+```
+
+#### FB-B-3: Trigger Prefill After fetchFinancialData()
+
+In `fetchFinancialData()`, after `loading.value = false`, add the prefill trigger:
+
+```typescript
+// Phase FB-B: If current quarter is empty, attempt to load prior quarter as reference
+if (financialRecords.value.length === 0) {
+  await fetchPrefillData()
+} else {
+  clearPrefill()   // records exist → no prefill needed
+}
+```
+
+**Important:** `clearPrefill()` must also be called whenever the context changes. Add `clearPrefill()` at the start of `fetchFinancialData()` (or in the watchers) so stale prefill data never carries over between quarter/pillar/FY switches.
+
+#### FB-B-4: Watcher Updates for Prefill Clear
+
+In both `watch(selectedQuarter)` and `watch(selectedFiscalYear)` (which already get the `currentQuarterlyReport.value = null` from FB-A), also add `clearPrefill()` at the top:
+
+```typescript
+watch(selectedQuarter, async () => {
+  if (isInitializing) return
+  currentQuarterlyReport.value = null   // FB-A
+  clearPrefill()                        // FB-B
+  await fetchFinancialData()
+  await fetchQuarterlyReport()
+})
+```
+
+(Same pattern for `selectedFiscalYear` and `activePillar` watchers.)
+
+#### FB-B-5: Template — Prefill Banner and Table Rendering
+
+**In the empty-state section and data section of the template:**
+
+When `isPrefillMode === true`, replace (or augment) the empty-state table with a prefill view:
+
+1. **Prefill banner** (above table, inside `<template v-else>` after Add button):
+   ```html
+   <v-alert v-if="isPrefillMode" type="info" variant="tonal" class="mb-3" closable
+     @click:close="clearPrefill">
+     <div class="d-flex align-center justify-space-between flex-wrap ga-2">
+       <span>
+         <v-icon start size="small">mdi-content-copy</v-icon>
+         <strong>{{ prefillSourceQuarter }} reference loaded</strong> —
+         {{ prefillRecords.length }} record(s) from {{ prefillSourceQuarter }} FY {{ selectedFiscalYear }}
+         shown below. These are <strong>not saved</strong>. Click "Save as {{ selectedQuarter }}" to create records.
+       </span>
+       <div class="d-flex ga-2">
+         <v-btn size="small" color="primary" variant="tonal"
+           :loading="saving" @click="saveAllPrefillRecords">
+           Save All as {{ selectedQuarter }}
+         </v-btn>
+         <v-btn size="small" variant="text" @click="clearPrefill">
+           Use Empty Form
+         </v-btn>
+       </div>
+     </div>
+   </v-alert>
+   ```
+
+2. **Prefill table** (replace empty-state card when `isPrefillMode && financialRecords.length === 0`):
+   - Render the prefill records in the same campus/expense-class grouped table structure
+   - Each prefill row uses `bg-grey-lighten-5` background (or `class="prefill-row"`) to visually distinguish
+   - Each row shows a `"From {{ prefillSourceQuarter }}"` chip in the Class column
+   - Row action: single `"Save as {{ selectedQuarter }}"` button → calls `openPrefillSaveDialog(prefillRecord)`
+
+3. **`openPrefillSaveDialog(record)`** function:
+   - Sets `editingRecord.value = null` (it's a CREATE, not an edit of existing)
+   - Populates `entryForm.value` from the prefill record (same fields, except `id`, `created_by`, etc.)
+   - Opens `entryDialog.value = true`
+   - On save success → removes the record from `prefillRecords`; if `prefillRecords.length === 0`, calls `clearPrefill()`
+
+4. **`saveAllPrefillRecords()`** function:
+   - Iterates through all `prefillRecords`
+   - For each record, POST to `/{operationId}/financials` with current quarter and FY
+   - On complete success → call `clearPrefill()`, re-fetch financial data (which will now show real records)
+   - On partial failure → show toast error, keep failed records in `prefillRecords`
+
+#### FB-B-6: Prefill Loading Spinner
+
+When `prefillLoading === true` and `financialRecords.length === 0`, show a subtle loading indicator in the empty-state area instead of the empty table, so the user knows data is being fetched:
+
+```html
+<div v-if="prefillLoading" class="text-center py-4 text-grey">
+  <v-progress-circular indeterminate size="24" class="mr-2" />
+  Loading {{ PRIOR_QUARTER_MAP[selectedQuarter] }} reference data...
+</div>
+```
+
+---
+
+### Phase FB Execution Priority
+
+| Priority | Step | Severity | Scope | Key Risk | Status |
+|----------|------|----------|-------|----------|--------|
+| 1 | FB-A: Add null reset in watchers (not just in fetchQuarterlyReport) | CRITICAL | Frontend (2 watcher additions) | None — safe synchronous assignment | ✅ DONE |
+| 2 | FB-B: Prior-quarter prefill — state, fetch function, template | MEDIUM | Frontend only (no backend) | Must not auto-save; clear on any context switch | ✅ DONE |
+
+---
+
+### Phase FB Governance Directives
+
+| # | Directive | Phase |
+|---|-----------|-------|
+| 119 | **`currentQuarterlyReport` must be set to null synchronously in the watcher, before any async fetch** | Phase FB-A |
+| 120 | **Prior-quarter prefill records must never be auto-saved. Persistence only on explicit user action.** | Phase FB-B |
+| 121 | **Prefill state (prefillRecords, isPrefillMode) must be cleared on every quarter, FY, or pillar switch** | Phase FB-B |
+| 122 | **Prefill fetch uses the existing GET /financials?quarter endpoint — no new backend endpoint required** | Phase FB-B |
+| 123 | **Prefill UI must visually distinguish reference rows from saved records at all times** | Phase FB-B |
+| 124 | **"Save as Qx" on a prefill row must open the standard entry dialog — user must confirm before POST** | Phase FB-B |

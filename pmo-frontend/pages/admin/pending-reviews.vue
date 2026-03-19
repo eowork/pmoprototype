@@ -96,6 +96,14 @@ const moduleColors: Record<string, string> = {
   university_operations: 'purple',
 }
 
+// Phase EZ-B: Dynamic module label based on actual content flags from backend
+function getModuleLabel(item: any): string {
+  if (item.has_physical && item.has_financial) return '(Physical & Financial)'
+  if (item.has_physical) return '(Physical)'
+  if (item.has_financial) return '(Financial)'
+  return '(Physical & Financial)' // fallback for items without flags
+}
+
 // API endpoints by module
 const moduleEndpoints: Record<string, string> = {
   coi: '/api/construction-projects',
@@ -142,19 +150,19 @@ async function fetchPendingItems() {
         source: 'legacy' as const,
         title: d.title || 'Untitled',
       })),
-      // Phase EM-E: Quarterly reports shown as single entries per quarter
+      // Phase EZ-B: Dynamic submission labels based on actual content
       ...quarterlyPending.map(d => ({
         ...d,
         module: 'university_operations' as const,
         source: 'quarterly_report' as const,
-        title: d.title || `${quarterNames[d.quarter] || d.quarter} — FY ${d.fiscal_year}`,
+        title: `UO Quarterly Report — ${d.quarter} FY ${d.fiscal_year} ${getModuleLabel(d)}`,
       })),
-      // Phase GOV-UI: Unlock requests shown with special source type
+      // Phase EZ-B: Unlock requests with dynamic labels
       ...unlockPending.map(d => ({
         ...d,
         module: 'university_operations' as const,
         source: 'unlock_request' as const,
-        title: `🔓 Unlock Request: ${quarterNames[d.quarter] || d.quarter} — FY ${d.fiscal_year}`,
+        title: `Unlock Request: UO ${d.quarter} FY ${d.fiscal_year} ${getModuleLabel(d)}`,
         submitter_name: d.requester_name || 'Unknown',
         submitted_at: d.unlock_requested_at,
         unlock_request_reason: d.unlock_request_reason,
@@ -168,10 +176,11 @@ async function fetchPendingItems() {
     )
 
     // Phase GOV-D: Populate archived items from versioned submission history
+    // Phase EZ-B: Archived items with dynamic module labels
     archivedItems.value = historyItems.map(d => ({
       ...d,
       module: 'university_operations' as const,
-      title: d.title || `${quarterNames[d.quarter] || d.quarter} — FY ${d.fiscal_year}`,
+      title: `UO Quarterly Report — ${d.quarter} FY ${d.fiscal_year} (Physical & Financial)`,
     }))
   } catch (err) {
     console.error('[PendingReviews] Failed to fetch:', err)

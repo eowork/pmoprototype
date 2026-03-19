@@ -133,6 +133,32 @@ export class UniversityOperationsController {
     return this.service.getYearlyComparison(yearList);
   }
 
+  // ─── Phase EZ-C: Financial Analytics Endpoints ──────────────────────────────
+
+  @Get('analytics/financial-pillar-summary')
+  getFinancialPillarSummary(@Query('fiscal_year') fiscalYear: number) {
+    return this.service.getFinancialPillarSummary(fiscalYear);
+  }
+
+  @Get('analytics/financial-quarterly-trend')
+  getFinancialQuarterlyTrend(
+    @Query('fiscal_year') fiscalYear: number,
+    @Query('pillar_type') pillarType?: string,
+  ) {
+    return this.service.getFinancialQuarterlyTrend(fiscalYear, pillarType);
+  }
+
+  @Get('analytics/financial-yearly-comparison')
+  getFinancialYearlyComparison(@Query('years') years: string) {
+    const yearList = years ? years.split(',').map((y) => parseInt(y.trim(), 10)).filter((y) => !isNaN(y)) : [];
+    return this.service.getFinancialYearlyComparison(yearList);
+  }
+
+  @Get('analytics/financial-expense-breakdown')
+  getFinancialExpenseBreakdown(@Query('fiscal_year') fiscalYear: number) {
+    return this.service.getFinancialExpenseBreakdown(fiscalYear);
+  }
+
   // ═══════════════════════════════════════════════════════════════
   // Phase DP-A: Fiscal Year Configuration Endpoints
   // IMPORTANT: These MUST be defined BEFORE @Get(':id') to avoid route interception
@@ -485,14 +511,16 @@ export class UniversityOperationsController {
 
   // --- Financials ---
   // Phase BC: Added fund_type query param for BAR1 subcategory tab filtering
+  // Phase ET-B: Added expense_class query param for PS/MOOE/CO filtering
   @Get(':id/financials')
   findFinancials(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('fiscal_year') fiscalYear?: number,
     @Query('quarter') quarter?: string,
     @Query('fund_type') fundType?: FundType,
+    @Query('expense_class') expenseClass?: string,
   ) {
-    return this.service.findFinancials(id, fiscalYear, quarter, fundType);
+    return this.service.findFinancials(id, fiscalYear, quarter, fundType, expenseClass);
   }
 
   // Phase CN: Financial CRUD with ownership + publication status validation

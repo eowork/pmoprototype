@@ -208,8 +208,8 @@ export class UniversityOperationsService {
     // BAR1 Formula: Utilization Rate = (Obligation / Allotment) × 100
     const utilization_rate = allotment > 0 ? (obligation / allotment) * 100 : null;
 
-    // BAR1 Formula: Balance = Allotment - Disbursement
-    const balance = allotment > 0 ? allotment - disbursement : null;
+    // Phase EV-C: DBM BAR No. 2 "Unobligated Balance" = Appropriation - Obligations
+    const balance = allotment > 0 ? allotment - obligation : null;
 
     // BAR1 Formula: Disbursement Rate = (Disbursement / Obligation) × 100
     const disbursement_rate = obligation > 0 ? (disbursement / obligation) * 100 : null;
@@ -301,6 +301,7 @@ export class UniversityOperationsService {
               uo.status, uo.budget, uo.campus, uo.coordinator_id, uo.publication_status, uo.created_at, uo.updated_at,
               uo.submitted_by, uo.submitted_at, uo.created_by,
               uo.status_q1, uo.status_q2, uo.status_q3, uo.status_q4,
+              uo.fiscal_year,
               submitter.first_name || ' ' || submitter.last_name as submitted_by_name,
               (SELECT COALESCE(json_agg(json_build_object('id', u.id, 'name', u.first_name || ' ' || u.last_name)), '[]'::json)
                FROM record_assignments ra JOIN users u ON ra.user_id = u.id
@@ -1441,7 +1442,7 @@ export class UniversityOperationsService {
 
   // --- Financials ---
   // Phase BC: Added fund_type filter for BAR1 tab-based categorization
-  async findFinancials(operationId: string, fiscalYear?: number, quarter?: string, fundType?: FundType): Promise<any[]> {
+  async findFinancials(operationId: string, fiscalYear?: number, quarter?: string, fundType?: FundType, expenseClass?: string): Promise<any[]> {
     await this.findOne(operationId);
 
     let query = `SELECT * FROM operation_financials WHERE operation_id = $1 AND deleted_at IS NULL`;
@@ -1461,6 +1462,11 @@ export class UniversityOperationsService {
       query += ` AND fund_type = $${paramIndex++}`;
       params.push(fundType);
     }
+    // Phase ET-B: expense_class filter for PS/MOOE/CO grouping
+    if (expenseClass) {
+      query += ` AND expense_class = $${paramIndex++}`;
+      params.push(expenseClass);
+    }
 
     query += ` ORDER BY fiscal_year DESC, quarter, operations_programs`;
 
@@ -1472,16 +1478,17 @@ export class UniversityOperationsService {
   async createFinancial(operationId: string, dto: CreateFinancialDto, userId: string, user: JwtPayload): Promise<any> {
     // Phase CN: Ownership validation
     await this.validateOperationOwnership(operationId, userId, user);
-    // Phase CO: Publication status lock
-    await this.validateOperationEditable(operationId, undefined, user);
+    // Phase FA-B: Pass dto.quarter so quarterly_report publication lock is enforced
+    await this.validateOperationEditable(operationId, dto.quarter, user);
 
     // Phase BC: Include fund_type and project_code in INSERT
+    // Phase ET-B: Include expense_class for BAR No. 2 categorization
     const result = await this.db.query(
       `INSERT INTO operation_financials
        (operation_id, fiscal_year, quarter, operations_programs, department, budget_source,
-        fund_type, project_code,
+        fund_type, project_code, expense_class,
         allotment, target, obligation, disbursement, performance_indicator, remarks, metadata, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
        RETURNING *`,
       [
         operationId,
@@ -1492,6 +1499,7 @@ export class UniversityOperationsService {
         dto.budget_source,
         dto.fund_type || null,
         dto.project_code || null,
+        dto.expense_class || null,
         dto.allotment,
         dto.target,
         dto.obligation,
@@ -1504,6 +1512,8 @@ export class UniversityOperationsService {
     );
 
     this.logger.log(`FINANCIAL_CREATED: id=${result.rows[0].id}, operation=${operationId}, by=${userId}`);
+    // Phase FA-C: Auto-revert quarterly report Published → Draft on financial create
+    await this.autoRevertQuarterlyReport(dto.fiscal_year, dto.quarter, userId);
     // Phase CP: Return record with computed metrics
     return this.computeFinancialMetrics(result.rows[0]);
   }
@@ -1511,16 +1521,20 @@ export class UniversityOperationsService {
   async updateFinancial(operationId: string, financialId: string, dto: Partial<CreateFinancialDto>, userId: string, user: JwtPayload): Promise<any> {
     // Phase CN: Ownership validation
     await this.validateOperationOwnership(operationId, userId, user);
-    // Phase CO: Publication status lock
-    await this.validateOperationEditable(operationId, undefined, user);
 
-    const check = await this.db.query(
-      `SELECT id FROM operation_financials WHERE id = $1 AND operation_id = $2 AND deleted_at IS NULL`,
+    // Phase FA-B: Fetch existing record to get its quarter for governance validation
+    const existing = await this.db.query(
+      `SELECT id, fiscal_year, quarter FROM operation_financials WHERE id = $1 AND operation_id = $2 AND deleted_at IS NULL`,
       [financialId, operationId],
     );
-    if (check.rows.length === 0) {
+    if (existing.rows.length === 0) {
       throw new NotFoundException(`Financial record ${financialId} not found`);
     }
+    const recordQuarter: string | undefined = existing.rows[0].quarter;
+    const recordFiscalYear: number = existing.rows[0].fiscal_year;
+
+    // Phase FA-B: Pass record's quarter so quarterly_report publication lock is enforced
+    await this.validateOperationEditable(operationId, recordQuarter, user);
 
     const fields = Object.keys(dto).filter((k) => dto[k] !== undefined);
     if (fields.length === 0) {
@@ -1541,6 +1555,10 @@ export class UniversityOperationsService {
     );
 
     this.logger.log(`FINANCIAL_UPDATED: id=${financialId}, by=${userId}`);
+    // Phase FA-C: Auto-revert quarterly report Published → Draft on financial update
+    const revertFiscalYear = dto.fiscal_year ?? recordFiscalYear;
+    const revertQuarter = dto.quarter ?? recordQuarter;
+    await this.autoRevertQuarterlyReport(revertFiscalYear, revertQuarter, userId);
     // Phase CP: Return record with computed metrics
     return this.computeFinancialMetrics(result.rows[0]);
   }
@@ -1548,8 +1566,20 @@ export class UniversityOperationsService {
   async removeFinancial(operationId: string, financialId: string, userId: string, user: JwtPayload): Promise<void> {
     // Phase CN: Ownership validation (Admin check at controller, but verify ownership context)
     await this.validateOperationOwnership(operationId, userId, user);
-    // Phase CO: Publication status lock
-    await this.validateOperationEditable(operationId, undefined, user);
+
+    // Phase FA-B: Fetch existing record to get its quarter for governance validation
+    const existing = await this.db.query(
+      `SELECT id, fiscal_year, quarter FROM operation_financials WHERE id = $1 AND operation_id = $2 AND deleted_at IS NULL`,
+      [financialId, operationId],
+    );
+    if (existing.rows.length === 0) {
+      throw new NotFoundException(`Financial record ${financialId} not found`);
+    }
+    const recordQuarter: string | undefined = existing.rows[0].quarter;
+    const recordFiscalYear: number = existing.rows[0].fiscal_year;
+
+    // Phase FA-B: Pass record's quarter so quarterly_report publication lock is enforced
+    await this.validateOperationEditable(operationId, recordQuarter, user);
 
     const result = await this.db.query(
       `UPDATE operation_financials SET deleted_at = NOW(), deleted_by = $1
@@ -1562,6 +1592,8 @@ export class UniversityOperationsService {
     }
 
     this.logger.log(`FINANCIAL_DELETED: id=${financialId}, by=${userId}`);
+    // Phase FA-C: Auto-revert quarterly report Published → Draft on financial delete
+    await this.autoRevertQuarterlyReport(recordFiscalYear, recordQuarter, userId);
   }
 
   // ─── Phase CH: Organizational Info CRUD ─────────────────────────────────
@@ -2217,10 +2249,26 @@ export class UniversityOperationsService {
       }
     }
 
+    // Phase EZ-B: Enrich with has_physical/has_financial flags for dynamic submission labels
     const result = await this.db.query(
       `SELECT qr.id, qr.fiscal_year, qr.quarter, qr.title, qr.publication_status,
               qr.submitted_by, qr.submitted_at, qr.created_at,
-              u.first_name || ' ' || u.last_name as submitter_name
+              u.first_name || ' ' || u.last_name as submitter_name,
+              EXISTS(
+                SELECT 1 FROM operation_indicators oi
+                JOIN university_operations uo ON uo.id = oi.operation_id
+                WHERE uo.fiscal_year = qr.fiscal_year
+                  AND oi.deleted_at IS NULL
+                  AND (oi.target_q1 IS NOT NULL OR oi.accomplishment_q1 IS NOT NULL
+                       OR oi.target_q2 IS NOT NULL OR oi.accomplishment_q2 IS NOT NULL
+                       OR oi.target_q3 IS NOT NULL OR oi.accomplishment_q3 IS NOT NULL
+                       OR oi.target_q4 IS NOT NULL OR oi.accomplishment_q4 IS NOT NULL)
+              ) as has_physical,
+              EXISTS(
+                SELECT 1 FROM operation_financials of2
+                WHERE of2.fiscal_year = qr.fiscal_year
+                  AND of2.deleted_at IS NULL
+              ) as has_financial
        FROM quarterly_reports qr
        LEFT JOIN users u ON qr.submitted_by = u.id
        WHERE qr.publication_status = 'PENDING_REVIEW'
@@ -2725,5 +2773,126 @@ export class UniversityOperationsService {
 
     const result = await this.db.query(query, params);
     return result.rows;
+  }
+
+  // ─── Phase EZ-C: Financial Analytics ──────────────────────────────────────────
+
+  /**
+   * Phase EZ-C: Financial pillar summary — per-pillar aggregation of financial metrics
+   */
+  async getFinancialPillarSummary(fiscalYear: number): Promise<any> {
+    const result = await this.db.query(`
+      SELECT
+        uo.operation_type AS pillar_type,
+        COUNT(of2.id) AS record_count,
+        COALESCE(SUM(of2.allotment), 0) AS total_appropriation,
+        COALESCE(SUM(of2.obligation), 0) AS total_obligations,
+        COALESCE(SUM(of2.disbursement), 0) AS total_disbursement,
+        CASE WHEN SUM(of2.allotment) > 0
+          THEN ROUND((SUM(of2.obligation)::numeric / SUM(of2.allotment)) * 100, 2)
+          ELSE 0
+        END AS avg_utilization_rate,
+        COALESCE(SUM(of2.allotment) - SUM(of2.obligation), 0) AS total_balance
+      FROM operation_financials of2
+      JOIN university_operations uo ON uo.id = of2.operation_id
+      WHERE uo.fiscal_year = $1
+        AND of2.deleted_at IS NULL
+        AND uo.deleted_at IS NULL
+      GROUP BY uo.operation_type
+      ORDER BY uo.operation_type
+    `, [fiscalYear]);
+
+    return { pillars: result.rows, fiscal_year: fiscalYear };
+  }
+
+  /**
+   * Phase EZ-C: Financial quarterly trend — per-quarter aggregation
+   */
+  async getFinancialQuarterlyTrend(fiscalYear: number, pillarType?: string): Promise<any> {
+    let query = `
+      SELECT
+        of2.quarter,
+        COALESCE(SUM(of2.allotment), 0) AS total_appropriation,
+        COALESCE(SUM(of2.obligation), 0) AS total_obligations,
+        COALESCE(SUM(of2.disbursement), 0) AS total_disbursement,
+        CASE WHEN SUM(of2.allotment) > 0
+          THEN ROUND((SUM(of2.obligation)::numeric / SUM(of2.allotment)) * 100, 2)
+          ELSE 0
+        END AS utilization_rate
+      FROM operation_financials of2
+      JOIN university_operations uo ON uo.id = of2.operation_id
+      WHERE uo.fiscal_year = $1
+        AND of2.deleted_at IS NULL
+        AND uo.deleted_at IS NULL`;
+
+    const params: any[] = [fiscalYear];
+    if (pillarType && pillarType !== 'ALL') {
+      params.push(pillarType);
+      query += ` AND uo.operation_type = $${params.length}`;
+    }
+
+    query += ` GROUP BY of2.quarter ORDER BY of2.quarter`;
+
+    const result = await this.db.query(query, params);
+    return { quarters: result.rows, fiscal_year: fiscalYear };
+  }
+
+  /**
+   * Phase EZ-C: Financial yearly comparison — utilization rate by pillar across years
+   */
+  async getFinancialYearlyComparison(years: number[]): Promise<any> {
+    if (!years.length) return { years: [], pillars: [] };
+
+    const placeholders = years.map((_, i) => `$${i + 1}`).join(',');
+    const result = await this.db.query(`
+      SELECT
+        uo.fiscal_year,
+        uo.operation_type AS pillar_type,
+        CASE WHEN SUM(of2.allotment) > 0
+          THEN ROUND((SUM(of2.obligation)::numeric / SUM(of2.allotment)) * 100, 2)
+          ELSE 0
+        END AS utilization_rate,
+        COALESCE(SUM(of2.allotment), 0) AS total_appropriation,
+        COALESCE(SUM(of2.obligation), 0) AS total_obligations
+      FROM operation_financials of2
+      JOIN university_operations uo ON uo.id = of2.operation_id
+      WHERE uo.fiscal_year IN (${placeholders})
+        AND of2.deleted_at IS NULL
+        AND uo.deleted_at IS NULL
+      GROUP BY uo.fiscal_year, uo.operation_type
+      ORDER BY uo.fiscal_year, uo.operation_type
+    `, years);
+
+    return { years, data: result.rows };
+  }
+
+  /**
+   * Phase EZ-C: Financial expense class breakdown — PS/MOOE/CO distribution
+   */
+  async getFinancialExpenseBreakdown(fiscalYear: number): Promise<any> {
+    const result = await this.db.query(`
+      SELECT
+        COALESCE(of2.expense_class, 'Unclassified') AS expense_class,
+        COUNT(of2.id) AS record_count,
+        COALESCE(SUM(of2.allotment), 0) AS total_appropriation,
+        COALESCE(SUM(of2.obligation), 0) AS total_obligations,
+        COALESCE(SUM(of2.disbursement), 0) AS total_disbursement
+      FROM operation_financials of2
+      JOIN university_operations uo ON uo.id = of2.operation_id
+      WHERE uo.fiscal_year = $1
+        AND of2.deleted_at IS NULL
+        AND uo.deleted_at IS NULL
+      GROUP BY of2.expense_class
+      ORDER BY of2.expense_class
+    `, [fiscalYear]);
+
+    // Calculate percentage of total
+    const totalObligation = result.rows.reduce((sum: number, r: any) => sum + Number(r.total_obligations), 0);
+    const rows = result.rows.map((r: any) => ({
+      ...r,
+      pct_of_total: totalObligation > 0 ? Number(((Number(r.total_obligations) / totalObligation) * 100).toFixed(2)) : 0,
+    }));
+
+    return { breakdown: rows, fiscal_year: fiscalYear };
   }
 }

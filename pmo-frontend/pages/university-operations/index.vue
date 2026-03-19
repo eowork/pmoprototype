@@ -48,10 +48,16 @@ const PILLARS = [
 // State
 const analyticsLoading = ref(true)
 
-// Analytics state
+// Physical analytics state
 const pillarSummary = ref<any>(null)
 const quarterlyTrend = ref<any>(null)
 const yearlyComparison = ref<any>(null)
+
+// Phase EZ-D: Financial analytics state
+const financialPillarSummary = ref<any>(null)
+const financialQuarterlyTrend = ref<any>(null)
+const financialYearlyComparison = ref<any>(null)
+const financialExpenseBreakdown = ref<any>(null)
 
 // Phase EE-D: Global pillar filter — controls all analytics charts simultaneously
 const selectedGlobalPillar = ref<string>('ALL')
@@ -63,8 +69,8 @@ const globalPillarOptions = computed(() => [
 // Phase EE-E: Reporting type selector (Physical / Financial)
 const selectedReportingType = ref<string>('PHYSICAL')
 const reportingTypeOptions = [
-  { title: 'Physical Accomplishments (BAR No. 1)', value: 'PHYSICAL' },
-  { title: 'Financial Accomplishments (BAR No. 2)', value: 'FINANCIAL' },
+  { title: 'Physical Accomplishments', value: 'PHYSICAL' },
+  { title: 'Financial Accomplishments', value: 'FINANCIAL' },
 ]
 
 // Phase DW-B: Fiscal year creation dialog
@@ -126,6 +132,138 @@ async function fetchAnalytics() {
     analyticsLoading.value = false
   }
 }
+
+// Phase EZ-D: Fetch financial analytics data
+async function fetchFinancialAnalytics() {
+  analyticsLoading.value = true
+  try {
+    const pillarParam = selectedGlobalPillar.value !== 'ALL' ? `&pillar_type=${selectedGlobalPillar.value}` : ''
+    const [summaryRes, trendRes, comparisonRes, breakdownRes] = await Promise.all([
+      api.get<any>(`/api/university-operations/analytics/financial-pillar-summary?fiscal_year=${selectedFiscalYear.value}`),
+      api.get<any>(`/api/university-operations/analytics/financial-quarterly-trend?fiscal_year=${selectedFiscalYear.value}${pillarParam}`),
+      api.get<any>(`/api/university-operations/analytics/financial-yearly-comparison?years=${fiscalYearOptions.value.slice(0, 3).join(',')}`),
+      api.get<any>(`/api/university-operations/analytics/financial-expense-breakdown?fiscal_year=${selectedFiscalYear.value}`),
+    ])
+    financialPillarSummary.value = summaryRes
+    financialQuarterlyTrend.value = trendRes
+    financialYearlyComparison.value = comparisonRes
+    financialExpenseBreakdown.value = breakdownRes
+  } catch (err: any) {
+    console.error('[UniOps Financial Analytics] Failed to fetch:', err)
+    toast.warning('Financial analytics data unavailable')
+    financialPillarSummary.value = null
+    financialQuarterlyTrend.value = null
+    financialYearlyComparison.value = null
+    financialExpenseBreakdown.value = null
+  } finally {
+    analyticsLoading.value = false
+  }
+}
+
+// Phase EZ-D: Financial chart configurations
+
+const financialPillarChartOptions = computed(() => ({
+  chart: {
+    type: 'radialBar' as const,
+    height: 280,
+    toolbar: { show: false },
+    events: {
+      dataPointSelection: (_event: any, _chartContext: any, config: any) => {
+        const pillarIndex = config.dataPointIndex
+        if (pillarIndex >= 0 && pillarIndex < PILLARS.length) {
+          navigateToFinancial(PILLARS[pillarIndex].id)
+        }
+      },
+    },
+  },
+  plotOptions: {
+    radialBar: {
+      dataLabels: {
+        name: { fontSize: '12px' },
+        value: { fontSize: '14px', formatter: (val: number) => `${val.toFixed(1)}%` },
+        total: {
+          show: true,
+          label: 'Avg Utilization',
+          formatter: () => {
+            const pillars = financialPillarSummary.value?.pillars || []
+            if (!pillars.length) return '0%'
+            const avg = pillars.reduce((s: number, p: any) => s + Number(p.avg_utilization_rate || 0), 0) / pillars.length
+            return `${avg.toFixed(1)}%`
+          },
+        },
+      },
+    },
+  },
+  labels: PILLARS.map(p => p.name),
+  colors: PILLARS.map(p => p.color),
+}))
+
+const financialPillarChartSeries = computed(() => {
+  if (!financialPillarSummary.value?.pillars) return [0, 0, 0, 0]
+  return PILLARS.map(p => {
+    const pd = financialPillarSummary.value.pillars.find((fp: any) => fp.pillar_type === p.id)
+    return pd ? Number(pd.avg_utilization_rate) : 0
+  })
+})
+
+const expenseBreakdownOptions = computed(() => ({
+  chart: { type: 'donut' as const, height: 280, toolbar: { show: false } },
+  labels: (financialExpenseBreakdown.value?.breakdown || []).map((r: any) => r.expense_class),
+  colors: ['#1976D2', '#F57C00', '#00897B', '#9E9E9E'],
+  legend: { position: 'bottom' as const },
+  dataLabels: {
+    formatter: (val: number) => `${val.toFixed(1)}%`,
+  },
+}))
+
+const expenseBreakdownSeries = computed(() => {
+  return (financialExpenseBreakdown.value?.breakdown || []).map((r: any) => Number(r.total_obligations))
+})
+
+const financialTrendOptions = computed(() => ({
+  chart: { type: 'line' as const, height: 300, toolbar: { show: false } },
+  xaxis: { categories: ['Q1', 'Q2', 'Q3', 'Q4'] },
+  yaxis: [
+    { title: { text: 'Amount (₱)' }, labels: { formatter: (v: number) => `₱${(v / 1000000).toFixed(1)}M` } },
+    { opposite: true, title: { text: 'Utilization (%)' }, min: 0, max: 100 },
+  ],
+  stroke: { width: [3, 3, 2], curve: 'smooth' as const },
+  colors: ['#1976D2', '#F57C00', '#4CAF50'],
+  tooltip: { y: { formatter: (v: number, { seriesIndex }: any) => seriesIndex === 2 ? `${v}%` : `₱${v.toLocaleString()}` } },
+}))
+
+const financialTrendSeries = computed(() => {
+  const quarters = financialQuarterlyTrend.value?.quarters || []
+  const qMap: Record<string, any> = {}
+  quarters.forEach((q: any) => { qMap[q.quarter] = q })
+  const qKeys = ['Q1', 'Q2', 'Q3', 'Q4']
+  return [
+    { name: 'Appropriation', type: 'line', data: qKeys.map(k => Number(qMap[k]?.total_appropriation || 0)) },
+    { name: 'Obligations', type: 'line', data: qKeys.map(k => Number(qMap[k]?.total_obligations || 0)) },
+    { name: 'Utilization %', type: 'line', data: qKeys.map(k => Number(qMap[k]?.utilization_rate || 0)) },
+  ]
+})
+
+const financialYearlyOptions = computed(() => ({
+  chart: { type: 'bar' as const, height: 400, toolbar: { show: false } },
+  plotOptions: { bar: { horizontal: false, columnWidth: '60%', dataLabels: { position: 'top' } } },
+  xaxis: { categories: PILLARS.map(p => p.name) },
+  yaxis: { title: { text: 'Utilization Rate (%)' }, min: 0 },
+  colors: (financialYearlyComparison.value?.years || []).map((_: any, i: number) => ['#1976D2', '#F57C00', '#4CAF50', '#9C27B0'][i % 4]),
+  dataLabels: { enabled: true, formatter: (val: number) => `${val}%`, offsetY: -20 },
+}))
+
+const financialYearlySeries = computed(() => {
+  const data = financialYearlyComparison.value?.data || []
+  const years = financialYearlyComparison.value?.years || []
+  return years.map((year: number) => ({
+    name: `FY ${year}`,
+    data: PILLARS.map(p => {
+      const match = data.find((d: any) => d.fiscal_year === year && d.pillar_type === p.id)
+      return match ? Number(match.utilization_rate) : 0
+    }),
+  }))
+})
 
 // Phase DE-C + DN-E: Chart configurations with interactive click handlers
 const pillarChartOptions = computed(() => ({
@@ -434,19 +572,33 @@ const targetVsActualSeries = computed(() => {
 
 // Phase DW-B: Watch for fiscal year changes from store
 watch(selectedFiscalYear, () => {
-  fetchAnalytics()
+  if (selectedReportingType.value === 'PHYSICAL') fetchAnalytics()
+  else fetchFinancialAnalytics()
 }, { immediate: false })
 
-// Phase EE-D: Watch for global pillar filter — re-fetch quarterly trend with pillar_type
+// Phase EZ-D: Watch for reporting type changes — fetch appropriate analytics
+watch(selectedReportingType, (newType) => {
+  if (newType === 'PHYSICAL') fetchAnalytics()
+  else fetchFinancialAnalytics()
+})
+
+// Phase EE-D: Watch for global pillar filter — re-fetch trend for active reporting type
 watch(selectedGlobalPillar, async (newPillar) => {
   try {
     const pillarParam = newPillar !== 'ALL' ? `&pillar_type=${newPillar}` : ''
-    const trendRes = await api.get<any>(
-      `/api/university-operations/analytics/quarterly-trend?fiscal_year=${selectedFiscalYear.value}${pillarParam}`
-    )
-    quarterlyTrend.value = trendRes
+    if (selectedReportingType.value === 'PHYSICAL') {
+      const trendRes = await api.get<any>(
+        `/api/university-operations/analytics/quarterly-trend?fiscal_year=${selectedFiscalYear.value}${pillarParam}`
+      )
+      quarterlyTrend.value = trendRes
+    } else {
+      const trendRes = await api.get<any>(
+        `/api/university-operations/analytics/financial-quarterly-trend?fiscal_year=${selectedFiscalYear.value}${pillarParam}`
+      )
+      financialQuarterlyTrend.value = trendRes
+    }
   } catch (err: any) {
-    console.error('[UniOps Analytics] Failed to fetch quarterly trend:', err)
+    console.error('[UniOps Analytics] Failed to fetch trend:', err)
   }
 })
 
@@ -461,8 +613,14 @@ function navigateToPhysical(pillarId?: string) {
   })
 }
 
-function navigateToFinancial() {
-  toast.info('Financial Accomplishments coming soon')
+function navigateToFinancial(pillarId?: string) {
+  router.push({
+    path: '/university-operations/financial',
+    query: {
+      year: selectedFiscalYear.value.toString(),
+      ...(pillarId && { pillar: pillarId })
+    }
+  })
 }
 
 // Phase DW-B: Initialize from store on mount
@@ -552,31 +710,30 @@ onMounted(async () => {
         </v-card>
       </v-col>
 
-      <!-- Financial Accomplishments (DEFERRED) -->
+      <!-- Financial Accomplishments (Phase ET-D: ENABLED) -->
       <v-col cols="12" md="6">
         <v-card
-          class="pa-6 h-100"
+          class="pa-6 h-100 cursor-pointer"
           variant="outlined"
-          disabled
+          hover
+          @click="navigateToFinancial()"
         >
           <div class="d-flex align-center mb-4">
-            <v-avatar color="grey" size="56" class="mr-4">
+            <v-avatar color="success" size="56" class="mr-4">
               <v-icon size="28" color="white">mdi-currency-php</v-icon>
             </v-avatar>
             <div>
-              <h2 class="text-h5 font-weight-bold text-grey">Financial Accomplishments</h2>
-              <p class="text-body-2 text-grey">BAR No. 2</p>
+              <h2 class="text-h5 font-weight-bold">Financial Accomplishments</h2>
+              <p class="text-body-2 text-grey">Budget Utilization and Financial Performance</p>
             </div>
           </div>
-          <p class="text-body-1 mb-4 text-grey">
-            Budget utilization and financial performance tracking. Monitor allotments,
-            obligations, and disbursements across fund types.
+          <p class="text-body-1 mb-4">
+            Budget utilization and financial performance tracking. Monitor appropriations,
+            obligations, and disbursements across fund types and expense classes.
           </p>
-          <div class="d-flex align-center text-grey">
-            <v-chip color="grey" variant="tonal" size="small">
-              <v-icon start size="small">mdi-clock-outline</v-icon>
-              Coming Soon - Phase 2
-            </v-chip>
+          <div class="d-flex align-center text-success">
+            <span class="font-weight-medium">Enter Financial Accomplishments</span>
+            <v-icon end>mdi-arrow-right</v-icon>
           </div>
         </v-card>
       </v-col>
@@ -588,22 +745,24 @@ onMounted(async () => {
         <v-icon start color="primary">mdi-chart-areaspline</v-icon>
         Analytics Dashboard - FY {{ selectedFiscalYear }}
         <v-spacer />
-        <!-- Phase EE-E: Reporting type selector -->
+        <!-- Phase EZ-F: Reporting type selector with icon -->
         <v-select
           v-model="selectedReportingType"
           :items="reportingTypeOptions"
           density="compact"
           variant="outlined"
           hide-details
+          prepend-inner-icon="mdi-file-chart-outline"
           style="max-width: 300px"
         />
-        <!-- Phase EE-D: Global pillar filter -->
+        <!-- Phase EZ-F: Global pillar filter with icon -->
         <v-select
           v-model="selectedGlobalPillar"
           :items="globalPillarOptions"
           density="compact"
           variant="outlined"
           hide-details
+          prepend-inner-icon="mdi-filter"
           style="max-width: 200px"
         />
       </v-card-title>
@@ -627,7 +786,8 @@ onMounted(async () => {
               Analytics Guide — How to Read These Charts
             </v-expansion-panel-title>
             <v-expansion-panel-text>
-              <div class="text-body-2">
+              <!-- Phase EZ-E: Dynamic guide content based on reporting type -->
+              <div class="text-body-2" v-if="selectedReportingType === 'PHYSICAL'">
                 <p class="font-weight-bold mb-1">Achievement Rate by Pillar (%)</p>
                 <p class="mb-3">
                   Displays the <em>Achievement Rate</em> for each pillar, computed as (Total Actual &divide; Total Target) &times; 100. A value above 100% indicates the pillar exceeded its targets. Values are computed dynamically for display — original stored data is never modified.
@@ -646,6 +806,28 @@ onMounted(async () => {
                 <p class="font-weight-bold mb-1">Year-over-Year Comparison</p>
                 <p class="mb-0">
                   Displays all four pillars as separate series across fiscal years, showing each pillar's accomplishment rate (%). This allows direct comparison of pillar performance trends over time. Use the global pillar filter to focus on a specific pillar.
+                </p>
+              </div>
+
+              <div class="text-body-2" v-else>
+                <p class="font-weight-bold mb-1">Utilization Rate by Pillar (%)</p>
+                <p class="mb-3">
+                  Shows the budget utilization rate (Obligations &divide; Appropriation &times; 100) for each pillar as a radial gauge. Higher values indicate more of the allocated budget has been committed. Each pillar is independent — no cross-pillar averaging.
+                </p>
+
+                <p class="font-weight-bold mb-1">Expense Class Breakdown</p>
+                <p class="mb-3">
+                  Displays the distribution of obligations across expense classes: PS (Personal Services), MOOE (Maintenance and Other Operating Expenses), and CO (Capital Outlay). Shows what proportion of total obligations falls into each category.
+                </p>
+
+                <p class="font-weight-bold mb-1">Financial Quarterly Trend</p>
+                <p class="mb-3">
+                  Tracks appropriation and obligation levels per quarter (Q1–Q4), with a utilization rate overlay. Use the global pillar filter to focus on a specific pillar's financial trend. Reveals spending patterns and budget absorption rates throughout the fiscal year.
+                </p>
+
+                <p class="font-weight-bold mb-1">Year-over-Year Comparison</p>
+                <p class="mb-0">
+                  Compares utilization rates across fiscal years for each pillar. Higher bars indicate better budget absorption. Useful for identifying whether financial performance is improving or declining across reporting periods.
                 </p>
               </div>
             </v-expansion-panel-text>
@@ -820,19 +1002,156 @@ onMounted(async () => {
 
         </template>
 
-        <!-- Phase EE-E: Financial accomplishments placeholder -->
+        <!-- Phase EZ-D: Financial accomplishments analytics -->
         <template v-else>
-          <v-card variant="tonal" class="text-center pa-8">
-            <v-icon size="64" color="grey-lighten-1" class="mb-4">mdi-chart-timeline-variant</v-icon>
-            <h3 class="text-h6 mb-2">Financial Accomplishments Analytics</h3>
-            <p class="text-body-2 text-grey mb-4">
-              BAR No. 2 financial analytics are under development. This module will provide budget utilization tracking, obligation monitoring, and disbursement analysis.
-            </p>
-            <v-chip color="info" variant="tonal">
-              <v-icon start size="small">mdi-clock-outline</v-icon>
-              Coming Soon
-            </v-chip>
-          </v-card>
+
+        <!-- Row 1: Financial Pillar Overview Cards -->
+        <v-row class="mb-4" v-if="financialPillarSummary?.pillars?.length">
+          <v-col cols="12">
+            <div class="text-subtitle-1 font-weight-medium mb-3 d-flex align-center">
+              <v-icon start size="small" color="success">mdi-view-dashboard</v-icon>
+              Budget Utilization Overview
+            </div>
+          </v-col>
+          <v-col v-for="pillar in PILLARS" :key="pillar.id" cols="6" md="3">
+            <v-card
+              variant="outlined"
+              class="h-100 cursor-pointer"
+              hover
+              @click="navigateToFinancial(pillar.id)"
+            >
+              <v-card-text class="pa-3">
+                <div class="d-flex align-center mb-2">
+                  <v-avatar :color="pillar.color" size="32" class="mr-2">
+                    <v-icon size="18" color="white">{{ pillar.icon }}</v-icon>
+                  </v-avatar>
+                  <span class="text-subtitle-2 font-weight-medium">{{ pillar.name }}</span>
+                </div>
+                <div
+                  v-if="financialPillarSummary?.pillars?.find((p: any) => p.pillar_type === pillar.id)"
+                  class="d-flex flex-column"
+                >
+                  <div class="d-flex justify-space-between text-caption mb-1">
+                    <span class="text-grey">Appropriation:</span>
+                    <span class="font-weight-medium">₱{{ Number(financialPillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.total_appropriation || 0).toLocaleString() }}</span>
+                  </div>
+                  <div class="d-flex justify-space-between text-caption mb-1">
+                    <span class="text-grey">Obligations:</span>
+                    <span class="font-weight-medium">₱{{ Number(financialPillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.total_obligations || 0).toLocaleString() }}</span>
+                  </div>
+                  <div class="d-flex ga-1 mt-2 flex-wrap">
+                    <v-chip
+                      :color="Number(financialPillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.avg_utilization_rate || 0) >= 80 ? 'success' : Number(financialPillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.avg_utilization_rate || 0) >= 50 ? 'warning' : 'error'"
+                      size="small"
+                      variant="tonal"
+                    >
+                      {{ Number(financialPillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.avg_utilization_rate || 0).toFixed(1) }}% Utilization
+                    </v-chip>
+                    <v-chip size="small" variant="tonal" color="info">
+                      {{ financialPillarSummary.pillars.find((p: any) => p.pillar_type === pillar.id)?.record_count || 0 }} records
+                    </v-chip>
+                  </div>
+                </div>
+                <div v-else class="text-caption text-grey">No financial data</div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <!-- Row 2: Utilization Radial + Expense Class Donut -->
+        <v-row class="mb-4">
+          <v-col cols="12" md="6">
+            <v-card variant="tonal" class="h-100">
+              <v-card-title class="text-subtitle-1 d-flex align-center">
+                <v-icon start size="small" color="success">mdi-chart-donut</v-icon>
+                Utilization Rate by Pillar (%)
+              </v-card-title>
+              <v-card-text>
+                <ClientOnly>
+                  <VueApexCharts
+                    type="radialBar"
+                    height="280"
+                    :options="financialPillarChartOptions"
+                    :series="financialPillarChartSeries"
+                  />
+                </ClientOnly>
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col cols="12" md="6">
+            <v-card variant="tonal" class="h-100">
+              <v-card-title class="text-subtitle-1 d-flex align-center">
+                <v-icon start size="small" color="orange">mdi-chart-pie</v-icon>
+                Expense Class Breakdown (Obligations)
+              </v-card-title>
+              <v-card-text>
+                <ClientOnly>
+                  <VueApexCharts
+                    v-if="expenseBreakdownSeries.length > 0"
+                    type="donut"
+                    height="280"
+                    :options="expenseBreakdownOptions"
+                    :series="expenseBreakdownSeries"
+                  />
+                  <div v-else class="text-center py-8 text-grey">
+                    <v-icon size="48">mdi-chart-pie</v-icon>
+                    <div class="mt-2">No expense class data available</div>
+                  </div>
+                </ClientOnly>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <!-- Row 3: Financial Quarterly Trend -->
+        <v-row class="mb-4">
+          <v-col cols="12">
+            <v-card variant="tonal" class="h-100">
+              <v-card-title class="text-subtitle-1 d-flex align-center">
+                <v-icon start size="small" color="primary">mdi-trending-up</v-icon>
+                Financial Quarterly Trend — Appropriation vs Obligations
+              </v-card-title>
+              <v-card-text>
+                <ClientOnly>
+                  <VueApexCharts
+                    type="line"
+                    height="300"
+                    :options="financialTrendOptions"
+                    :series="financialTrendSeries"
+                  />
+                </ClientOnly>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <!-- Row 4: Year-over-Year Financial Comparison -->
+        <v-row>
+          <v-col cols="12">
+            <v-card variant="tonal" class="h-100">
+              <v-card-title class="text-subtitle-1 d-flex align-center">
+                <v-icon start size="small" color="orange">mdi-chart-bar</v-icon>
+                Year-over-Year Comparison — Utilization Rate by Pillar (%)
+              </v-card-title>
+              <v-card-text>
+                <ClientOnly>
+                  <VueApexCharts
+                    v-if="financialYearlyComparison?.years?.length"
+                    type="bar"
+                    height="400"
+                    :options="financialYearlyOptions"
+                    :series="financialYearlySeries"
+                  />
+                  <div v-else class="text-center py-8 text-grey">
+                    <v-icon size="48">mdi-chart-bar</v-icon>
+                    <div class="mt-2">No historical financial data available</div>
+                  </div>
+                </ClientOnly>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+
         </template>
 
       </v-card-text>

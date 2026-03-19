@@ -7,6 +7,7 @@ import {
   IsIn,
   IsEnum,
   MaxLength,
+  Min,
 } from 'class-validator';
 
 // Phase BC: BAR1 fund type subcategories
@@ -62,20 +63,30 @@ export class CreateFinancialDto {
   @MaxLength(50)
   project_code?: string;
 
+  // Phase ET-B: BAR No. 2 expense class categorization (PS/MOOE/CO)
+  @IsOptional()
+  @IsIn(['PS', 'MOOE', 'CO'])
+  expense_class?: string;
+
+  // Phase EZ-A: @Min(0) — negative financial values rejected by backend validation
   @IsOptional()
   @IsNumber()
+  @Min(0)
   allotment?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   target?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   obligation?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   disbursement?: number;
 
   @IsOptional()
