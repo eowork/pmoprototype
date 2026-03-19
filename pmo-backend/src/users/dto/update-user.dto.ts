@@ -2,7 +2,8 @@ import { PartialType, OmitType } from '@nestjs/mapped-types';
 import { CreateUserDto } from './create-user.dto';
 import { IsOptional, IsString, MinLength, MaxLength, Matches } from 'class-validator';
 
-export class UpdateUserDto extends PartialType(OmitType(CreateUserDto, ['email', 'password'])) {
+// Phase BZ: Allow email updates (remove from OmitType exclusion)
+export class UpdateUserDto extends PartialType(OmitType(CreateUserDto, ['password'])) {
   @IsOptional()
   @IsString()
   @MinLength(8)

@@ -23,6 +23,7 @@ interface UserRole {
 interface UserDetail {
   id: string
   email: string
+  username?: string  // Phase CB: Username edit
   first_name: string
   last_name: string
   phone?: string
@@ -42,6 +43,7 @@ if (!userId) {
 
 const form = ref({
   email: '',
+  username: '',  // Phase CB: Username edit
   first_name: '',
   last_name: '',
   phone: '',
@@ -49,6 +51,19 @@ const form = ref({
   rank_level: 100,
   // Phase AG: Campus assignment for office-scoped visibility
   campus: '' as string,
+})
+
+// Phase CB/CC: Get current user for self-edit check
+const authStore = useAuthStore()
+const { isAdmin, isSuperAdmin } = usePermissions()
+
+// Phase CB/CC: Computed - can edit credentials (username, email)
+// Self-edit blocked, only Admin/SuperAdmin can edit others
+const canEditCredentials = computed(() => {
+  // If editing self, cannot edit username/email
+  if (authStore.user?.id === userId) return false
+  // Must be Admin or SuperAdmin
+  return isAdmin.value || isSuperAdmin.value
 })
 
 // Phase AG: Campus options for office-scoped visibility
@@ -139,6 +154,7 @@ async function fetchUser() {
     // Populate form
     form.value = {
       email: response.email,
+      username: response.username || '',  // Phase CB: Username edit
       first_name: response.first_name,
       last_name: response.last_name,
       phone: response.phone || '',
@@ -180,7 +196,7 @@ async function handleSubmit() {
 
   submitting.value = true
   try {
-    const payload = {
+    const payload: Record<string, any> = {
       first_name: form.value.first_name,
       last_name: form.value.last_name,
       phone: form.value.phone || undefined,
@@ -188,6 +204,16 @@ async function handleSubmit() {
       rank_level: form.value.rank_level,
       // Phase AG: Campus for office-scoped visibility
       campus: form.value.campus || undefined,
+    }
+
+    // Phase CB/CC: Include username and email only if editing another user (canEditCredentials)
+    if (canEditCredentials.value) {
+      if (form.value.username) {
+        payload.username = form.value.username
+      }
+      if (form.value.email) {
+        payload.email = form.value.email
+      }
     }
 
     console.log('[User Edit] Updating user:', userId, payload)
@@ -493,18 +519,38 @@ onMounted(async () => {
           <v-card-text class="pa-6">
             <v-form @submit.prevent="handleSubmit">
           <v-row>
-            <!-- Email (read-only) -->
+            <!-- Phase CB: Username (editable for Admin/SuperAdmin editing others) -->
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="form.username"
+                label="Username"
+                variant="outlined"
+                density="compact"
+                :readonly="!canEditCredentials"
+                :disabled="!canEditCredentials"
+                :hint="canEditCredentials ? 'Lowercase letters, numbers, dots, underscores, dashes only' : 'Admin privileges required to change username'"
+                persistent-hint
+                :rules="canEditCredentials ? [
+                  (v: string) => !v || v.length >= 3 || 'Min 3 characters',
+                  (v: string) => !v || v.length <= 100 || 'Max 100 characters',
+                  (v: string) => !v || /^[a-z0-9._-]*$/.test(v) || 'Only lowercase letters, numbers, dots, underscores, dashes'
+                ] : []"
+              />
+            </v-col>
+
+            <!-- Phase CC: Email (editable for Admin/SuperAdmin editing others) -->
             <v-col cols="12" md="6">
               <v-text-field
                 v-model="form.email"
-                label="Email"
+                label="Email *"
                 type="email"
                 variant="outlined"
                 density="compact"
-                readonly
-                disabled
-                hint="Email cannot be changed"
+                :readonly="!canEditCredentials"
+                :disabled="!canEditCredentials"
+                :hint="canEditCredentials ? 'Must be a valid email address' : 'Admin privileges required to change email'"
                 persistent-hint
+                required
               />
             </v-col>
 

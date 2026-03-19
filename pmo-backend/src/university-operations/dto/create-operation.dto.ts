@@ -5,8 +5,11 @@ import {
   IsEnum,
   IsUUID,
   IsNumber,
+  IsInt,
   IsDateString,
   IsArray,
+  Min,
+  Max,
 } from 'class-validator';
 import { OperationType, ProjectStatus, Campus } from '../../common/enums';
 
@@ -53,6 +56,13 @@ export class CreateOperationDto {
 
   @IsOptional()
   metadata?: Record<string, any>;
+
+  // Phase BD: Fiscal year for year-based filtering
+  @IsOptional()
+  @IsInt()
+  @Min(2020)
+  @Max(2099)
+  fiscal_year?: number;
 
   // Phase AN: Inline assignment during creation (DEPRECATED - use assigned_user_ids)
   @IsOptional()

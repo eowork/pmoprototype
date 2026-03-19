@@ -275,9 +275,9 @@ export class UsersService {
   }
 
   async update(id: string, dto: UpdateUserDto, adminId: string): Promise<any> {
-    // Verify user exists
+    // Verify user exists (Phase BY: Fetch username and email for audit logging)
     const existing = await this.db.query(
-      `SELECT id, rank_level FROM users WHERE id = $1 AND deleted_at IS NULL`,
+      `SELECT id, rank_level, username, email FROM users WHERE id = $1 AND deleted_at IS NULL`,
       [id],
     );
 
@@ -285,9 +285,29 @@ export class UsersService {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
 
-    // Rank-Based Permission: Check if actor can modify this user
-    // Skip check if updating own profile (users can always update their own basic info)
-    if (id !== adminId) {
+    // Phase CE: Field-level permission for self-edit vs admin edit
+    if (id === adminId) {
+      // Self-edit allowed ONLY for basic info fields
+      const allowedSelfEditFields = ['first_name', 'last_name', 'phone', 'avatar_url'];
+      const forbiddenFields: string[] = [];
+
+      // Check each field in dto for forbidden self-edits
+      if (dto.username !== undefined) forbiddenFields.push('username');
+      if (dto.email !== undefined) forbiddenFields.push('email');
+      if (dto.password !== undefined) forbiddenFields.push('password');
+      if (dto.rank_level !== undefined) forbiddenFields.push('rank_level');
+      if (dto.is_active !== undefined) forbiddenFields.push('is_active');
+      if (dto.metadata !== undefined) forbiddenFields.push('metadata');
+      if ((dto as any).campus !== undefined) forbiddenFields.push('campus');
+
+      if (forbiddenFields.length > 0) {
+        throw new ForbiddenException(
+          `Cannot self-edit: ${forbiddenFields.join(', ')}. Admin approval required for username, email, rank, or password changes.`
+        );
+      }
+      // Self-edit for basic info — skip rank check
+    } else {
+      // Admin editing another user — enforce rank check
       const canModify = await this.canModifyUser(adminId, id);
       if (!canModify) {
         throw new ForbiddenException('Cannot modify a user with equal or higher authority');
@@ -305,6 +325,52 @@ export class UsersService {
     if (dto.last_name !== undefined) {
       updates.push(`last_name = $${paramIndex++}`);
       values.push(dto.last_name);
+    }
+    // Phase BY: Username update with uniqueness validation
+    if (dto.username !== undefined) {
+      // Check uniqueness
+      const usernameCheck = await this.db.query(
+        'SELECT id FROM users WHERE username = $1 AND id != $2 AND deleted_at IS NULL',
+        [dto.username, id],
+      );
+      if (usernameCheck.rowCount > 0) {
+        throw new ConflictException('Username already exists');
+      }
+
+      updates.push(`username = $${paramIndex++}`);
+      values.push(dto.username);
+
+      this.logger.log({
+        action: 'USER_USERNAME_CHANGED',
+        userId: id,
+        oldValue: existing.rows[0].username,
+        newValue: dto.username,
+        actorId: adminId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    // Phase BZ: Email update with uniqueness validation
+    if (dto.email !== undefined) {
+      // Check uniqueness
+      const emailCheck = await this.db.query(
+        'SELECT id FROM users WHERE email = $1 AND id != $2 AND deleted_at IS NULL',
+        [dto.email, id],
+      );
+      if (emailCheck.rowCount > 0) {
+        throw new ConflictException('Email already exists');
+      }
+
+      updates.push(`email = $${paramIndex++}`);
+      values.push(dto.email);
+
+      this.logger.log({
+        action: 'USER_EMAIL_CHANGED',
+        userId: id,
+        oldValue: existing.rows[0].email,
+        newValue: dto.email,
+        actorId: adminId,
+        timestamp: new Date().toISOString(),
+      });
     }
     if (dto.phone !== undefined) {
       updates.push(`phone = $${paramIndex++}`);
@@ -527,6 +593,19 @@ export class UsersService {
   }
 
   async resetPassword(userId: string, newPassword: string, adminId: string): Promise<void> {
+    // Phase CD: Prevent self-reset (SuperAdmin cannot bypass complexity for self)
+    if (userId === adminId) {
+      throw new ForbiddenException(
+        'Cannot bypass password complexity for your own account. Use profile settings to change your password with complexity requirements.'
+      );
+    }
+
+    // Phase CD: Check if actor can modify target user (rank-based permission)
+    const canModify = await this.canModifyUser(adminId, userId);
+    if (!canModify) {
+      throw new ForbiddenException('Cannot reset password for a user with equal or higher authority');
+    }
+
     const passwordHash = await bcrypt.hash(newPassword, this.SALT_ROUNDS);
 
     const result = await this.db.query(
@@ -540,7 +619,14 @@ export class UsersService {
       throw new NotFoundException(`User with ID ${userId} not found`);
     }
 
-    this.logger.log(`USER_PASSWORD_RESET: id=${userId}, by=${adminId}`);
+    // Phase CD: Enhanced structured audit logging
+    this.logger.log({
+      action: 'USER_PASSWORD_RESET',
+      userId: userId,
+      actorId: adminId,
+      bypass_complexity: true,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // --- Permission Overrides ---

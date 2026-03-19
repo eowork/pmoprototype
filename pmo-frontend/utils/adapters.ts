@@ -39,6 +39,7 @@ export interface BackendProject {
   end_date?: string
   publication_status?: PublicationStatus
   created_by?: string
+  created_by_name?: string
   created_at: string
   updated_at: string
   // Approval metadata fields
@@ -338,6 +339,7 @@ export interface BackendUniversityOperation {
   budget_utilized?: number
   publication_status?: PublicationStatus
   created_by?: string
+  created_by_name?: string
   created_at: string
   updated_at: string
   // Approval metadata fields
@@ -449,6 +451,7 @@ export interface BackendRepairProject {
   budget?: number
   actual_cost?: number
   created_by?: string
+  created_by_name?: string
   // Approval metadata fields
   submitted_by?: string
   submitted_by_name?: string
