@@ -1,0 +1,460 @@
+================================================================================
+ACE FRAMEWORK v2.4 + CLAUDE.MD INTEGRATION GUIDE
+================================================================================
+Version: 1.1
+Date: 2026-03-20
+Author: PMO Dashboard Development Team
+Purpose: Reference artifact for integrating the ACE Framework with Claude Code's
+         CLAUDE.md context system. Applicable to any AI-assisted development project.
+
+================================================================================
+I. PROBLEM STATEMENT
+================================================================================
+
+AI-assisted development conversations face two competing demands:
+
+  1. CONTROL — The operator must authorize every action. No autonomous mutations.
+  2. EFFICIENCY — Token consumption must be minimized. No redundant re-discovery.
+
+The ACE Framework v2.4 solves (1) with authorization gates.
+CLAUDE.md solves (2) with pre-loaded project context.
+
+These are complementary, not competing. This guide documents how to combine them
+safely — preserving full operator control while eliminating token waste.
+
+================================================================================
+II. WHAT IS THE ACE FRAMEWORK v2.4?
+================================================================================
+
+ACE (Analyze → Contextualize → Execute) is a governed AI engineering framework
+that enforces structured development through three mandatory phases:
+
+  Phase 1: RESEARCH
+    - AI reads code, analyzes structure, documents findings
+    - Output: research.md (knowledge artifact)
+    - NO code changes. NO implementation.
+
+  Phase 2: PLAN
+    - AI creates ordered, verifiable implementation steps
+    - Output: plan.md (execution contract)
+    - NO code changes. NO implementation.
+
+  Phase 3: IMPLEMENT
+    - AI executes ONLY approved plan steps
+    - Output: Code changes + plan.md step verification
+    - Plan is FROZEN during implementation
+
+KEY PRINCIPLE: The operator must explicitly issue RUN_ACE or EXECUTE_WITH_ACE
+to activate any phase. The AI NEVER auto-starts execution.
+
+See: docs/guides/VERSION 2.4 PROMPT AND RULE GOVERNANCE AI ENGINEERING.txt (full spec)
+See: docs/guides/ACE FRAMEWORK UNDERSTANDING OF ITS PURPOSE.txt (philosophy)
+
+================================================================================
+III. WHAT IS CLAUDE.MD?
+================================================================================
+
+CLAUDE.md is a project-root file that Claude Code reads automatically at the
+start of every conversation. It contains:
+
+  - Project context (tech stack, structure, conventions)
+  - Working agreements (what to do, what NOT to do)
+  - Key file references
+  - Active governance rules
+
+CRITICAL DISTINCTION:
+  CLAUDE.md is a CONTEXT FILE, not an AUTOMATION SYSTEM.
+  It tells the AI what the project is about.
+  It does NOT tell the AI to take actions autonomously.
+  It does NOT bypass operator authorization.
+
+================================================================================
+IV. WHY COMBINE THEM?
+================================================================================
+
+Without CLAUDE.md, every new conversation must:
+  1. Read plan.md (potentially thousands of lines)
+  2. Read research.md (potentially thousands of lines)
+  3. Re-discover project structure, conventions, and rules
+  4. Re-learn operator preferences and ACE governance
+
+This burns 30-60% of the context window before any useful work begins.
+
+With CLAUDE.md:
+  1. ACE rules are pre-loaded (compact form)
+  2. Project state is pre-loaded (current phase, next steps)
+  3. Key file map is pre-loaded (no re-discovery)
+  4. The AI knows where it is immediately
+
+TOKEN SAVINGS: 60-80% reduction in context discovery overhead.
+CONTROL IMPACT: Zero. The authorization gate model is preserved exactly.
+
+================================================================================
+V. INTEGRATION ARCHITECTURE
+================================================================================
+
+The integration follows a strict separation of concerns:
+
+  ┌─────────────────────────────────────────────────────┐
+  │                    CLAUDE.md                         │
+  │                                                     │
+  │  Purpose: INFORM the AI (read-only context)         │
+  │  Contains:                                          │
+  │    - ACE v2.4 rules (compact)                       │
+  │    - Project structure                              │
+  │    - Active governance directives (summary)         │
+  │    - Key file map                                   │
+  │    - Operator preferences                           │
+  │                                                     │
+  │  DOES NOT contain:                                  │
+  │    - Automation hooks                               │
+  │    - MCP server configurations                      │
+  │    - Auto-execute triggers                          │
+  │    - Background processes                           │
+  └─────────────────────────────────────────────────────┘
+                         │
+                         │ (pre-loads at conversation start)
+                         ▼
+  ┌─────────────────────────────────────────────────────┐
+  │              AI CONVERSATION SESSION                 │
+  │                                                     │
+  │  The AI enters the conversation with:               │
+  │    - Full project understanding                     │
+  │    - ACE rules internalized                         │
+  │    - Ready to respond to operator commands           │
+  │                                                     │
+  │  The AI STILL requires:                             │
+  │    - RUN_ACE to start any phase                     │
+  │    - Operator scope confirmation                    │
+  │    - Step-by-step authorization                     │
+  └─────────────────────────────────────────────────────┘
+                         │
+                         │ (operator issues commands)
+                         ▼
+  ┌─────────────────────────────────────────────────────┐
+  │              ACE FRAMEWORK EXECUTION                 │
+  │                                                     │
+  │  Phase 1 → Phase 2 → Phase 3                        │
+  │  (Research)  (Plan)    (Implement)                  │
+  │                                                     │
+  │  Artifacts:                                         │
+  │    - docs/research.md (findings)                    │
+  │    - docs/plan.md (execution contract)              │
+  │    - docs/archive/ (historical reference)           │
+  └─────────────────────────────────────────────────────┘
+
+================================================================================
+VI. OPERATOR CONTROL MODEL
+================================================================================
+
+The following guarantees are NON-NEGOTIABLE:
+
+  1. NO AUTONOMOUS EXECUTION
+     The AI will NEVER start Phase 1, 2, or 3 without explicit operator command.
+     CLAUDE.md provides context. It does NOT provide authorization.
+
+  2. NO HIDDEN STATE
+     All artifacts (plan.md, research.md) are visible to the operator.
+     The AI cannot maintain hidden execution state.
+
+  3. OPERATOR CAN CANCEL AT ANY TIME
+     Every action is interruptible. The operator can:
+       - PAUSE_STATE → freeze execution
+       - RESET_SCOPE → clear and start over
+       - Deny any tool call → AI must adjust approach
+
+  4. NO SCOPE CREEP
+     CLAUDE.md defines what the project IS.
+     Only RUN_ACE + explicit scope defines what the AI DOES.
+
+  5. ARTIFACTS ARE AUTHORITATIVE
+     plan.md and research.md are the source of truth.
+     CLAUDE.md is a summary/pointer — it does NOT replace them.
+
+================================================================================
+VII. WHAT NOT TO PUT IN CLAUDE.MD
+================================================================================
+
+NEVER add these to CLAUDE.md:
+
+  ✗ MCP server automation that auto-executes on events
+  ✗ Hooks that trigger code changes without operator approval
+  ✗ Background processes that the operator cannot see
+  ✗ Auto-commit or auto-push rules
+  ✗ Rules that bypass the Phase 1→2→3 sequence
+  ✗ Detailed implementation plans (those belong in plan.md)
+  ✗ Research findings (those belong in research.md)
+  ✗ Full governance directive tables (use summary + pointer)
+
+ALWAYS add these to CLAUDE.md:
+
+  ✓ ACE v2.4 enforcement rules (compact form)
+  ✓ Tech stack and project structure
+  ✓ Key file paths and their purposes
+  ✓ Current project state (which phase, what's next)
+  ✓ Coding conventions (naming, patterns, constraints)
+  ✓ Operator preferences (verbosity, style, workflow)
+  ✓ Pointers to detailed artifacts (plan.md, research.md)
+
+================================================================================
+VIII. ARTIFACT MANAGEMENT PROTOCOL
+================================================================================
+
+The ACE Framework mandates TWO LIVING DOCUMENTS:
+  1. docs/plan.md — Execution contract
+  2. docs/research.md — Research findings
+
+CLAUDE.md is a THIRD document but with a different role:
+  - It is a CONTEXT FILE, not an execution artifact
+  - It summarizes and points to plan.md and research.md
+  - It does NOT duplicate their content
+  - It is updated when project state changes significantly
+
+ARCHIVAL RULES:
+  - Completed phases in plan.md → archive to docs/archive/
+  - Completed research in research.md → archive to docs/archive/
+  - CLAUDE.md state pointers → update to reflect current phase
+  - Historical content is NEVER deleted — only archived
+
+TOKEN BUDGET TARGETS:
+  - CLAUDE.md: < 200 lines (pre-loaded every conversation)
+  - plan.md (active): < 500 lines (read on RUN_ACE)
+  - research.md (active): < 500 lines (read on Phase 1)
+  - Archive files: unlimited (read only when needed)
+
+================================================================================
+IX. MEMORY SYSTEM INTEGRATION
+================================================================================
+
+Claude Code has a persistent memory system separate from CLAUDE.md:
+
+  CLAUDE.md  → Project-level context (shared, version-controlled)
+  Memory     → User-level context (personal, persistent across projects)
+
+Memory stores:
+  - User preferences and role
+  - Feedback on AI behavior
+  - Cross-project references
+
+Memory does NOT store:
+  - Code patterns (derivable from code)
+  - Git history (derivable from git)
+  - Implementation details (belong in plan.md)
+
+The two systems complement each other:
+  CLAUDE.md answers: "What is this project?"
+  Memory answers: "Who is this user and how do they work?"
+
+================================================================================
+X. MIGRATION GUIDE — ADAPTING AN EXISTING ACE PROJECT
+================================================================================
+
+For projects already using ACE v2.4 without CLAUDE.md:
+
+Step 1: ARCHIVE completed phases
+  - Move completed phase details from plan.md to docs/archive/
+  - Move completed research sections to docs/archive/
+  - Keep only governance table + active phases in living documents
+
+Step 2: CREATE CLAUDE.md
+  - Extract compact ACE rules from plan.md header
+  - Extract project structure from codebase
+  - Extract key file map from research findings
+  - Add current state pointer (e.g., "Last completed: Phase FB")
+
+Step 3: VERIFY control model
+  - Confirm RUN_ACE still required to start any phase
+  - Confirm no automation hooks were added
+  - Confirm operator can still cancel any action
+
+Step 4: TEST a conversation
+  - Start a new conversation
+  - Verify CLAUDE.md loads automatically
+  - Verify AI understands project context without reading plan.md
+  - Verify RUN_ACE is still required for execution
+
+================================================================================
+XI. COMPARISON: ACE-ONLY vs. ACE + CLAUDE.MD
+================================================================================
+
+  ┌──────────────────────┬──────────────┬────────────────────┐
+  │ Dimension            │ ACE-Only     │ ACE + CLAUDE.md    │
+  ├──────────────────────┼──────────────┼────────────────────┤
+  │ Operator Control     │ Full         │ Full (unchanged)   │
+  │ Token Efficiency     │ Low          │ High               │
+  │ Context Discovery    │ Every conv.  │ Pre-loaded         │
+  │ Phase Authorization  │ Required     │ Required           │
+  │ Artifact Management  │ 2 documents  │ 2 + context file   │
+  │ Cross-conv Memory    │ None         │ Memory system      │
+  │ Autonomous Actions   │ None         │ None               │
+  │ Hidden State         │ None         │ None               │
+  └──────────────────────┴──────────────┴────────────────────┘
+
+================================================================================
+XII. QUICK REFERENCE — OPERATOR COMMANDS
+================================================================================
+
+These commands work identically with or without CLAUDE.md:
+
+  RUN_ACE              → Activate ACE Framework, start Phase 1
+  EXECUTE_WITH_ACE     → Same as RUN_ACE
+  META_DISCUSSION      → Ask questions without triggering execution
+  PAUSE_STATE          → Freeze execution
+  RESET_SCOPE          → Clear and restart
+  ADVANCE_STEP         → Move to next plan step
+  ADVANCE_TO_STEP <n>  → Jump to step n
+  VERIFY_STEP          → Mark current step verified
+  SET_VERBOSITY        → SUMMARY (default) or VERBOSE
+
+================================================================================
+XIII. LAYMAN EXPLANATION — WHAT THIS ACTUALLY DOES
+================================================================================
+
+For readers who are not familiar with AI engineering terminology:
+
+ACE v2.4 is a RULEBOOK.
+  It tells the AI: "You cannot do anything unless the user explicitly says so."
+  The user says RUN_ACE, and only then does the AI start working — step by step,
+  with user approval at every gate. The user can stop, redirect, or cancel at
+  any point. The AI never moves forward without permission.
+
+CLAUDE.md is a CHEAT SHEET taped to the AI's desk.
+  When a new conversation starts, instead of the AI spending time reading
+  thousands of lines to figure out "what is this project? what are the rules?
+  where are the files?" — it already knows. The cheat sheet gives it context
+  upfront, saving time and tokens.
+
+The Integration Guide is the INSTRUCTION MANUAL for combining the rulebook
+and the cheat sheet without breaking anything.
+
+ANALOGY:
+  Think of hiring a contractor to work on your house.
+
+  WITHOUT CLAUDE.md (ACE only):
+    Every morning, the contractor arrives and reads the entire project history
+    binder (3 hours of reading) before picking up a hammer. Then waits for
+    your "go ahead" before doing anything.
+
+  WITH CLAUDE.md (ACE + context):
+    The contractor arrives with a 1-page brief summarizing the project and is
+    ready to work immediately — but still waits for your "go ahead" before
+    touching anything.
+
+  The brief does NOT give the contractor permission to act.
+  It just eliminates wasted time re-reading what they already know.
+
+The user's control is IDENTICAL in both cases. The only difference is speed.
+
+================================================================================
+XIV. ARTIFACT CONTINUITY — research.md AND plan.md ARE NOT REPLACED
+================================================================================
+
+A common concern: "If CLAUDE.md exists, do we still need research.md and plan.md?"
+
+YES. Absolutely. Nothing changes about how they work.
+
+  ┌──────────────┬──────────────────────────────────┬───────────────┐
+  │ Artifact     │ Role                             │ Still Used?   │
+  ├──────────────┼──────────────────────────────────┼───────────────┤
+  │ plan.md      │ Execution contract — what will   │ YES, always   │
+  │              │ be done, step by step            │               │
+  ├──────────────┼──────────────────────────────────┼───────────────┤
+  │ research.md  │ Research findings — what was     │ YES, always   │
+  │              │ discovered during investigation  │               │
+  ├──────────────┼──────────────────────────────────┼───────────────┤
+  │ CLAUDE.md    │ Context cheat sheet — project    │ NEW addition  │
+  │              │ summary for quick AI startup     │               │
+  └──────────────┴──────────────────────────────────┴───────────────┘
+
+The relationship:
+  - CLAUDE.md SUMMARIZES and POINTS TO plan.md and research.md
+  - CLAUDE.md does NOT replace them
+  - When you say RUN_ACE, the AI still writes findings to research.md
+    and steps to plan.md
+  - CLAUDE.md just helps the AI know where things are without spending
+    tokens searching
+
+The "Two Living Documents" rule from ACE v2.4 still holds.
+CLAUDE.md is a context file, not an execution artifact.
+
+================================================================================
+XV. CROSS-PLATFORM PORTABILITY — USING THIS WITH OTHER AI TOOLS
+================================================================================
+
+This guide is designed to be portable. The ACE Framework v2.4 works with any AI
+that follows structured instructions. The context-loading concept applies to
+every major AI coding tool, even though the specific filename differs:
+
+  ┌─────────────────────┬────────────────────────────────┐
+  │ AI Tool             │ Context File                   │
+  ├─────────────────────┼────────────────────────────────┤
+  │ Claude Code (CLI)   │ CLAUDE.md                      │
+  │ Cursor              │ .cursorrules                   │
+  │ GitHub Copilot      │ .github/copilot-instructions.md│
+  │ Windsurf            │ .windsurfrules                 │
+  │ Cline               │ .clinerules                    │
+  │ Any AI (generic)    │ System prompt or context file   │
+  └─────────────────────┴────────────────────────────────┘
+
+To adapt this guide for another AI tool:
+  1. Copy the ACE v2.4 spec (VERSION 2.4 PROMPT AND RULE GOVERNANCE.txt)
+  2. Copy this integration guide
+  3. Create the tool-specific context file (e.g., .cursorrules)
+  4. Populate it with the same content structure as CLAUDE.md:
+     - ACE rules (compact)
+     - Project structure
+     - Key files and conventions
+     - Current state pointer
+  5. The ACE authorization gates work identically regardless of AI tool
+
+IMPORTANT CLARIFICATION — THIS IS NOT MCP:
+  What this guide describes is NOT an MCP (Model Context Protocol) implementation
+  in the technical sense. MCP specifically refers to Anthropic's protocol for
+  connecting AI models to external tools and data sources — things like database
+  connectors, API integrations, live data feeds, and server-side tool execution.
+
+  What we implemented is deliberately simpler and safer:
+    - CLAUDE.md = a static context file (no protocol, no automation)
+    - Memory system = Claude Code's built-in persistence (personal, not shared)
+    - Archive structure = file organization (docs/archive/)
+
+  We intentionally avoided actual MCP automation because it would compromise
+  the operator control that ACE v2.4 provides. MCP servers can execute actions
+  autonomously — which violates ACE's core principle that the operator must
+  authorize every action.
+
+  If MCP is desired in the future, it should be limited to READ-ONLY data
+  sources (e.g., fetching Jira tickets, reading Slack channels) and must
+  NEVER include write operations that bypass ACE authorization gates.
+
+FOR USE AS A SYSTEM DEVELOPMENT REFERENCE:
+  This guide can serve as a reference artifact for any team adopting
+  AI-assisted development with structured governance. To use it:
+
+  1. Share this file with the development team
+  2. Share the ACE v2.4 spec alongside it
+  3. Adapt the CLAUDE.md template to the target project
+  4. Establish the Phase 1→2→3 workflow with the team
+  5. The AI tool becomes a governed participant, not an autonomous agent
+
+  The key insight: AI tools are most effective when they have full context
+  (what the project is) but limited authority (what they may do). This guide
+  formalizes that balance.
+
+================================================================================
+XVI. CONCLUSION
+================================================================================
+
+The ACE Framework v2.4 ensures the operator controls every action.
+CLAUDE.md ensures the AI starts every conversation fully informed.
+
+These are not alternatives — they are layers:
+  - ACE = execution governance (what the AI MAY do)
+  - CLAUDE.md = context pre-loading (what the AI KNOWS)
+
+The operator retains full authority. The AI gains full context.
+Token waste is eliminated. Safety is preserved.
+
+================================================================================
+END OF INTEGRATION GUIDE
+================================================================================
