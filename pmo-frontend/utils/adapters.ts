@@ -66,6 +66,7 @@ export interface BackendUser {
   permissions: string[]
   module_overrides?: Record<string, boolean>
   module_assignments?: string[]
+  pillar_assignments?: string[]  // Phase HN: pillar-based tab access
   rank_level?: number
   campus?: string  // Phase Y: Office-scoped visibility
   role?: { name: string }
@@ -105,6 +106,7 @@ export interface UIUser {
   permissions: string[]
   moduleOverrides: Record<string, boolean>
   moduleAssignments: string[]
+  pillarAssignments: string[]  // Phase HN: pillar-based tab access
   rankLevel: number
   campus: string  // Phase Y: Office-scoped visibility
   roleName: string
@@ -170,6 +172,7 @@ export function adaptUser(backend: BackendUser): UIUser {
     permissions: backend.permissions || [],
     moduleOverrides: backend.module_overrides || {},
     moduleAssignments: backend.module_assignments || [],
+    pillarAssignments: backend.pillar_assignments || [],
     rankLevel: backend.rank_level ?? 100,
     campus: backend.campus || '',  // Phase Y: Office-scoped visibility
     roleName: backend.role?.name || '',

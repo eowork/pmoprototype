@@ -122,6 +122,110 @@ export class UniversityOperationsService {
   }
 
   /**
+   * Phase HU: Returns the university operation record for a given pillar + fiscal year.
+   * Used by Physical and Financial display pages to resolve the operation context.
+   * Does NOT apply ownership/campus filter — access is controlled by module assignment only.
+   * Directives 209, 210
+   */
+  async findOperationForDisplay(
+    pillarType: string,
+    fiscalYear: number,
+    user: JwtPayload,
+  ): Promise<any> {
+    // Admins always have access
+    if (!this.isAdmin(user)) {
+      const moduleCheck = await this.db.query(
+        `SELECT 1 FROM user_module_assignments WHERE user_id = $1 AND (module = 'OPERATIONS' OR module = 'ALL')`,
+        [user.sub],
+      );
+      if (moduleCheck.rows.length === 0) {
+        return null;
+      }
+    }
+
+    const result = await this.db.query(
+      `SELECT * FROM university_operations
+       WHERE operation_type = $1
+         AND fiscal_year = $2
+         AND deleted_at IS NULL
+       LIMIT 1`,
+      [pillarType, fiscalYear],
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Phase FG-1: Validates financial CUD access using module assignment instead of operation ownership.
+   * Financial data is shared across all users with OPERATIONS module access.
+   * Physical indicator CUD continues using validateOperationOwnership() (unchanged).
+   */
+  private async validateFinancialAccess(userId: string, user: JwtPayload): Promise<void> {
+    // Admins can modify any financial record
+    if (this.isAdmin(user)) {
+      return;
+    }
+
+    // Staff: check user_module_assignments for OPERATIONS or ALL
+    const result = await this.db.query(
+      `SELECT 1 FROM user_module_assignments WHERE user_id = $1 AND (module = 'OPERATIONS' OR module = 'ALL')`,
+      [userId],
+    );
+
+    if (result.rows.length === 0) {
+      throw new ForbiddenException(
+        'You do not have permission to modify financial records. OPERATIONS module assignment required.',
+      );
+    }
+  }
+
+  /**
+   * Phase FH-2: Validates financial CUD editability — only checks quarterly report publication,
+   * NOT operation-level publication. Financial data entry is governed by the quarterly report
+   * lifecycle, not the UO main page publish workflow.
+   * Physical indicator CUD continues using validateOperationEditable() which checks both.
+   */
+  private async validateFinancialEditable(operationId: string, quarter: string, user?: JwtPayload): Promise<void> {
+    const result = await this.db.query(
+      `SELECT uo.fiscal_year, qr.publication_status AS quarterly_status,
+              qr.unlocked_by
+       FROM university_operations uo
+       LEFT JOIN quarterly_reports qr
+         ON qr.fiscal_year = uo.fiscal_year AND qr.quarter = $2
+            AND qr.deleted_at IS NULL
+       WHERE uo.id = $1 AND uo.deleted_at IS NULL`,
+      [operationId, quarter],
+    );
+
+    if (result.rowCount === 0) {
+      throw new NotFoundException('Operation not found');
+    }
+
+    const row = result.rows[0];
+
+    // SuperAdmin bypasses all locks
+    if (user && user.is_superadmin) {
+      return;
+    }
+
+    // Admin: only blocked if quarterly report is PUBLISHED without unlock approval
+    if (user && this.permissionResolver.isAdmin(user)) {
+      if (row.quarterly_status === 'PUBLISHED' && !row.unlocked_by) {
+        throw new ForbiddenException(
+          'This quarterly report is published. An unlock must be approved before editing.',
+        );
+      }
+      return;
+    }
+
+    // Staff: blocked if quarterly report is PUBLISHED
+    if (row.quarterly_status === 'PUBLISHED') {
+      throw new ForbiddenException(
+        'Cannot modify financial records: the quarterly report for this period has been published.',
+      );
+    }
+  }
+
+  /**
    * Phase CO: Validates that operation is in DRAFT or PENDING_REVIEW status.
    * Throws ForbiddenException if operation is PUBLISHED.
    * Published operations represent final, approved data submitted to COA/DBM.
@@ -1030,24 +1134,23 @@ export class UniversityOperationsService {
       toNumber(record.accomplishment_q4),
     ].filter((v): v is number => v !== null);
 
-    // Phase DO-A: BAR1 Standard — ALL indicator types use SUM aggregation
-    // Total = sum of all quarterly values (Q1 + Q2 + Q3 + Q4)
-    // Now safe: targets and accomplishments are guaranteed number[]
-    const totalTarget = targets.length > 0
-      ? targets.reduce((a, b) => a + b, 0)
-      : null;
+    // Phase FY-1: DBM BAR1 standard — ALL indicator types use SUM (Directive 211/212)
+    const totalTarget = targets.length > 0 ? targets.reduce((a, b) => a + b, 0) : null;
+    const totalAccomplishment = accomplishments.length > 0 ? accomplishments.reduce((a, b) => a + b, 0) : null;
 
-    const totalAccomplishment = accomplishments.length > 0
-      ? accomplishments.reduce((a, b) => a + b, 0)
-      : null;
+    // Phase HA: Override totals — when set, replace quarterly sums as base for variance/rate (Directive 369)
+    const overrideTotalTarget = record.override_total_target != null ? toNumber(record.override_total_target) : null;
+    const overrideTotalActual = record.override_total_actual != null ? toNumber(record.override_total_actual) : null;
+    const effectiveTarget = overrideTotalTarget ?? totalTarget;
+    const effectiveActual = overrideTotalActual ?? totalAccomplishment;
 
     // Phase DT-D: Variance with safe bounds
     // DECIMAL(10,4) max is 999999.9999
     const MAX_VARIANCE = 999999.9999;
     const MIN_VARIANCE = -999999.9999;
     let variance: number | null = null;
-    if (totalTarget !== null && totalAccomplishment !== null) {
-      const rawVariance = totalAccomplishment - totalTarget;
+    if (effectiveTarget !== null && effectiveActual !== null) {
+      const rawVariance = effectiveActual - effectiveTarget;
       variance = Math.max(MIN_VARIANCE, Math.min(rawVariance, MAX_VARIANCE));
     }
 
@@ -1055,21 +1158,37 @@ export class UniversityOperationsService {
     // Cap at 9999.99% to prevent numeric overflow in edge cases
     const MAX_RATE = 9999.99;
     let accomplishmentRate: number | null = null;
-    if (totalTarget !== null && totalTarget !== 0 && totalAccomplishment !== null) {
-      const rawRate = (totalAccomplishment / totalTarget) * 100;
+    if (effectiveTarget !== null && effectiveTarget !== 0 && effectiveActual !== null) {
+      const rawRate = (effectiveActual / effectiveTarget) * 100;
       accomplishmentRate = Math.min(rawRate, MAX_RATE);
     }
 
+    // Phase FY-2: Rate override — if set, replaces displayed rate (Directive 213)
+    const overrideRate = record.override_rate != null ? toNumber(record.override_rate) : null;
+
+    // Phase GY/GZ: Annual variance override — when set, replaces computed variance display (Directives 356, 359)
+    const overrideVarianceAnnual = record.override_variance != null ? toNumber(record.override_variance) : null;
+
     return {
       ...record,
-      // Phase DO-A: BAR1 Standard — all values computed via SUM
-      total_target: formatDecimal(totalTarget, 4),
-      total_accomplishment: formatDecimal(totalAccomplishment, 4),
-      // Backward compat aliases (contain SUM values, not averages)
-      average_target: formatDecimal(totalTarget, 4),
-      average_accomplishment: formatDecimal(totalAccomplishment, 4),
-      variance: formatDecimal(variance, 4),
-      accomplishment_rate: formatDecimal(accomplishmentRate, 2),
+      // Phase HD: total_target/total_accomplishment return effective values (override ?? raw) — Directive 383
+      total_target: formatDecimal(overrideTotalTarget ?? totalTarget, 4),
+      total_accomplishment: formatDecimal(overrideTotalActual ?? totalAccomplishment, 4),
+      average_target: formatDecimal(overrideTotalTarget ?? totalTarget, 4),
+      average_accomplishment: formatDecimal(overrideTotalActual ?? totalAccomplishment, 4),
+      computed_total_target: formatDecimal(totalTarget, 4),
+      computed_total_accomplishment: formatDecimal(totalAccomplishment, 4),
+      // Phase HA: Override totals passthrough (Directive 369)
+      override_total_target: formatDecimal(overrideTotalTarget, 4),
+      override_total_actual: formatDecimal(overrideTotalActual, 4),
+      // Phase GY/GZ: Annual override fields only (Directive 359)
+      variance: formatDecimal(overrideVarianceAnnual ?? variance, 4),
+      override_variance: formatDecimal(overrideVarianceAnnual, 2),
+      computed_variance: formatDecimal(variance, 4),
+      // Phase FY-2: computed_rate = auto-calculated, accomplishment_rate = override if set
+      computed_rate: formatDecimal(accomplishmentRate, 2),
+      accomplishment_rate: formatDecimal(overrideRate ?? accomplishmentRate, 2),
+      override_rate: formatDecimal(overrideRate, 2),
     };
   }
 
@@ -1128,19 +1247,25 @@ export class UniversityOperationsService {
     }
 
     // Phase DY-C: Include reported_quarter in INSERT
+    // Phase FY-2: Include override_rate in INSERT
+    // Phase GY/GZ: Include override_variance (annual-only override model — Directive 359)
+    // Phase HA: Include override_total_target, override_total_actual (Directive 370)
+    // Phase HE: Include catch_up_plan, facilitating_factors, ways_forward (Directive 386)
     const result = await this.db.query(
       `INSERT INTO operation_indicators
        (operation_id, pillar_indicator_id, particular, fiscal_year, reported_quarter,
         target_q1, target_q2, target_q3, target_q4,
         accomplishment_q1, accomplishment_q2, accomplishment_q3, accomplishment_q4,
         score_q1, score_q2, score_q3, score_q4,
-        remarks, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        remarks, override_rate, override_variance,
+        override_total_target, override_total_actual,
+        catch_up_plan, facilitating_factors, ways_forward, mov, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
        RETURNING *`,
       [
         operationId,
         dto.pillar_indicator_id,
-        taxonomy.indicator_name, // Auto-derived from pillar_indicator_taxonomy
+        taxonomy.indicator_name,
         dto.fiscal_year,
         dto.reported_quarter || null,
         dto.target_q1,
@@ -1156,6 +1281,14 @@ export class UniversityOperationsService {
         dto.score_q3,
         dto.score_q4,
         dto.remarks,
+        dto.override_rate ?? null,
+        dto.override_variance ?? null,
+        dto.override_total_target ?? null,
+        dto.override_total_actual ?? null,
+        dto.catch_up_plan ?? null,
+        dto.facilitating_factors ?? null,
+        dto.ways_forward ?? null,
+        dto.mov ?? null,
         userId,
       ],
     );
@@ -1351,6 +1484,8 @@ export class UniversityOperationsService {
     // Phase CM: Ownership validation
     await this.validateOperationOwnership(operationId, userId, user);
     // Phase CO: Publication status lock
+    // Physical indicators span all quarters (column-based: target_q1..q4).
+    // Quarter-specific publication lock is intentionally bypassed — guarded by uo.publication_status instead.
     await this.validateOperationEditable(operationId, undefined, user);
 
     const result = await this.db.query(
@@ -1390,6 +1525,8 @@ export class UniversityOperationsService {
     // Phase CM: Ownership validation
     await this.validateOperationOwnership(operationId, userId, user);
     // Phase CO: Publication status lock
+    // Physical indicators span all quarters (column-based: target_q1..q4).
+    // Quarter-specific publication lock is intentionally bypassed — guarded by uo.publication_status instead.
     await this.validateOperationEditable(operationId, undefined, user);
 
     const check = await this.db.query(
@@ -1425,6 +1562,8 @@ export class UniversityOperationsService {
     // Phase CM: Ownership validation (Admin check at controller, but still verify ownership context)
     await this.validateOperationOwnership(operationId, userId, user);
     // Phase CO: Publication status lock
+    // Physical indicators span all quarters (column-based: target_q1..q4).
+    // Quarter-specific publication lock is intentionally bypassed — guarded by uo.publication_status instead.
     await this.validateOperationEditable(operationId, undefined, user);
 
     const result = await this.db.query(
@@ -1476,10 +1615,10 @@ export class UniversityOperationsService {
   }
 
   async createFinancial(operationId: string, dto: CreateFinancialDto, userId: string, user: JwtPayload): Promise<any> {
-    // Phase CN: Ownership validation
-    await this.validateOperationOwnership(operationId, userId, user);
-    // Phase FA-B: Pass dto.quarter so quarterly_report publication lock is enforced
-    await this.validateOperationEditable(operationId, dto.quarter, user);
+    // Phase FG-1: Use module-assignment check for financial CUD (shared pillar operations)
+    await this.validateFinancialAccess(userId, user);
+    // Phase FH-2: Financial uses quarterly report lock only, not operation publication
+    await this.validateFinancialEditable(operationId, dto.quarter, user);
 
     // Phase BC: Include fund_type and project_code in INSERT
     // Phase ET-B: Include expense_class for BAR No. 2 categorization
@@ -1519,8 +1658,8 @@ export class UniversityOperationsService {
   }
 
   async updateFinancial(operationId: string, financialId: string, dto: Partial<CreateFinancialDto>, userId: string, user: JwtPayload): Promise<any> {
-    // Phase CN: Ownership validation
-    await this.validateOperationOwnership(operationId, userId, user);
+    // Phase FG-1: Use module-assignment check for financial CUD (shared pillar operations)
+    await this.validateFinancialAccess(userId, user);
 
     // Phase FA-B: Fetch existing record to get its quarter for governance validation
     const existing = await this.db.query(
@@ -1530,11 +1669,11 @@ export class UniversityOperationsService {
     if (existing.rows.length === 0) {
       throw new NotFoundException(`Financial record ${financialId} not found`);
     }
-    const recordQuarter: string | undefined = existing.rows[0].quarter;
+    const recordQuarter: string = existing.rows[0].quarter;
     const recordFiscalYear: number = existing.rows[0].fiscal_year;
 
-    // Phase FA-B: Pass record's quarter so quarterly_report publication lock is enforced
-    await this.validateOperationEditable(operationId, recordQuarter, user);
+    // Phase FH-2: Financial uses quarterly report lock only, not operation publication
+    await this.validateFinancialEditable(operationId, recordQuarter, user);
 
     const fields = Object.keys(dto).filter((k) => dto[k] !== undefined);
     if (fields.length === 0) {
@@ -1564,8 +1703,8 @@ export class UniversityOperationsService {
   }
 
   async removeFinancial(operationId: string, financialId: string, userId: string, user: JwtPayload): Promise<void> {
-    // Phase CN: Ownership validation (Admin check at controller, but verify ownership context)
-    await this.validateOperationOwnership(operationId, userId, user);
+    // Phase FG-1: Use module-assignment check for financial CUD (shared pillar operations)
+    await this.validateFinancialAccess(userId, user);
 
     // Phase FA-B: Fetch existing record to get its quarter for governance validation
     const existing = await this.db.query(
@@ -1575,11 +1714,11 @@ export class UniversityOperationsService {
     if (existing.rows.length === 0) {
       throw new NotFoundException(`Financial record ${financialId} not found`);
     }
-    const recordQuarter: string | undefined = existing.rows[0].quarter;
+    const recordQuarter: string = existing.rows[0].quarter;
     const recordFiscalYear: number = existing.rows[0].fiscal_year;
 
-    // Phase FA-B: Pass record's quarter so quarterly_report publication lock is enforced
-    await this.validateOperationEditable(operationId, recordQuarter, user);
+    // Phase FH-2: Financial uses quarterly report lock only, not operation publication
+    await this.validateFinancialEditable(operationId, recordQuarter, user);
 
     const result = await this.db.query(
       `UPDATE operation_financials SET deleted_at = NOW(), deleted_by = $1
@@ -1808,13 +1947,34 @@ export class UniversityOperationsService {
       ORDER BY pillar_type
     `);
 
-    // Phase DQ-B: Unit-type-aware aggregation with cross-operation deduplication
-    // Uses DISTINCT ON to pick one row per indicator (latest updated) to prevent
-    // double-counting when multiple operations exist for the same pillar/fiscal year.
-    // Aggregation rules:
-    //   COUNT/WEIGHTED_COUNT: SUM of Q1+Q2+Q3+Q4 (cumulative annual total)
-    //   PERCENTAGE: AVG of non-null quarters (annual average rate)
+    // Phase GO-1: Two-stage CTE aggregation — fixes data loss from DISTINCT ON in row-per-quarter model.
+    // Stage 1 (canonical_ops): DISTINCT ON picks ONE canonical operation per indicator (multi-operation dedup).
+    // Stage 2 (merged): MAX-aggregates ALL rows of that operation across reported_quarter values (multi-row dedup).
+    // Outer SELECT is unchanged — deduped alias exposes same column interface as before.
     const dataRes = await this.db.query(`
+      WITH canonical_ops AS (
+        SELECT DISTINCT ON (oi.pillar_indicator_id)
+          oi.operation_id, oi.pillar_indicator_id
+        FROM operation_indicators oi
+        JOIN pillar_indicator_taxonomy pit ON oi.pillar_indicator_id = pit.id
+        WHERE oi.fiscal_year = $1 AND oi.deleted_at IS NULL AND pit.is_active = true
+        ORDER BY oi.pillar_indicator_id, oi.updated_at DESC
+      ),
+      merged AS (
+        SELECT
+          oi.pillar_indicator_id,
+          pit.pillar_type, pit.unit_type, pit.indicator_type,
+          MAX(oi.target_q1) AS target_q1, MAX(oi.target_q2) AS target_q2,
+          MAX(oi.target_q3) AS target_q3, MAX(oi.target_q4) AS target_q4,
+          MAX(oi.accomplishment_q1) AS accomplishment_q1, MAX(oi.accomplishment_q2) AS accomplishment_q2,
+          MAX(oi.accomplishment_q3) AS accomplishment_q3, MAX(oi.accomplishment_q4) AS accomplishment_q4
+        FROM operation_indicators oi
+        JOIN canonical_ops co ON oi.operation_id = co.operation_id
+          AND oi.pillar_indicator_id = co.pillar_indicator_id
+        JOIN pillar_indicator_taxonomy pit ON oi.pillar_indicator_id = pit.id
+        WHERE oi.fiscal_year = $1 AND oi.deleted_at IS NULL
+        GROUP BY oi.pillar_indicator_id, pit.pillar_type, pit.unit_type, pit.indicator_type
+      )
       SELECT
         deduped.pillar_type,
         COUNT(DISTINCT deduped.pillar_indicator_id) AS indicators_with_data,
@@ -1854,45 +2014,46 @@ export class UniversityOperationsService {
         ) AS pct_avg_accomplishment,
         COUNT(CASE WHEN deduped.unit_type = 'PERCENTAGE' THEN 1 END) AS pct_indicator_count,
         COUNT(CASE WHEN deduped.unit_type IN ('COUNT', 'WEIGHTED_COUNT') THEN 1 END) AS count_indicator_count,
+        -- Phase GN-2: Unit-type-aware avg accomplishment rate (formula unchanged)
         AVG(
           CASE
-            WHEN COALESCE(deduped.target_q1,0) + COALESCE(deduped.target_q2,0) + COALESCE(deduped.target_q3,0) + COALESCE(deduped.target_q4,0) > 0
-            THEN (
-              (COALESCE(deduped.accomplishment_q1,0) + COALESCE(deduped.accomplishment_q2,0) + COALESCE(deduped.accomplishment_q3,0) + COALESCE(deduped.accomplishment_q4,0)) /
-              NULLIF(COALESCE(deduped.target_q1,0) + COALESCE(deduped.target_q2,0) + COALESCE(deduped.target_q3,0) + COALESCE(deduped.target_q4,0), 0)
-            ) * 100
+            WHEN deduped.unit_type IN ('COUNT', 'WEIGHTED_COUNT') AND deduped._sum_target > 0
+              THEN (deduped._sum_actual / deduped._sum_target) * 100
+            WHEN deduped.unit_type = 'PERCENTAGE' AND deduped._filled_target_qs > 0 AND deduped._filled_actual_qs > 0
+              THEN (
+                (deduped._sum_actual / deduped._filled_actual_qs) /
+                NULLIF(deduped._sum_target / deduped._filled_target_qs, 0)
+              ) * 100
             ELSE NULL
           END
         ) AS avg_accomplishment_rate,
-        -- Phase DR-A: Rate-based aggregation
-        -- indicator_target_rate = count of indicators with any target data (each contributes 1.0)
         SUM(
-          CASE
-            WHEN (COALESCE(deduped.target_q1,0)+COALESCE(deduped.target_q2,0)+COALESCE(deduped.target_q3,0)+COALESCE(deduped.target_q4,0)) > 0
-            THEN 1.0
-            ELSE 0
-          END
+          CASE WHEN deduped._sum_target > 0 THEN 1.0 ELSE 0 END
         ) AS indicator_target_rate,
-        -- indicator_actual_rate = SUM of (actual/target) per indicator (dimensionless)
         SUM(
           CASE
-            WHEN (COALESCE(deduped.target_q1,0)+COALESCE(deduped.target_q2,0)+COALESCE(deduped.target_q3,0)+COALESCE(deduped.target_q4,0)) > 0
-            THEN (
-              COALESCE(deduped.accomplishment_q1,0)+COALESCE(deduped.accomplishment_q2,0)+COALESCE(deduped.accomplishment_q3,0)+COALESCE(deduped.accomplishment_q4,0)
-            ) /
-            NULLIF(
-              COALESCE(deduped.target_q1,0)+COALESCE(deduped.target_q2,0)+COALESCE(deduped.target_q3,0)+COALESCE(deduped.target_q4,0)
-            , 0)
+            WHEN deduped.unit_type IN ('COUNT', 'WEIGHTED_COUNT') AND deduped._sum_target > 0
+              THEN deduped._sum_actual / deduped._sum_target
+            WHEN deduped.unit_type = 'PERCENTAGE' AND deduped._filled_target_qs > 0 AND deduped._filled_actual_qs > 0
+              THEN (deduped._sum_actual / deduped._filled_actual_qs) /
+                   NULLIF(deduped._sum_target / deduped._filled_target_qs, 0)
             ELSE NULL
           END
         ) AS indicator_actual_rate
       FROM (
-        SELECT DISTINCT ON (oi.pillar_indicator_id)
-          oi.*, pit.pillar_type, pit.unit_type, pit.indicator_type
-        FROM operation_indicators oi
-        JOIN pillar_indicator_taxonomy pit ON oi.pillar_indicator_id = pit.id
-        WHERE oi.fiscal_year = $1 AND oi.deleted_at IS NULL AND pit.is_active = true
-        ORDER BY oi.pillar_indicator_id, oi.updated_at DESC
+        SELECT
+          merged.*,
+          (COALESCE(merged.target_q1,0)+COALESCE(merged.target_q2,0)+COALESCE(merged.target_q3,0)+COALESCE(merged.target_q4,0)) AS _sum_target,
+          (COALESCE(merged.accomplishment_q1,0)+COALESCE(merged.accomplishment_q2,0)+COALESCE(merged.accomplishment_q3,0)+COALESCE(merged.accomplishment_q4,0)) AS _sum_actual,
+          (CASE WHEN merged.target_q1 IS NOT NULL AND merged.target_q1 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.target_q2 IS NOT NULL AND merged.target_q2 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.target_q3 IS NOT NULL AND merged.target_q3 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.target_q4 IS NOT NULL AND merged.target_q4 != 0 THEN 1 ELSE 0 END) AS _filled_target_qs,
+          (CASE WHEN merged.accomplishment_q1 IS NOT NULL AND merged.accomplishment_q1 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.accomplishment_q2 IS NOT NULL AND merged.accomplishment_q2 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.accomplishment_q3 IS NOT NULL AND merged.accomplishment_q3 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.accomplishment_q4 IS NOT NULL AND merged.accomplishment_q4 != 0 THEN 1 ELSE 0 END) AS _filled_actual_qs
+        FROM merged
       ) AS deduped
       GROUP BY deduped.pillar_type
     `, [fiscalYear]);
@@ -1987,9 +2148,35 @@ export class UniversityOperationsService {
       params.push(pillarType);
     }
 
+    // Phase GO-2: Two-stage CTE — same pattern as getPillarSummary.
+    // pillarFilter applied in canonical_ops WHERE clause.
     const query = `
+      WITH canonical_ops AS (
+        SELECT DISTINCT ON (oi.pillar_indicator_id)
+          oi.operation_id, oi.pillar_indicator_id
+        FROM operation_indicators oi
+        JOIN pillar_indicator_taxonomy pit ON oi.pillar_indicator_id = pit.id
+        WHERE oi.fiscal_year = $1 AND oi.deleted_at IS NULL AND pit.is_active = true
+        ${pillarFilter}
+        ORDER BY oi.pillar_indicator_id, oi.updated_at DESC
+      ),
+      deduped AS (
+        SELECT
+          oi.pillar_indicator_id,
+          pit.pillar_type, pit.unit_type,
+          MAX(oi.target_q1) AS target_q1, MAX(oi.target_q2) AS target_q2,
+          MAX(oi.target_q3) AS target_q3, MAX(oi.target_q4) AS target_q4,
+          MAX(oi.accomplishment_q1) AS accomplishment_q1, MAX(oi.accomplishment_q2) AS accomplishment_q2,
+          MAX(oi.accomplishment_q3) AS accomplishment_q3, MAX(oi.accomplishment_q4) AS accomplishment_q4
+        FROM operation_indicators oi
+        JOIN canonical_ops co ON oi.operation_id = co.operation_id
+          AND oi.pillar_indicator_id = co.pillar_indicator_id
+        JOIN pillar_indicator_taxonomy pit ON oi.pillar_indicator_id = pit.id
+        WHERE oi.fiscal_year = $1 AND oi.deleted_at IS NULL
+        GROUP BY oi.pillar_indicator_id, pit.pillar_type, pit.unit_type
+      )
       SELECT
-        -- Phase DR-B: Per-quarter rate computation
+        -- Phase DR-B: Per-quarter rate computation (unchanged)
         SUM(CASE WHEN deduped.target_q1 > 0 THEN 1.0 ELSE 0 END) AS target_rate_q1,
         SUM(CASE WHEN deduped.target_q2 > 0 THEN 1.0 ELSE 0 END) AS target_rate_q2,
         SUM(CASE WHEN deduped.target_q3 > 0 THEN 1.0 ELSE 0 END) AS target_rate_q3,
@@ -1998,15 +2185,7 @@ export class UniversityOperationsService {
         SUM(CASE WHEN deduped.target_q2 > 0 THEN COALESCE(deduped.accomplishment_q2,0)/deduped.target_q2 ELSE NULL END) AS actual_rate_q2,
         SUM(CASE WHEN deduped.target_q3 > 0 THEN COALESCE(deduped.accomplishment_q3,0)/deduped.target_q3 ELSE NULL END) AS actual_rate_q3,
         SUM(CASE WHEN deduped.target_q4 > 0 THEN COALESCE(deduped.accomplishment_q4,0)/deduped.target_q4 ELSE NULL END) AS actual_rate_q4
-      FROM (
-        SELECT DISTINCT ON (oi.pillar_indicator_id)
-          oi.*, pit.pillar_type, pit.unit_type
-        FROM operation_indicators oi
-        JOIN pillar_indicator_taxonomy pit ON oi.pillar_indicator_id = pit.id
-        WHERE oi.fiscal_year = $1 AND oi.deleted_at IS NULL AND pit.is_active = true
-        ${pillarFilter}
-        ORDER BY oi.pillar_indicator_id, oi.updated_at DESC
-      ) AS deduped
+      FROM deduped
     `;
 
     const result = await this.db.query(query, params);
@@ -2056,73 +2235,250 @@ export class UniversityOperationsService {
       return { years: [] };
     }
 
-    // Get yearly aggregates
+    // Phase GO-3: Two-stage CTE for both yearlyRes and pillarRes.
+    // Composite key: (fiscal_year, pillar_indicator_id) — spans multiple years in one query.
+    // GN-3 outer formula (unit-type-aware mean-of-rates) unchanged.
     const yearlyRes = await this.db.query(`
+      WITH canonical_ops AS (
+        SELECT DISTINCT ON (oi.fiscal_year, oi.pillar_indicator_id)
+          oi.operation_id, oi.pillar_indicator_id, oi.fiscal_year
+        FROM operation_indicators oi
+        JOIN pillar_indicator_taxonomy pit ON oi.pillar_indicator_id = pit.id
+        WHERE oi.fiscal_year = ANY($1) AND oi.deleted_at IS NULL AND pit.is_active = true
+        ORDER BY oi.fiscal_year, oi.pillar_indicator_id, oi.updated_at DESC
+      ),
+      merged AS (
+        SELECT
+          oi.pillar_indicator_id, oi.fiscal_year, pit.unit_type,
+          MAX(oi.target_q1) AS target_q1, MAX(oi.target_q2) AS target_q2,
+          MAX(oi.target_q3) AS target_q3, MAX(oi.target_q4) AS target_q4,
+          MAX(oi.accomplishment_q1) AS accomplishment_q1, MAX(oi.accomplishment_q2) AS accomplishment_q2,
+          MAX(oi.accomplishment_q3) AS accomplishment_q3, MAX(oi.accomplishment_q4) AS accomplishment_q4
+        FROM operation_indicators oi
+        JOIN canonical_ops co ON oi.operation_id = co.operation_id
+          AND oi.pillar_indicator_id = co.pillar_indicator_id
+          AND oi.fiscal_year = co.fiscal_year
+        JOIN pillar_indicator_taxonomy pit ON oi.pillar_indicator_id = pit.id
+        WHERE oi.fiscal_year = ANY($1) AND oi.deleted_at IS NULL
+        GROUP BY oi.pillar_indicator_id, oi.fiscal_year, pit.unit_type
+      )
       SELECT
-        oi.fiscal_year,
-        COUNT(DISTINCT oi.id) AS total_indicators,
-        SUM(COALESCE(oi.target_q1, 0) + COALESCE(oi.target_q2, 0) + COALESCE(oi.target_q3, 0) + COALESCE(oi.target_q4, 0)) AS total_target,
-        SUM(COALESCE(oi.accomplishment_q1, 0) + COALESCE(oi.accomplishment_q2, 0) + COALESCE(oi.accomplishment_q3, 0) + COALESCE(oi.accomplishment_q4, 0)) AS total_accomplishment
-      FROM operation_indicators oi
-      WHERE oi.fiscal_year = ANY($1) AND oi.deleted_at IS NULL
-      GROUP BY oi.fiscal_year
-      ORDER BY oi.fiscal_year
+        deduped.fiscal_year,
+        COUNT(*) AS total_indicators,
+        AVG(
+          CASE
+            WHEN deduped.unit_type IN ('COUNT', 'WEIGHTED_COUNT') AND deduped._sum_target > 0
+              THEN (deduped._sum_actual / deduped._sum_target) * 100
+            WHEN deduped.unit_type = 'PERCENTAGE' AND deduped._filled_target_qs > 0 AND deduped._filled_actual_qs > 0
+              THEN ((deduped._sum_actual / deduped._filled_actual_qs) /
+                    NULLIF(deduped._sum_target / deduped._filled_target_qs, 0)) * 100
+            ELSE NULL
+          END
+        ) AS avg_accomplishment_rate
+      FROM (
+        SELECT
+          merged.*,
+          (COALESCE(merged.target_q1,0)+COALESCE(merged.target_q2,0)+COALESCE(merged.target_q3,0)+COALESCE(merged.target_q4,0)) AS _sum_target,
+          (COALESCE(merged.accomplishment_q1,0)+COALESCE(merged.accomplishment_q2,0)+COALESCE(merged.accomplishment_q3,0)+COALESCE(merged.accomplishment_q4,0)) AS _sum_actual,
+          (CASE WHEN merged.target_q1 IS NOT NULL AND merged.target_q1 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.target_q2 IS NOT NULL AND merged.target_q2 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.target_q3 IS NOT NULL AND merged.target_q3 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.target_q4 IS NOT NULL AND merged.target_q4 != 0 THEN 1 ELSE 0 END) AS _filled_target_qs,
+          (CASE WHEN merged.accomplishment_q1 IS NOT NULL AND merged.accomplishment_q1 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.accomplishment_q2 IS NOT NULL AND merged.accomplishment_q2 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.accomplishment_q3 IS NOT NULL AND merged.accomplishment_q3 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.accomplishment_q4 IS NOT NULL AND merged.accomplishment_q4 != 0 THEN 1 ELSE 0 END) AS _filled_actual_qs
+        FROM merged
+      ) AS deduped
+      GROUP BY deduped.fiscal_year
+      ORDER BY deduped.fiscal_year
     `, [years]);
 
-    // Get pillar breakdown per year
+    // Phase GO-3: Pillar breakdown — same two-stage CTE, adds pillar_type to grouping
     const pillarRes = await this.db.query(`
+      WITH canonical_ops AS (
+        SELECT DISTINCT ON (oi.fiscal_year, oi.pillar_indicator_id)
+          oi.operation_id, oi.pillar_indicator_id, oi.fiscal_year
+        FROM operation_indicators oi
+        JOIN pillar_indicator_taxonomy pit ON oi.pillar_indicator_id = pit.id
+        WHERE oi.fiscal_year = ANY($1) AND oi.deleted_at IS NULL AND pit.is_active = true
+        ORDER BY oi.fiscal_year, oi.pillar_indicator_id, oi.updated_at DESC
+      ),
+      merged AS (
+        SELECT
+          oi.pillar_indicator_id, oi.fiscal_year, pit.pillar_type, pit.unit_type,
+          MAX(oi.target_q1) AS target_q1, MAX(oi.target_q2) AS target_q2,
+          MAX(oi.target_q3) AS target_q3, MAX(oi.target_q4) AS target_q4,
+          MAX(oi.accomplishment_q1) AS accomplishment_q1, MAX(oi.accomplishment_q2) AS accomplishment_q2,
+          MAX(oi.accomplishment_q3) AS accomplishment_q3, MAX(oi.accomplishment_q4) AS accomplishment_q4
+        FROM operation_indicators oi
+        JOIN canonical_ops co ON oi.operation_id = co.operation_id
+          AND oi.pillar_indicator_id = co.pillar_indicator_id
+          AND oi.fiscal_year = co.fiscal_year
+        JOIN pillar_indicator_taxonomy pit ON oi.pillar_indicator_id = pit.id
+        WHERE oi.fiscal_year = ANY($1) AND oi.deleted_at IS NULL
+        GROUP BY oi.pillar_indicator_id, oi.fiscal_year, pit.pillar_type, pit.unit_type
+      )
       SELECT
-        oi.fiscal_year,
-        pit.pillar_type,
-        SUM(COALESCE(oi.target_q1, 0) + COALESCE(oi.target_q2, 0) + COALESCE(oi.target_q3, 0) + COALESCE(oi.target_q4, 0)) AS total_target,
-        SUM(COALESCE(oi.accomplishment_q1, 0) + COALESCE(oi.accomplishment_q2, 0) + COALESCE(oi.accomplishment_q3, 0) + COALESCE(oi.accomplishment_q4, 0)) AS total_accomplishment
-      FROM operation_indicators oi
-      JOIN pillar_indicator_taxonomy pit ON oi.pillar_indicator_id = pit.id
-      WHERE oi.fiscal_year = ANY($1) AND oi.deleted_at IS NULL
-      GROUP BY oi.fiscal_year, pit.pillar_type
-      ORDER BY oi.fiscal_year, pit.pillar_type
+        deduped.fiscal_year,
+        deduped.pillar_type,
+        AVG(
+          CASE
+            WHEN deduped.unit_type IN ('COUNT', 'WEIGHTED_COUNT') AND deduped._sum_target > 0
+              THEN (deduped._sum_actual / deduped._sum_target) * 100
+            WHEN deduped.unit_type = 'PERCENTAGE' AND deduped._filled_target_qs > 0 AND deduped._filled_actual_qs > 0
+              THEN ((deduped._sum_actual / deduped._filled_actual_qs) /
+                    NULLIF(deduped._sum_target / deduped._filled_target_qs, 0)) * 100
+            ELSE NULL
+          END
+        ) AS avg_accomplishment_rate,
+        AVG(CASE WHEN deduped.unit_type = 'PERCENTAGE'
+          THEN deduped._sum_target / NULLIF(deduped._filled_target_qs, 0)
+          ELSE NULL END) AS pct_avg_target,
+        AVG(CASE WHEN deduped.unit_type = 'PERCENTAGE'
+          THEN deduped._sum_actual / NULLIF(deduped._filled_actual_qs, 0)
+          ELSE NULL END) AS pct_avg_accomplishment,
+        SUM(CASE WHEN deduped.unit_type IN ('COUNT', 'WEIGHTED_COUNT')
+          THEN deduped._sum_target ELSE 0 END) AS count_target,
+        SUM(CASE WHEN deduped.unit_type IN ('COUNT', 'WEIGHTED_COUNT')
+          THEN deduped._sum_actual ELSE 0 END) AS count_accomplishment
+      FROM (
+        SELECT
+          merged.*,
+          (COALESCE(merged.target_q1,0)+COALESCE(merged.target_q2,0)+COALESCE(merged.target_q3,0)+COALESCE(merged.target_q4,0)) AS _sum_target,
+          (COALESCE(merged.accomplishment_q1,0)+COALESCE(merged.accomplishment_q2,0)+COALESCE(merged.accomplishment_q3,0)+COALESCE(merged.accomplishment_q4,0)) AS _sum_actual,
+          (CASE WHEN merged.target_q1 IS NOT NULL AND merged.target_q1 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.target_q2 IS NOT NULL AND merged.target_q2 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.target_q3 IS NOT NULL AND merged.target_q3 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.target_q4 IS NOT NULL AND merged.target_q4 != 0 THEN 1 ELSE 0 END) AS _filled_target_qs,
+          (CASE WHEN merged.accomplishment_q1 IS NOT NULL AND merged.accomplishment_q1 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.accomplishment_q2 IS NOT NULL AND merged.accomplishment_q2 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.accomplishment_q3 IS NOT NULL AND merged.accomplishment_q3 != 0 THEN 1 ELSE 0 END +
+           CASE WHEN merged.accomplishment_q4 IS NOT NULL AND merged.accomplishment_q4 != 0 THEN 1 ELSE 0 END) AS _filled_actual_qs
+        FROM merged
+      ) AS deduped
+      GROUP BY deduped.fiscal_year, deduped.pillar_type
+      ORDER BY deduped.fiscal_year, deduped.pillar_type
     `, [years]);
 
     // Build pillar map per year
-    const pillarMap = new Map<number, Map<string, { target: number; accomplishment: number }>>();
+    const pillarMap = new Map<number, Map<string, {
+      rate: number | null;
+      pct_avg_target: number | null;
+      pct_avg_accomplishment: number | null;
+      count_target: number | null;
+      count_accomplishment: number | null;
+    }>>();
     for (const row of pillarRes.rows) {
       if (!pillarMap.has(row.fiscal_year)) {
         pillarMap.set(row.fiscal_year, new Map());
       }
       pillarMap.get(row.fiscal_year)!.set(row.pillar_type, {
-        target: parseFloat(row.total_target) || 0,
-        accomplishment: parseFloat(row.total_accomplishment) || 0,
+        rate: row.avg_accomplishment_rate != null ? parseFloat(parseFloat(row.avg_accomplishment_rate).toFixed(2)) : null,
+        pct_avg_target: row.pct_avg_target != null ? parseFloat(parseFloat(row.pct_avg_target).toFixed(2)) : null,
+        pct_avg_accomplishment: row.pct_avg_accomplishment != null ? parseFloat(parseFloat(row.pct_avg_accomplishment).toFixed(2)) : null,
+        count_target: row.count_target != null ? parseFloat(row.count_target) : null,
+        count_accomplishment: row.count_accomplishment != null ? parseFloat(row.count_accomplishment) : null,
       });
     }
 
     const validPillarTypes = ['HIGHER_EDUCATION', 'ADVANCED_EDUCATION', 'RESEARCH', 'TECHNICAL_ADVISORY'];
 
     const yearsData = yearlyRes.rows.map((row) => {
-      const totalTarget = parseFloat(row.total_target) || 0;
-      const totalAccomplishment = parseFloat(row.total_accomplishment) || 0;
-      const overallRate = totalTarget > 0 ? (totalAccomplishment / totalTarget) * 100 : null;
+      const overallRate = row.avg_accomplishment_rate != null
+        ? parseFloat(parseFloat(row.avg_accomplishment_rate).toFixed(2))
+        : null;
 
       const yearPillars = pillarMap.get(row.fiscal_year) || new Map();
       const pillars = validPillarTypes.map((pt) => {
         const p = yearPillars.get(pt);
-        const rate = p && p.target > 0 ? (p.accomplishment / p.target) * 100 : null;
         return {
           pillar_type: pt,
-          accomplishment_rate: rate !== null ? parseFloat(rate.toFixed(2)) : null,
+          accomplishment_rate: p?.rate ?? null,
+          pct_avg_target: p?.pct_avg_target ?? null,
+          pct_avg_accomplishment: p?.pct_avg_accomplishment ?? null,
+          count_target: p?.count_target ?? null,
+          count_accomplishment: p?.count_accomplishment ?? null,
         };
       });
 
       return {
         fiscal_year: row.fiscal_year,
         total_indicators: parseInt(row.total_indicators, 10),
-        total_target: parseFloat(totalTarget.toFixed(2)),
-        total_accomplishment: parseFloat(totalAccomplishment.toFixed(2)),
-        overall_accomplishment_rate: overallRate !== null ? parseFloat(overallRate.toFixed(2)) : null,
+        total_target: 0,
+        total_accomplishment: 0,
+        overall_accomplishment_rate: overallRate,
         pillars,
       };
     });
 
     return { years: yearsData };
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Phase GP-2: Financial Campus Breakdown Analytics
+  // ═══════════════════════════════════════════════════════════════
+
+  async getFinancialCampusBreakdown(fiscalYear: number): Promise<{ breakdown: any[]; fiscal_year: number }> {
+    const result = await this.db.query(`
+      SELECT
+        uo.operation_type AS pillar_type,
+        COALESCE(of2.department, 'Unspecified') AS campus,
+        COALESCE(SUM(of2.allotment), 0) AS total_appropriation,
+        COALESCE(SUM(of2.obligation), 0) AS total_obligations,
+        COALESCE(SUM(of2.disbursement), 0) AS total_disbursement,
+        CASE WHEN SUM(of2.allotment) > 0
+          THEN ROUND((SUM(of2.obligation)::numeric / SUM(of2.allotment)) * 100, 2)
+          ELSE 0
+        END AS utilization_rate
+      FROM operation_financials of2
+      JOIN university_operations uo ON uo.id = of2.operation_id
+      WHERE uo.fiscal_year = $1 AND of2.deleted_at IS NULL AND uo.deleted_at IS NULL
+      GROUP BY uo.operation_type, of2.department
+      ORDER BY uo.operation_type, of2.department
+    `, [fiscalYear]);
+
+    const breakdown = result.rows.map((row) => ({
+      pillar_type: row.pillar_type,
+      campus: row.campus,
+      total_appropriation: parseFloat(row.total_appropriation),
+      total_obligations: parseFloat(row.total_obligations),
+      total_disbursement: parseFloat(row.total_disbursement),
+      utilization_rate: parseFloat(row.utilization_rate),
+    }));
+
+    return { breakdown, fiscal_year: Number(fiscalYear) };
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Phase GS-3: Financial Pillar × Expense Class Breakdown (Directive 313)
+  // Returns per-pillar rows with PS/MOOE/CO obligation totals
+  // ═══════════════════════════════════════════════════════════════
+
+  async getFinancialPillarExpenseBreakdown(fiscalYear: number): Promise<{ rows: any[]; fiscal_year: number }> {
+    const result = await this.db.query(`
+      SELECT
+        uo.operation_type AS pillar_type,
+        of2.expense_class,
+        COALESCE(SUM(of2.allotment), 0) AS total_appropriation,
+        COALESCE(SUM(of2.obligation), 0) AS total_obligations,
+        COALESCE(SUM(of2.disbursement), 0) AS total_disbursement
+      FROM operation_financials of2
+      JOIN university_operations uo ON uo.id = of2.operation_id
+      WHERE uo.fiscal_year = $1 AND of2.deleted_at IS NULL AND uo.deleted_at IS NULL
+      GROUP BY uo.operation_type, of2.expense_class
+      ORDER BY uo.operation_type, of2.expense_class
+    `, [fiscalYear]);
+
+    const rows = result.rows.map((row) => ({
+      pillar_type: row.pillar_type,
+      expense_class: row.expense_class,
+      total_appropriation: parseFloat(row.total_appropriation),
+      total_obligations: parseFloat(row.total_obligations),
+      total_disbursement: parseFloat(row.total_disbursement),
+    }));
+
+    return { rows, fiscal_year: Number(fiscalYear) };
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -2469,7 +2825,7 @@ export class UniversityOperationsService {
       );
     } catch (err) {
       // Non-blocking: history insert failure must not break the primary operation
-      this.logger.error(`Failed to snapshot submission history: ${err}`);
+      this.logger.warn(`SNAPSHOT_FAILED: event=${eventType}, reportId=${report.id}, error=${(err as Error).message}`);
     }
   }
 
@@ -2482,7 +2838,10 @@ export class UniversityOperationsService {
     quarter: string | undefined,
     userId: string,
   ): Promise<void> {
-    if (!fiscalYear || !quarter) return;
+    if (!fiscalYear || !quarter) {
+      this.logger.warn(`[autoRevertQuarterlyReport] Called without quarter param — skipping revert (operationId context only)`);
+      return;
+    }
 
     const report = await this.db.query(
       `SELECT id, fiscal_year, quarter, publication_status, submission_count,
@@ -2863,7 +3222,12 @@ export class UniversityOperationsService {
       ORDER BY uo.fiscal_year, uo.operation_type
     `, years);
 
-    return { years, data: result.rows };
+    // Phase GT-1 + GU-1: Return only fiscal years present in data — prevents empty-year bars (Directive 320, 326)
+    const rawYears: number[] = result.rows
+      .map((r: any) => Number(r.fiscal_year))
+      .filter((n: number) => Number.isFinite(n));
+    const dataYears: number[] = [...new Set(rawYears)].sort((a: number, b: number) => a - b);
+    return { years: dataYears, data: result.rows };
   }
 
   /**

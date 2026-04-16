@@ -9,7 +9,7 @@ import {
 import * as bcrypt from 'bcrypt';
 import { DatabaseService } from '../database/database.service';
 import { createPaginatedResponse, PaginatedResponse } from '../common/dto';
-import { CreateUserDto, UpdateUserDto, QueryUserDto, AssignRoleDto, SetPermissionOverrideDto, PermissionOverride, BulkPermissionUpdateDto, BulkPermissionResult } from './dto';
+import { CreateUserDto, UpdateUserDto, QueryUserDto, AssignRoleDto, SetPermissionOverrideDto, PermissionOverride, BulkPermissionUpdateDto, BulkPermissionResult, BulkCrossUserAccessDto, BulkCrossUserResult } from './dto';
 import { JwtPayload } from '../common/interfaces';
 
 // Rank hierarchy constants (lower = higher authority)
@@ -989,6 +989,168 @@ export class UsersService {
     } catch (err) {
       await client.query('ROLLBACK');
       this.logger.error(`BULK_MODULE_UPDATE_FAILED: user=${userId}, error=${err.message}`);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  // --- Pillar Assignments (Phase HN, Directive 156) ---
+
+  async getPillarAssignments(userId: string): Promise<string[]> {
+    const result = await this.db.query(
+      `SELECT pillar_type FROM user_pillar_assignments WHERE user_id = $1 ORDER BY pillar_type`,
+      [userId],
+    );
+    return result.rows.map(r => r.pillar_type);
+  }
+
+  async assignPillar(userId: string, pillarType: string, actorId: string): Promise<{ pillar_type: string }> {
+    const valid = ['HIGHER_EDUCATION', 'ADVANCED_EDUCATION', 'RESEARCH', 'TECHNICAL_ADVISORY'];
+    if (!valid.includes(pillarType)) {
+      throw new BadRequestException(`Invalid pillar_type: ${pillarType}`);
+    }
+    await this.db.query(
+      `INSERT INTO user_pillar_assignments (user_id, pillar_type, assigned_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, pillar_type) DO NOTHING`,
+      [userId, pillarType, actorId],
+    );
+    this.logger.log(`PILLAR_ASSIGNED: user=${userId}, pillar=${pillarType}, by=${actorId}`);
+    return { pillar_type: pillarType };
+  }
+
+  async revokePillar(userId: string, pillarType: string, actorId: string): Promise<void> {
+    await this.db.query(
+      `DELETE FROM user_pillar_assignments WHERE user_id = $1 AND pillar_type = $2`,
+      [userId, pillarType],
+    );
+    this.logger.log(`PILLAR_REVOKED: user=${userId}, pillar=${pillarType}, by=${actorId}`);
+  }
+
+  // --- Password Reset Requests (Phase HQ, Directive 177) ---
+
+  async getPasswordResetRequests(): Promise<any[]> {
+    const result = await this.db.query(
+      `SELECT id, identifier, status, notes, requested_at, completed_by, completed_at
+       FROM password_reset_requests
+       WHERE status = 'PENDING'
+       ORDER BY requested_at DESC`,
+    );
+    return result.rows;
+  }
+
+  async completePasswordResetRequest(requestId: string, adminId: string): Promise<void> {
+    await this.db.query(
+      `UPDATE password_reset_requests
+       SET status = 'COMPLETED', completed_by = $2, completed_at = NOW()
+       WHERE id = $1 AND status = 'PENDING'`,
+      [requestId, adminId],
+    );
+    this.logger.log(`PASSWORD_RESET_COMPLETED: request=${requestId}, by=${adminId}`);
+  }
+
+  // --- Phase HV: Cross-User Bulk Access Update (Directive 225) ---
+
+  async bulkCrossUserAccessUpdate(
+    dto: BulkCrossUserAccessDto,
+    adminId: string,
+  ): Promise<BulkCrossUserResult> {
+    if (!dto.userIds || dto.userIds.length === 0) {
+      throw new BadRequestException('userIds array cannot be empty');
+    }
+    if (dto.userIds.length > 50) {
+      throw new BadRequestException('Cannot update more than 50 users at once');
+    }
+
+    const result: BulkCrossUserResult = {
+      success: true,
+      total: dto.userIds.length,
+      applied: 0,
+      skipped: 0,
+      errors: [],
+    };
+
+    const client = await this.db.getClient();
+    try {
+      await client.query('BEGIN');
+
+      for (const userId of dto.userIds) {
+        try {
+          // Verify user exists
+          const userCheck = await client.query(
+            'SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL',
+            [userId],
+          );
+          if (userCheck.rowCount === 0) {
+            result.skipped++;
+            result.errors.push(`User ${userId}: not found`);
+            continue;
+          }
+
+          // Rank check — skip users that admin cannot modify
+          const canModify = await this.canModifyUser(adminId, userId);
+          if (!canModify) {
+            result.skipped++;
+            result.errors.push(`User ${userId}: insufficient authority`);
+            continue;
+          }
+
+          if (dto.type === 'permission') {
+            // Upsert permission override
+            await client.query(
+              `INSERT INTO user_permission_overrides (user_id, module_key, can_access, created_by, updated_by)
+               VALUES ($1, $2, $3, $4, $4)
+               ON CONFLICT (user_id, module_key)
+               DO UPDATE SET can_access = $3, updated_by = $4, updated_at = NOW()`,
+              [userId, dto.key, dto.action === 'grant', adminId],
+            );
+            result.applied++;
+          } else if (dto.type === 'module') {
+            if (dto.action === 'grant') {
+              await client.query(
+                `INSERT INTO user_module_assignments (user_id, module, assigned_by)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (user_id, module) DO NOTHING`,
+                [userId, dto.key, adminId],
+              );
+            } else {
+              await client.query(
+                'DELETE FROM user_module_assignments WHERE user_id = $1 AND module = $2',
+                [userId, dto.key],
+              );
+            }
+            result.applied++;
+          } else if (dto.type === 'pillar') {
+            if (dto.action === 'grant') {
+              await client.query(
+                `INSERT INTO user_pillar_assignments (user_id, pillar_type, assigned_by)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (user_id, pillar_type) DO NOTHING`,
+                [userId, dto.key, adminId],
+              );
+            } else {
+              await client.query(
+                'DELETE FROM user_pillar_assignments WHERE user_id = $1 AND pillar_type = $2',
+                [userId, dto.key],
+              );
+            }
+            result.applied++;
+          }
+        } catch (err) {
+          result.skipped++;
+          result.errors.push(`User ${userId}: ${err.message}`);
+        }
+      }
+
+      await client.query('COMMIT');
+      this.logger.log(
+        `BULK_CROSS_USER_ACCESS: type=${dto.type}, action=${dto.action}, key=${dto.key}, applied=${result.applied}/${result.total}, by=${adminId}`,
+      );
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      this.logger.error(`BULK_CROSS_USER_ACCESS_FAILED: ${err.message}`);
       throw err;
     } finally {
       client.release();

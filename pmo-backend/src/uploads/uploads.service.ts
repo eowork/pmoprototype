@@ -15,11 +15,11 @@ export class UploadsService {
   ) {
     this.maxFileSize = this.configService.get<number>(
       'MAX_FILE_SIZE',
-      10 * 1024 * 1024,
+      25 * 1024 * 1024,
     );
     const mimeTypesStr = this.configService.get<string>(
       'ALLOWED_MIME_TYPES',
-      'image/jpeg,image/png,image/gif,application/pdf',
+      'image/jpeg,image/png,image/gif,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain',
     );
     this.allowedMimeTypes = mimeTypesStr.split(',').map((t) => t.trim());
   }

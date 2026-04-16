@@ -9,6 +9,7 @@ import {
   IsIn,
   Min,
   Max,
+  MaxLength,
 } from 'class-validator';
 
 export enum IndicatorStatus {
@@ -99,25 +100,77 @@ export class CreateIndicatorQuarterlyDto {
   accomplishment_q4?: number | null;
 
   // Quarterly scores (ratio strings like "148/200")
+  // Phase GX-3: Expanded to VARCHAR(250) to accommodate longer score expressions (Directive 347)
   @IsOptional()
   @IsString()
+  @MaxLength(250)
   score_q1?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(250)
   score_q2?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(250)
   score_q3?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(250)
   score_q4?: string;
 
   @IsOptional()
   @IsString()
   remarks?: string;
+
+  // Phase HE: APR/UPR narrative fields (Directive 386)
+  // Catch-Up Plan = for Not Met Targets; Facilitating Factors = for Met Targets; Ways Forward = general
+  @IsOptional()
+  @IsString()
+  catch_up_plan?: string | null;
+
+  @IsOptional()
+  @IsString()
+  facilitating_factors?: string | null;
+
+  @IsOptional()
+  @IsString()
+  ways_forward?: string | null;
+
+  // Phase FY-2: Optional annual rate override — when set, replaces computed accomplishment_rate (Directive 213)
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(9999.99)
+  override_rate?: number | null;
+
+  // Phase GY/GZ: Annual variance override — when set, replaces computed annual variance (Directives 356, 359)
+  @IsOptional()
+  @IsNumber()
+  @Min(-999999.99)
+  @Max(999999.99)
+  override_variance?: number | null;
+
+  // Phase HA: Optional total overrides — when set, effectiveTarget/Actual replace quarterly sums
+  // as base for variance and rate computation (Directive 368)
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  override_total_target?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  override_total_actual?: number | null;
+
+  // Phase HK: MOV (Means of Verification) field (Directive 139)
+  @IsOptional()
+  @IsString()
+  mov?: string | null;
 }
 
 /**

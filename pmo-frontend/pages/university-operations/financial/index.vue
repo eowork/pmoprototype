@@ -35,28 +35,28 @@ const PILLARS = [
   {
     id: 'HIGHER_EDUCATION',
     name: 'Higher Education',
-    fullName: 'MFO1: Higher Education Services',
+    fullName: 'MFO1: Higher Education Program',
     icon: 'mdi-school',
     color: 'blue',
   },
   {
     id: 'ADVANCED_EDUCATION',
     name: 'Advanced Ed',
-    fullName: 'MFO2: Advanced Education Services',
+    fullName: 'MFO2: Advanced Education Program',
     icon: 'mdi-book-education',
     color: 'purple',
   },
   {
     id: 'RESEARCH',
     name: 'Research',
-    fullName: 'MFO3: Research Services',
+    fullName: 'MFO3: Research Program',
     icon: 'mdi-flask',
     color: 'teal',
   },
   {
     id: 'TECHNICAL_ADVISORY',
     name: 'Extension',
-    fullName: 'MFO4: Technical Advisory & Extension Services',
+    fullName: 'MFO4: Technical Advisory & Extension Program',
     icon: 'mdi-handshake',
     color: 'orange',
   },
@@ -75,8 +75,16 @@ const CAMPUSES = [
   { id: 'CABADBARAN', name: 'Cabadbaran Campus' },
 ] as const
 
+// Phase HN: Pillar-based tab visibility (Directive 159)
+const visiblePillars = computed(() => {
+  if (isAdmin.value || isSuperAdmin.value) return PILLARS
+  const assignments = authStore.user?.pillarAssignments ?? []
+  if (assignments.length === 0) return PILLARS // no restriction if unassigned
+  return PILLARS.filter(p => assignments.includes(p.id))
+})
+
 // State
-const selectedQuarter = ref<string>('Q1')
+const selectedQuarter = ref<string>('Q4')
 const activePillar = ref<string>(
   (route.query.pillar as string) && PILLARS.some(p => p.id === route.query.pillar)
     ? (route.query.pillar as string)
@@ -96,6 +104,7 @@ const quarterOptions = [
 // Data
 const financialRecords = ref<any[]>([])
 const currentOperation = ref<any>(null)
+const operationNotFound = ref(false) // Phase HU: Distinguish "not configured" from "no data" (Directive 216)
 const currentQuarterlyReport = ref<any>(null)
 const isLoadingQuarterlyReport = ref(true)
 const quarterlyReportFetchFailed = ref(false)
@@ -128,6 +137,72 @@ const unlockRequestDialog = ref(false)
 const unlockRequestReason = ref('')
 const unlockRequestLoading = ref(false)
 
+// Phase HL: Column visibility for Financial module (Directive 150)
+const columnVisibility = reactive({
+  remarks: false,
+  mov: false,
+})
+const anyPanelVisible = computed(() => columnVisibility.remarks || columnVisibility.mov)
+const remarksRowColspan = computed(() => canEditData() ? 7 : 6)
+
+// Phase HL: MOV type-selector state (Directive 152)
+const movType = ref<'text' | 'link' | 'file'>('text')
+const movValue = ref('')
+const movUploading = ref(false)
+const movFileMetadata = ref<{ filename: string; size: number; mimeType: string } | null>(null)
+const movFileInputRef = ref<HTMLInputElement | null>(null)
+
+function parseMov(raw: string | null | undefined): { type: 'text' | 'link' | 'file'; value: string; metadata: any } {
+  if (!raw) return { type: 'text', value: '', metadata: null }
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed.type && parsed.value !== undefined) return { type: parsed.type, value: parsed.value, metadata: parsed.metadata || null }
+  } catch {}
+  return { type: 'text', value: raw, metadata: null }
+}
+
+function serializeMov(): string | null {
+  if (!movValue.value && movType.value !== 'file') return null
+  const obj: any = { type: movType.value, value: movValue.value }
+  if (movType.value === 'file' && movFileMetadata.value) obj.metadata = movFileMetadata.value
+  return JSON.stringify(obj)
+}
+
+watch(movType, () => { movValue.value = ''; movFileMetadata.value = null })
+
+async function handleMovFileUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!input.files?.[0]) return
+  const file = input.files[0]
+  const MAX_UPLOAD_BYTES = 25 * 1024 * 1024 // 25MB
+  if (file.size > MAX_UPLOAD_BYTES) {
+    toast.error(`File too large. Maximum allowed size is 25MB (selected file: ${(file.size / 1024 / 1024).toFixed(1)}MB)`)
+    if (input) input.value = ''
+    return
+  }
+  const formData = new FormData()
+  formData.append('file', file)
+  movUploading.value = true
+  try {
+    const response = await api.upload<{ filePath: string; originalName: string; fileSize: number; mimeType: string }>('/api/uploads', formData)
+    movValue.value = response.filePath
+    movFileMetadata.value = { filename: response.originalName, size: response.fileSize, mimeType: response.mimeType }
+  } catch (err: any) {
+    toast.error(err.message || 'File upload failed')
+  } finally {
+    movUploading.value = false
+    if (input) input.value = ''
+  }
+}
+
+function initMovFromMetadata(metadata: any) {
+  const raw = metadata?.mov ? JSON.stringify(metadata.mov) : null
+  const parsed = parseMov(raw)
+  movType.value = parsed.type
+  movValue.value = parsed.value
+  movFileMetadata.value = parsed.metadata
+}
+
 // Current pillar info
 const currentPillar = computed(() => {
   return PILLARS.find(p => p.id === activePillar.value) || PILLARS[0]
@@ -157,9 +232,11 @@ function canEditData(): boolean {
     }
     return true
   }
-  if (currentOperation.value.publication_status === 'PUBLISHED') return false
+  // Phase FH-1: Financial edit-lock governed by quarterly report, NOT operation publication_status
+  // Operation-level publication is from UO main page workflow — independent of financial data entry
   if (currentQuarterlyReport.value?.publication_status === 'PUBLISHED') return false
-  return isOwnerOrAssigned(currentOperation.value)
+  // Phase FG-2: Staff with OPERATIONS module access can edit any pillar's financial data
+  return canAdd('operations')
 }
 
 function canSubmitAllPillars(): boolean {
@@ -212,18 +289,26 @@ async function fetchFinancialData() {
   fetchAbortController = new AbortController()
   const currentController = fetchAbortController
 
+  // Phase FD-2: Capture context at call time to detect stale responses
+  const snapshotPillar = activePillar.value
+  const snapshotFY = selectedFiscalYear.value
+  const snapshotQuarter = selectedQuarter.value
+
   loading.value = true
 
-  await findCurrentOperation()
-  if (currentController.signal.aborted) return
+  await findCurrentOperation(snapshotPillar, snapshotFY)
+  if (currentController.signal.aborted || activePillar.value !== snapshotPillar) { loading.value = false; return }
 
   if (currentOperation.value) {
     try {
       const res = await api.get<any[]>(
-        `/api/university-operations/${currentOperation.value.id}/financials?fiscal_year=${selectedFiscalYear.value}&quarter=${selectedQuarter.value}`
+        `/api/university-operations/${currentOperation.value.id}/financials?fiscal_year=${snapshotFY}&quarter=${snapshotQuarter}`
       )
+      // Phase FD-2: Discard if context changed during await
+      if (currentController.signal.aborted || activePillar.value !== snapshotPillar) { loading.value = false; return }
       financialRecords.value = Array.isArray(res) ? res : (res as any)?.data || []
     } catch (err: any) {
+      if (currentController.signal.aborted || activePillar.value !== snapshotPillar) { loading.value = false; return }
       console.error('[Financial] Fetch financials failed:', err)
       financialRecords.value = []
     }
@@ -231,29 +316,38 @@ async function fetchFinancialData() {
     financialRecords.value = []
   }
 
-  if (currentController.signal.aborted) return
+  if (currentController.signal.aborted || activePillar.value !== snapshotPillar) { loading.value = false; return }
   loading.value = false
 
   // Phase FB-B: If current quarter is empty, attempt to load prior quarter as reference
   if (financialRecords.value.length === 0) {
-    await fetchPrefillData()
+    await fetchPrefillData(snapshotPillar)
   } else {
     clearPrefill()
   }
 }
 
-async function findCurrentOperation() {
+// Phase HU: Use pillar-operation endpoint — no ownership filter, correct for display context (Directive 211)
+async function findCurrentOperation(targetPillar?: string, targetFY?: number) {
+  const pillar = targetPillar ?? activePillar.value
+  const fy = targetFY ?? selectedFiscalYear.value
+  operationNotFound.value = false
   try {
-    const response = await api.get<any>(
-      `/api/university-operations?type=${activePillar.value}&fiscal_year=${selectedFiscalYear.value}&limit=100`
+    const found = await api.get<any>(
+      `/api/university-operations/pillar-operation?pillar_type=${pillar}&fiscal_year=${fy}`
     )
-    const data = Array.isArray(response) ? response : (response?.data || [])
-    currentOperation.value = data.find(
-      (op: any) => op.operation_type === activePillar.value && Number(op.fiscal_year) === Number(selectedFiscalYear.value)
-    ) || null
-  } catch (err) {
+    if (activePillar.value === pillar) {
+      currentOperation.value = found
+    }
+  } catch (err: any) {
     console.error('[Financial] findCurrentOperation: Error:', err)
-    currentOperation.value = null
+    if (activePillar.value === pillar) {
+      currentOperation.value = null
+      // Phase HU: Detect 404 (operation not configured) vs other errors (Directive 216)
+      if (err?.statusCode === 404 || err?.status === 404 || err?.response?.status === 404) {
+        operationNotFound.value = true
+      }
+    }
   }
 }
 
@@ -293,7 +387,15 @@ function clearPrefill() {
   prefillSourceQuarter.value = null
 }
 
-async function fetchPrefillData() {
+function removePrefillRow(index: number) {
+  prefillRecords.value.splice(index, 1)
+  if (prefillRecords.value.length === 0) {
+    clearPrefill()
+  }
+}
+
+async function fetchPrefillData(snapshotPillar?: string) {
+  const pillarAtCall = snapshotPillar ?? activePillar.value
   const priorQ = PRIOR_QUARTER_MAP[selectedQuarter.value]
   if (!priorQ || !currentOperation.value) {
     clearPrefill()
@@ -304,6 +406,8 @@ async function fetchPrefillData() {
     const res = await api.get<any[]>(
       `/api/university-operations/${currentOperation.value.id}/financials?fiscal_year=${selectedFiscalYear.value}&quarter=${priorQ}`
     )
+    // Phase FF-1: Discard stale prefill if pillar changed during await
+    if (activePillar.value !== pillarAtCall) return
     const records = Array.isArray(res) ? res : (res as any)?.data || []
     if (records.length > 0) {
       prefillRecords.value = records
@@ -326,12 +430,13 @@ function openPrefillSaveDialog(record: any) {
     department: record.department || 'MAIN',
     expense_class: record.expense_class || '',
     fund_type: record.fund_type || '',
-    project_code: record.project_code || '',
     allotment: record.allotment,
     obligation: record.obligation,
     disbursement: record.disbursement,
     remarks: record.remarks || '',
   }
+  // Phase HL: Initialize MOV from prefill record metadata (Directive 152)
+  initMovFromMetadata(record.metadata)
   entryDialog.value = true
 }
 
@@ -350,11 +455,12 @@ async function saveAllPrefillRecords() {
           department: rec.department || null,
           expense_class: rec.expense_class || null,
           fund_type: rec.fund_type || null,
-          project_code: rec.project_code || null,
           allotment: rec.allotment !== null && rec.allotment !== undefined ? Number(rec.allotment) : null,
           obligation: rec.obligation !== null && rec.obligation !== undefined ? Number(rec.obligation) : null,
           disbursement: rec.disbursement !== null && rec.disbursement !== undefined ? Number(rec.disbursement) : null,
           remarks: rec.remarks || null,
+          // Phase HL: Carry over MOV metadata from prefill (Directive 152)
+          metadata: rec.metadata?.mov ? { mov: rec.metadata.mov } : undefined,
         })
         successCount++
       } catch {
@@ -412,16 +518,19 @@ const groupedFinancials = computed(() => {
 })
 
 // Campus subtotals
+// Phase HE: Replace balance with disbursement (Directives 388, 389)
 const campusSubtotals = computed(() => {
-  const result: Record<string, { allotment: number; obligation: number; utilization: number | null; balance: number }> = {}
+  const result: Record<string, { allotment: number; obligation: number; disbursement: number; utilization: number | null }> = {}
   for (const campus of CAMPUSES) {
     let allotment = 0
     let obligation = 0
+    let disbursement = 0
     for (const ec of EXPENSE_CLASSES) {
       const records = groupedFinancials.value[campus.id]?.[ec.id] || []
       for (const rec of records) {
         allotment += Number(rec.allotment) || 0
         obligation += Number(rec.obligation) || 0
+        disbursement += Number(rec.disbursement) || 0
       }
     }
     // Include uncategorized
@@ -429,30 +538,34 @@ const campusSubtotals = computed(() => {
     for (const rec of uncategorized) {
       allotment += Number(rec.allotment) || 0
       obligation += Number(rec.obligation) || 0
+      disbursement += Number(rec.disbursement) || 0
     }
     result[campus.id] = {
       allotment,
       obligation,
+      disbursement,
       utilization: allotment > 0 ? (obligation / allotment) * 100 : null,
-      balance: allotment - obligation,
     }
   }
   return result
 })
 
 // Pillar total
+// Phase HE: Replace balance with disbursement (Directives 388, 389)
 const pillarTotal = computed(() => {
   let allotment = 0
   let obligation = 0
+  let disbursement = 0
   for (const rec of financialRecords.value) {
     allotment += Number(rec.allotment) || 0
     obligation += Number(rec.obligation) || 0
+    disbursement += Number(rec.disbursement) || 0
   }
   return {
     allotment,
     obligation,
+    disbursement,
     utilization: allotment > 0 ? (obligation / allotment) * 100 : null,
-    balance: allotment - obligation,
   }
 })
 
@@ -499,12 +612,15 @@ function openAddDialogDirect() {
     department: 'MAIN',
     expense_class: 'PS',
     fund_type: '',
-    project_code: '',
     allotment: null,
     obligation: null,
     disbursement: null,
     remarks: '',
   }
+  // Phase HL: Reset MOV state (Directive 152)
+  movType.value = 'text'
+  movValue.value = ''
+  movFileMetadata.value = null
   entryDialog.value = true
 }
 
@@ -530,12 +646,13 @@ function openEditDialogDirect(record: any) {
     department: record.department || 'MAIN',
     expense_class: record.expense_class || '',
     fund_type: record.fund_type || '',
-    project_code: record.project_code || '',
     allotment: record.allotment,
     obligation: record.obligation,
     disbursement: record.disbursement,
     remarks: record.remarks || '',
   }
+  // Phase HL: Initialize MOV from record metadata (Directive 152)
+  initMovFromMetadata(record.metadata)
   entryDialog.value = true
 }
 
@@ -588,11 +705,15 @@ async function saveFinancialRecord() {
       department: entryForm.value.department || null,
       expense_class: entryForm.value.expense_class || null,
       fund_type: entryForm.value.fund_type || null,
-      project_code: entryForm.value.project_code?.trim() || null,
       allotment: entryForm.value.allotment !== null && entryForm.value.allotment !== '' ? Number(entryForm.value.allotment) : null,
       obligation: entryForm.value.obligation !== null && entryForm.value.obligation !== '' ? Number(entryForm.value.obligation) : null,
       disbursement: entryForm.value.disbursement !== null && entryForm.value.disbursement !== '' ? Number(entryForm.value.disbursement) : null,
       remarks: entryForm.value.remarks?.trim() || null,
+      // Phase HL: MOV stored in metadata field (Directive 152)
+      metadata: (() => {
+        const mov = serializeMov()
+        return mov ? { mov: JSON.parse(mov) } : undefined
+      })(),
     }
 
     if (editingRecord.value) {
@@ -730,10 +851,17 @@ function goBack() {
 
 // --- Watchers ---
 
-watch(activePillar, async () => {
+// Phase FF-3: Debounce pillar switches to batch rapid tab clicks into a single fetch chain
+let pillarDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(activePillar, () => {
   if (!selectedFiscalYear.value || selectedFiscalYear.value < 2020) return
-  clearPrefill() // Phase FB-B: Clear prefill on pillar switch
-  await fetchFinancialData()
+  clearPrefill() // Phase FB-B: Clear prefill on pillar switch immediately
+  if (pillarDebounceTimer) clearTimeout(pillarDebounceTimer)
+  pillarDebounceTimer = setTimeout(async () => {
+    pillarDebounceTimer = null
+    await fetchFinancialData()
+  }, 150)
 })
 
 watch(selectedFiscalYear, async (newYear) => {
@@ -757,6 +885,10 @@ watch(selectedQuarter, async () => {
 })
 
 onMounted(async () => {
+  // Phase HN: If current activePillar not in visiblePillars, select first visible
+  if (!visiblePillars.value.some(p => p.id === activePillar.value)) {
+    activePillar.value = visiblePillars.value[0]?.id ?? PILLARS[0].id
+  }
   await fiscalYearStore.fetchFiscalYears()
   await fetchFinancialData()
   await fetchQuarterlyReport()
@@ -766,8 +898,8 @@ onMounted(async () => {
 
 <template>
   <div>
-    <!-- Header -->
-    <div class="d-flex flex-column flex-sm-row justify-space-between align-start align-sm-center mb-4 ga-3">
+    <!-- Row 1: Title + Submit/Status (Phase HK-2 — Directive 133) -->
+    <div class="d-flex align-center ga-3 mb-2" style="justify-content: space-between">
       <div class="d-flex align-center ga-3">
         <v-btn icon="mdi-arrow-left" variant="text" @click="goBack" />
         <div>
@@ -777,59 +909,157 @@ onMounted(async () => {
           <p class="text-subtitle-1 text-grey-darken-1">
             Budget Utilization and Financial Performance
           </p>
-          <!-- Phase EV-E: At-a-glance financial summary -->
-          <div v-if="!loading && financialRecords.length > 0" class="d-flex flex-wrap ga-2 mt-1">
-            <v-chip size="x-small" variant="tonal" color="primary">
-              Appropriation: ₱{{ formatCurrency(pillarTotal.allotment) }}
-            </v-chip>
-            <v-chip size="x-small" variant="tonal" color="info">
-              Obligations: ₱{{ formatCurrency(pillarTotal.obligation) }}
-            </v-chip>
-            <v-chip
-              v-if="pillarTotal.utilization !== null"
-              size="x-small"
-              variant="tonal"
-              :color="(pillarTotal.utilization ?? 0) >= 80 ? 'success' : 'warning'"
-            >
-              Utilization: {{ formatPercent(pillarTotal.utilization) }}
-            </v-chip>
-          </div>
         </div>
       </div>
-      <div class="d-flex flex-column flex-sm-row align-stretch align-sm-center justify-sm-end ga-2 ga-sm-3">
-        <v-select
-          v-model="selectedQuarter"
-          :items="quarterOptions"
-          item-title="title"
-          item-value="value"
-          label="Reporting Period"
-          variant="outlined"
-          density="compact"
-          hide-details
-          class="flex-sm-0-0-auto"
-          style="width: 100%; max-width: 200px"
-          prepend-inner-icon="mdi-calendar-range"
-        />
-        <v-select
-          :model-value="selectedFiscalYear"
-          @update:model-value="fiscalYearStore.setFiscalYear"
-          :items="fiscalYearOptions"
-          label="Fiscal Year"
-          density="compact"
-          variant="outlined"
-          hide-details
-          class="flex-sm-0-0-auto"
-          style="width: 100%; max-width: 140px"
-          prepend-inner-icon="mdi-calendar"
-        />
+      <div class="d-flex align-center flex-wrap ga-2">
+        <template v-if="!isLoadingQuarterlyReport">
+          <v-btn
+            v-if="canSubmitAllPillars()"
+            color="primary"
+            variant="flat"
+            density="compact"
+            :prepend-icon="currentQuarterlyReport?.publication_status === 'REJECTED' ? 'mdi-refresh' : 'mdi-send'"
+            :loading="actionLoading"
+            @click="submitAllPillarsForReview"
+            class="flex-shrink-0"
+          >
+            <span class="d-none d-sm-inline">{{ currentQuarterlyReport?.publication_status === 'REJECTED' ? 'Resubmit' : 'Submit for Review' }}</span>
+            <v-icon class="d-sm-none">{{ currentQuarterlyReport?.publication_status === 'REJECTED' ? 'mdi-refresh' : 'mdi-send' }}</v-icon>
+          </v-btn>
+          <v-btn
+            v-else-if="canWithdrawAllPillars()"
+            color="warning"
+            variant="tonal"
+            density="compact"
+            prepend-icon="mdi-undo"
+            :loading="actionLoading"
+            @click="withdrawAllPillarsSubmission"
+            class="flex-shrink-0"
+          >
+            <span class="d-none d-sm-inline">Withdraw Submission</span>
+            <v-icon class="d-sm-none">mdi-undo</v-icon>
+          </v-btn>
+          <v-btn
+            v-else-if="currentQuarterlyReport?.publication_status === 'PENDING_REVIEW'"
+            color="info"
+            variant="tonal"
+            density="compact"
+            prepend-icon="mdi-clock-outline"
+            disabled
+            class="flex-shrink-0"
+          >
+            <span class="d-none d-sm-inline">Pending Review</span>
+            <v-icon class="d-sm-none">mdi-clock-outline</v-icon>
+          </v-btn>
+          <v-chip
+            v-else-if="currentQuarterlyReport?.publication_status === 'PUBLISHED'"
+            color="success"
+            variant="tonal"
+            size="small"
+            prepend-icon="mdi-check-circle"
+            class="flex-shrink-0"
+          >
+            Approved
+          </v-chip>
+        </template>
       </div>
+    </div>
+
+    <!-- Row 2: Hero KPI Stats (Phase HJ-6 — Directive 132) -->
+    <div v-if="!loading && financialRecords.length > 0" class="d-flex flex-wrap ga-3 mb-4">
+      <div class="fin-stat-card">
+        <div class="fin-stat-label">Appropriation</div>
+        <div class="fin-stat-value text-primary">₱{{ formatCurrency(pillarTotal.allotment) }}</div>
+      </div>
+      <div class="fin-stat-card">
+        <div class="fin-stat-label">Obligations</div>
+        <div class="fin-stat-value text-info">₱{{ formatCurrency(pillarTotal.obligation) }}</div>
+      </div>
+      <div class="fin-stat-card">
+        <div class="fin-stat-label">Disbursement</div>
+        <div class="fin-stat-value" style="color: #00897B">₱{{ formatCurrency(pillarTotal.disbursement) }}</div>
+      </div>
+      <div v-if="pillarTotal.utilization !== null" class="fin-stat-card fin-stat-card--highlight">
+        <div class="fin-stat-label">Utilization Rate</div>
+        <div
+          class="fin-stat-value"
+          style="font-size: 1.25rem"
+          :class="(pillarTotal.utilization ?? 0) >= 80 ? 'text-success' : (pillarTotal.utilization ?? 0) >= 50 ? 'text-warning' : 'text-error'"
+        >{{ formatPercent(pillarTotal.utilization) }}</div>
+      </div>
+    </div>
+
+    <!-- Row 3: Controls — Quarter + FY + Export (Phase HK-2) -->
+    <div class="d-flex align-center flex-wrap ga-2 mb-4">
+      <v-select
+        v-model="selectedQuarter"
+        :items="quarterOptions"
+        item-title="title"
+        item-value="value"
+        label="Reporting Period"
+        variant="outlined"
+        density="compact"
+        hide-details
+        style="width: 200px"
+        prepend-inner-icon="mdi-calendar-range"
+      />
+      <v-select
+        :model-value="selectedFiscalYear"
+        @update:model-value="fiscalYearStore.setFiscalYear"
+        :items="fiscalYearOptions"
+        label="Fiscal Year"
+        density="compact"
+        variant="outlined"
+        hide-details
+        style="width: 140px"
+        prepend-inner-icon="mdi-calendar"
+      />
+      <!-- Phase HL: Column visibility menu for Financial parity (Directive 150) -->
+      <v-menu :close-on-content-click="false">
+        <template v-slot:activator="{ props: menuProps }">
+          <v-btn variant="outlined" density="compact" prepend-icon="mdi-eye-settings" class="flex-shrink-0" v-bind="menuProps">
+            <span class="d-none d-sm-inline">Columns</span>
+          </v-btn>
+        </template>
+        <v-card min-width="230" class="pa-3">
+          <div class="text-subtitle-2 mb-2">Show / Hide Columns</div>
+          <v-checkbox v-model="columnVisibility.remarks" label="Remarks" density="compact" hide-details color="primary" />
+          <v-checkbox v-model="columnVisibility.mov" label="Means of Verification (MOV)" density="compact" hide-details color="primary" />
+        </v-card>
+      </v-menu>
+      <v-menu>
+        <template v-slot:activator="{ props }">
+          <v-btn
+            variant="outlined"
+            density="compact"
+            prepend-icon="mdi-file-export"
+            class="flex-shrink-0"
+            v-bind="props"
+          >
+            <span class="d-none d-sm-inline">Export</span>
+            <v-icon class="d-sm-none">mdi-file-export</v-icon>
+          </v-btn>
+        </template>
+        <v-list density="compact">
+          <v-list-item disabled>
+            <template v-slot:prepend><v-icon>mdi-file-pdf-box</v-icon></template>
+            <v-list-item-title>Export to PDF</v-list-item-title>
+            <v-list-item-subtitle class="text-caption">Coming soon</v-list-item-subtitle>
+          </v-list-item>
+          <v-list-item disabled>
+            <template v-slot:prepend><v-icon>mdi-file-excel</v-icon></template>
+            <v-list-item-title>Export to Excel</v-list-item-title>
+            <v-list-item-subtitle class="text-caption">Coming soon</v-list-item-subtitle>
+          </v-list-item>
+        </v-list>
+      </v-menu>
     </div>
 
     <!-- Pillar Tabs (Phase EX-E: Match Physical page styling) -->
     <v-card class="mb-4">
       <v-tabs v-model="activePillar" bg-color="primary" show-arrows>
         <v-tab
-          v-for="pillar in PILLARS"
+          v-for="pillar in visiblePillars"
           :key="pillar.id"
           :value="pillar.id"
         >
@@ -870,31 +1100,7 @@ onMounted(async () => {
           {{ formatPercent(pillarTotal.utilization) }} Utilization
         </v-chip>
 
-        <!-- Submission controls -->
-        <template v-if="!isLoadingQuarterlyReport">
-          <v-btn
-            v-if="canSubmitAllPillars()"
-            color="primary"
-            variant="tonal"
-            size="small"
-            prepend-icon="mdi-send"
-            :loading="actionLoading"
-            @click="submitAllPillarsForReview"
-          >
-            Submit Financial {{ selectedQuarter }}
-          </v-btn>
-          <v-btn
-            v-if="canWithdrawAllPillars()"
-            color="warning"
-            variant="tonal"
-            size="small"
-            prepend-icon="mdi-undo"
-            :loading="actionLoading"
-            @click="withdrawAllPillarsSubmission"
-          >
-            Withdraw
-          </v-btn>
-        </template>
+        <!-- Phase HG: Submit/Withdraw moved to top action bar (Directive 112) — pillar header shows status chips only -->
       </v-card-text>
     </v-card>
 
@@ -981,11 +1187,11 @@ onMounted(async () => {
 
             <v-divider class="my-2" />
 
+            <!-- Phase HF: Disbursement Rate formula removed (Directive 106) -->
             <p class="mb-0 text-grey-darken-1">
-              <strong>Key formulas (DBM BAR No. 2):</strong>
+              <strong>Key formulas (DBM):</strong>
               <em>Unobligated Balance</em> = Appropriation − Obligations &nbsp;|&nbsp;
-              <em>% Utilization</em> = (Obligations ÷ Appropriation) × 100 &nbsp;|&nbsp;
-              <em>Disbursement Rate</em> = (Disbursement ÷ Obligations) × 100
+              <em>% Utilization</em> = (Obligations ÷ Appropriation) × 100
             </p>
           </div>
         </v-expansion-panel-text>
@@ -1018,25 +1224,26 @@ onMounted(async () => {
         Loading {{ PRIOR_QUARTER_MAP[selectedQuarter] }} reference data...
       </div>
 
-      <!-- Phase FB-B: Prefill banner + prefilled reference table -->
+      <!-- Phase FB-B: Prefill banner + read-only reference table (FE-2: dialog-based editing) -->
       <template v-if="isPrefillMode && financialRecords.length === 0 && !prefillLoading">
+        <!-- Phase FI-2: Advisory banner — not a decision gate -->
         <v-alert type="info" variant="tonal" class="mb-3" closable @click:close="clearPrefill">
           <div class="d-flex align-center justify-space-between flex-wrap ga-2">
             <span class="text-body-2">
               <v-icon start size="small">mdi-content-copy</v-icon>
-              <strong>{{ prefillSourceQuarter }} reference loaded</strong> —
-              {{ prefillRecords.length }} record{{ prefillRecords.length !== 1 ? 's' : '' }}
-              shown below. These are <strong>not saved</strong> to {{ selectedQuarter }}.
+              Showing <strong>{{ prefillSourceQuarter }}</strong> data as reference
+              ({{ prefillRecords.length }} record{{ prefillRecords.length !== 1 ? 's' : '' }}).
+              Click any row to edit and save as <strong>{{ selectedQuarter }}</strong>.
             </span>
-            <div class="d-flex ga-2">
-              <v-btn size="small" color="primary" variant="tonal"
+            <div class="d-flex ga-1">
+              <v-btn size="x-small" variant="tonal"
                 :loading="saving" @click="saveAllPrefillRecords"
                 prepend-icon="mdi-content-save-all"
               >
                 Save All as {{ selectedQuarter }}
               </v-btn>
-              <v-btn size="small" variant="text" @click="clearPrefill">
-                Use Empty Form
+              <v-btn size="x-small" variant="text" @click="clearPrefill">
+                Clear
               </v-btn>
             </div>
           </div>
@@ -1045,41 +1252,55 @@ onMounted(async () => {
         <v-card variant="outlined" class="mb-4">
           <v-table density="compact" class="financial-table">
             <thead>
-              <tr>
+              <tr class="bg-primary text-white">
                 <th style="min-width: 220px">Program / Line Item</th>
                 <th style="width: 80px">Class</th>
                 <th style="width: 140px" class="text-right">Appropriation</th>
                 <th style="width: 140px" class="text-right">Obligations</th>
+                <!-- Phase HF: Disbursement before % Utilization (Directive 103) -->
+                <th style="width: 130px" class="text-right">Disbursement</th>
                 <th style="width: 100px" class="text-right">% Utilization</th>
-                <th style="width: 130px" class="text-right">Balance</th>
-                <th v-if="canEditData()" style="width: 120px" class="text-center">Actions</th>
+                <!-- Phase FF-4: Use canAdd('operations') so all users with base access can save prefill rows -->
+                <th v-if="canAdd('operations')" style="width: 80px" class="text-center">Actions</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(rec, idx) in prefillRecords" :key="'prefill-' + idx" class="bg-grey-lighten-5">
+              <tr v-for="(rec, idx) in prefillRecords" :key="'prefill-' + idx" class="bg-grey-lighten-5 cursor-pointer" @click="openPrefillSaveDialog(rec)">
                 <td>
                   <span class="text-body-2">{{ rec.operations_programs }}</span>
                   <v-chip size="x-small" variant="tonal" color="info" class="ml-2">From {{ prefillSourceQuarter }}</v-chip>
                 </td>
                 <td>
-                  <v-chip v-if="rec.expense_class" size="x-small" variant="tonal">{{ rec.expense_class }}</v-chip>
+                  <v-chip v-if="rec.expense_class" size="small" variant="flat" color="primary" class="font-weight-bold">{{ rec.expense_class }}</v-chip>
                   <span v-else class="text-grey">—</span>
                 </td>
                 <td class="text-right font-weight-medium">{{ formatCurrency(rec.allotment) }}</td>
                 <td class="text-right">{{ formatCurrency(rec.obligation) }}</td>
+                <!-- Phase HF: Disbursement before % Utilization (Directive 103) -->
+                <td class="text-right">{{ formatCurrency(rec.disbursement) }}</td>
                 <td class="text-right">
+                  <!-- Phase HF: Utilization chip emphasis — size="small" variant="flat" (Directive 104) -->
                   <v-chip
                     v-if="rec.utilization_rate !== null && rec.utilization_rate !== undefined"
                     :color="Number(rec.utilization_rate) >= 80 ? 'success' : Number(rec.utilization_rate) >= 50 ? 'warning' : 'error'"
-                    size="x-small" variant="tonal"
+                    size="small" variant="flat"
                   >{{ formatPercent(rec.utilization_rate) }}</v-chip>
                   <span v-else class="text-grey">—</span>
                 </td>
-                <td class="text-right">{{ formatCurrency(rec.balance) }}</td>
-                <td v-if="canEditData()" class="text-center">
-                  <v-btn size="x-small" color="primary" variant="tonal" @click="openPrefillSaveDialog(rec)">
-                    Save as {{ selectedQuarter }}
-                  </v-btn>
+                <td v-if="canAdd('operations')" class="text-center">
+                  <v-btn
+                    icon="mdi-pencil"
+                    size="x-small"
+                    variant="text"
+                    @click.stop="openPrefillSaveDialog(rec)"
+                  />
+                  <v-btn
+                    icon="mdi-delete-outline"
+                    size="x-small"
+                    variant="text"
+                    color="error"
+                    @click.stop="removePrefillRow(idx)"
+                  />
                 </td>
               </tr>
             </tbody>
@@ -1087,17 +1308,18 @@ onMounted(async () => {
         </v-card>
       </template>
 
-      <!-- Empty state (no records AND no prefill) -->
+      <!-- Phase FD-4: Empty state with explicit guidance (no records AND no prefill) -->
       <v-card v-if="financialRecords.length === 0 && !isPrefillMode && !prefillLoading" variant="outlined" class="mb-4">
         <v-table density="compact" class="financial-table">
           <thead>
-            <tr>
+            <tr class="bg-primary text-white">
               <th style="min-width: 220px">Program / Line Item</th>
               <th style="width: 80px">Class</th>
               <th style="width: 140px" class="text-right">Appropriation</th>
               <th style="width: 140px" class="text-right">Obligations</th>
+              <!-- Phase HF: Disbursement before % Utilization (Directive 103) -->
+              <th style="width: 130px" class="text-right">Disbursement</th>
               <th style="width: 100px" class="text-right">% Utilization</th>
-              <th style="width: 130px" class="text-right">Balance</th>
               <th v-if="canEditData()" style="width: 80px" class="text-center">Actions</th>
             </tr>
           </thead>
@@ -1105,10 +1327,19 @@ onMounted(async () => {
             <tr>
               <td :colspan="canEditData() ? 7 : 6" class="text-center py-6 text-grey">
                 <v-icon size="20" color="grey-lighten-1" class="mr-1">mdi-currency-php</v-icon>
-                No financial records for {{ currentPillar.fullName }}, {{ selectedQuarter }} FY {{ selectedFiscalYear }}.
-                <span v-if="canEditData()">
-                  Click <strong>Add Financial Record</strong> above to begin.
-                </span>
+                <template v-if="operationNotFound">
+                  No operation record has been configured for {{ currentPillar.fullName }}, FY {{ selectedFiscalYear }}.
+                  Please contact an administrator.
+                </template>
+                <template v-else-if="!currentOperation">
+                  Unable to load operation context for {{ currentPillar.fullName }}, FY {{ selectedFiscalYear }}.
+                </template>
+                <template v-else>
+                  No financial records for {{ currentPillar.fullName }}, {{ selectedQuarter }} FY {{ selectedFiscalYear }}.
+                  <span v-if="canEditData()">
+                    Click <strong>Add Financial Record</strong> above to begin.
+                  </span>
+                </template>
               </td>
             </tr>
           </tbody>
@@ -1130,13 +1361,14 @@ onMounted(async () => {
 
             <v-table density="compact" class="financial-table">
               <thead>
-                <tr>
+                <tr class="bg-primary text-white">
                   <th style="min-width: 220px">Program / Line Item</th>
                   <th style="width: 80px">Class</th>
                   <th style="width: 140px" class="text-right">Appropriation</th>
                   <th style="width: 140px" class="text-right">Obligations</th>
+                  <!-- Phase HF: Disbursement before % Utilization (Directive 103) -->
+                  <th style="width: 130px" class="text-right">Disbursement</th>
                   <th style="width: 100px" class="text-right">% Utilization</th>
-                  <th style="width: 130px" class="text-right">Balance</th>
                   <th v-if="canEditData()" style="width: 80px" class="text-center">Actions</th>
                 </tr>
               </thead>
@@ -1144,28 +1376,31 @@ onMounted(async () => {
                 <!-- Group by expense class -->
                 <template v-for="ec in EXPENSE_CLASSES" :key="ec.id">
                   <template v-if="(groupedFinancials[campus.id]?.[ec.id] || []).length > 0">
-                    <tr v-for="rec in groupedFinancials[campus.id][ec.id]" :key="rec.id" class="cursor-pointer" @click="openEditDialog(rec)">
+                    <!-- Phase HL: Wrap in template for stacked panel (Directive 150) -->
+                    <template v-for="rec in groupedFinancials[campus.id][ec.id]" :key="rec.id">
+                    <tr class="cursor-pointer" @click="openEditDialog(rec)">
                       <td>
                         <span class="text-body-2">{{ rec.operations_programs }}</span>
-                        <span v-if="rec.project_code" class="text-caption text-grey ml-1">({{ rec.project_code }})</span>
                       </td>
                       <td>
-                        <v-chip :color="ec.color" size="x-small" variant="tonal">{{ ec.id }}</v-chip>
+                        <v-chip :color="ec.color" size="small" variant="flat" class="font-weight-bold">{{ ec.id }}</v-chip>
                       </td>
                       <td class="text-right font-weight-medium">{{ formatCurrency(rec.allotment) }}</td>
                       <td class="text-right">{{ formatCurrency(rec.obligation) }}</td>
+                      <!-- Phase HF: Disbursement before % Utilization (Directive 103) -->
+                      <td class="text-right">{{ formatCurrency(rec.disbursement) }}</td>
                       <td class="text-right">
+                        <!-- Phase HF: Utilization chip emphasis — size="small" variant="flat" (Directive 104) -->
                         <v-chip
                           v-if="rec.utilization_rate !== null && rec.utilization_rate !== undefined"
                           :color="Number(rec.utilization_rate) >= 80 ? 'success' : Number(rec.utilization_rate) >= 50 ? 'warning' : 'error'"
-                          size="x-small"
-                          variant="tonal"
+                          size="small"
+                          variant="flat"
                         >
                           {{ formatPercent(rec.utilization_rate) }}
                         </v-chip>
                         <span v-else class="text-grey">—</span>
                       </td>
-                      <td class="text-right">{{ formatCurrency(rec.balance) }}</td>
                       <td v-if="canEditData()" class="text-center">
                         <v-btn
                           icon="mdi-pencil"
@@ -1183,22 +1418,57 @@ onMounted(async () => {
                         />
                       </td>
                     </tr>
+                    <!-- Phase HL: Stacked panel — remarks + MOV (Directive 150) -->
+                    <tr v-if="anyPanelVisible" class="narrative-stacked-row cursor-pointer" @click="openEditDialog(rec)">
+                      <td :colspan="remarksRowColspan" class="pa-0">
+                        <div class="narrative-stacked-panel">
+                          <div v-if="columnVisibility.remarks" class="narrative-stacked-item">
+                            <span class="narrative-stacked-label">Remarks:</span>
+                            <span v-if="rec.remarks" class="narrative-stacked-text">{{ rec.remarks }}</span>
+                            <span v-else class="text-grey text-caption">—</span>
+                          </div>
+                          <div v-if="columnVisibility.mov" class="narrative-stacked-item">
+                            <span class="narrative-stacked-label">MOV:</span>
+                            <template v-if="rec.metadata?.mov">
+                              <a v-if="rec.metadata.mov.type === 'link'" :href="rec.metadata.mov.value" target="_blank" rel="noopener" class="narrative-stacked-text text-primary" @click.stop>
+                                <v-icon size="x-small" class="mr-1">mdi-open-in-new</v-icon>{{ rec.metadata.mov.value }}
+                              </a>
+                              <span v-else-if="rec.metadata.mov.type === 'file'" class="narrative-stacked-text">
+                                <v-icon size="x-small" class="mr-1">mdi-file-check</v-icon>{{ rec.metadata.mov.metadata?.filename || rec.metadata.mov.value }}
+                              </span>
+                              <span v-else class="narrative-stacked-text">{{ rec.metadata.mov.value }}</span>
+                            </template>
+                            <span v-else class="text-grey text-caption">—</span>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                    </template>
                   </template>
                 </template>
                 <!-- Uncategorized records -->
                 <template v-if="(groupedFinancials[campus.id]?.['_NONE'] || []).length > 0">
-                  <tr v-for="rec in groupedFinancials[campus.id]['_NONE']" :key="rec.id" class="cursor-pointer" @click="openEditDialog(rec)">
+                  <!-- Phase HL: Wrap in template for stacked panel (Directive 150) -->
+                  <template v-for="rec in groupedFinancials[campus.id]['_NONE']" :key="rec.id">
+                  <tr class="cursor-pointer" @click="openEditDialog(rec)">
                     <td>
                       <span class="text-body-2">{{ rec.operations_programs }}</span>
                     </td>
-                    <td><v-chip size="x-small" variant="tonal" color="grey">—</v-chip></td>
+                    <td><v-chip size="small" variant="tonal" color="grey">—</v-chip></td>
                     <td class="text-right font-weight-medium">{{ formatCurrency(rec.allotment) }}</td>
                     <td class="text-right">{{ formatCurrency(rec.obligation) }}</td>
+                    <!-- Phase HF: Disbursement before % Utilization (Directive 103) -->
+                    <td class="text-right">{{ formatCurrency(rec.disbursement) }}</td>
                     <td class="text-right">
-                      <span v-if="rec.utilization_rate !== null">{{ formatPercent(rec.utilization_rate) }}</span>
+                      <!-- Phase HF: Utilization chip (Directive 104) -->
+                      <v-chip
+                        v-if="rec.utilization_rate !== null && rec.utilization_rate !== undefined"
+                        :color="Number(rec.utilization_rate) >= 80 ? 'success' : Number(rec.utilization_rate) >= 50 ? 'warning' : 'error'"
+                        size="small"
+                        variant="flat"
+                      >{{ formatPercent(rec.utilization_rate) }}</v-chip>
                       <span v-else class="text-grey">—</span>
                     </td>
-                    <td class="text-right">{{ formatCurrency(rec.balance) }}</td>
                     <td v-if="canEditData()" class="text-center">
                       <v-btn
                         icon="mdi-pencil"
@@ -1216,6 +1486,32 @@ onMounted(async () => {
                       />
                     </td>
                   </tr>
+                  <!-- Phase HL: Stacked panel — remarks + MOV (Directive 150) -->
+                  <tr v-if="anyPanelVisible" class="narrative-stacked-row cursor-pointer" @click="openEditDialog(rec)">
+                    <td :colspan="remarksRowColspan" class="pa-0">
+                      <div class="narrative-stacked-panel">
+                        <div v-if="columnVisibility.remarks" class="narrative-stacked-item">
+                          <span class="narrative-stacked-label">Remarks:</span>
+                          <span v-if="rec.remarks" class="narrative-stacked-text">{{ rec.remarks }}</span>
+                          <span v-else class="text-grey text-caption">—</span>
+                        </div>
+                        <div v-if="columnVisibility.mov" class="narrative-stacked-item">
+                          <span class="narrative-stacked-label">MOV:</span>
+                          <template v-if="rec.metadata?.mov">
+                            <a v-if="rec.metadata.mov.type === 'link'" :href="rec.metadata.mov.value" target="_blank" rel="noopener" class="narrative-stacked-text text-primary" @click.stop>
+                              <v-icon size="x-small" class="mr-1">mdi-open-in-new</v-icon>{{ rec.metadata.mov.value }}
+                            </a>
+                            <span v-else-if="rec.metadata.mov.type === 'file'" class="narrative-stacked-text">
+                              <v-icon size="x-small" class="mr-1">mdi-file-check</v-icon>{{ rec.metadata.mov.metadata?.filename || rec.metadata.mov.value }}
+                            </span>
+                            <span v-else class="narrative-stacked-text">{{ rec.metadata.mov.value }}</span>
+                          </template>
+                          <span v-else class="text-grey text-caption">—</span>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                  </template>
                 </template>
                 <!-- Campus Sub-Total Row -->
                 <tr class="bg-grey-lighten-4 font-weight-bold">
@@ -1223,8 +1519,9 @@ onMounted(async () => {
                   <td></td>
                   <td class="text-right">{{ formatCurrency(campusSubtotals[campus.id]?.allotment) }}</td>
                   <td class="text-right">{{ formatCurrency(campusSubtotals[campus.id]?.obligation) }}</td>
+                  <!-- Phase HF: Disbursement before % Utilization (Directive 103) -->
+                  <td class="text-right">{{ formatCurrency(campusSubtotals[campus.id]?.disbursement) }}</td>
                   <td class="text-right">{{ formatPercent(campusSubtotals[campus.id]?.utilization) }}</td>
-                  <td class="text-right">{{ formatCurrency(campusSubtotals[campus.id]?.balance) }}</td>
                   <td v-if="canEditData()"></td>
                 </tr>
               </tbody>
@@ -1241,8 +1538,9 @@ onMounted(async () => {
                 <td style="width: 80px"></td>
                 <td style="width: 140px" class="text-right">{{ formatCurrency(pillarTotal.allotment) }}</td>
                 <td style="width: 140px" class="text-right">{{ formatCurrency(pillarTotal.obligation) }}</td>
+                <!-- Phase HF: Disbursement before % Utilization (Directive 103) -->
+                <td style="width: 130px" class="text-right">{{ formatCurrency(pillarTotal.disbursement) }}</td>
                 <td style="width: 100px" class="text-right">{{ formatPercent(pillarTotal.utilization) }}</td>
-                <td style="width: 130px" class="text-right">{{ formatCurrency(pillarTotal.balance) }}</td>
                 <td v-if="canEditData()" style="width: 80px"></td>
               </tr>
             </tbody>
@@ -1311,16 +1609,6 @@ onMounted(async () => {
                 clearable
               />
             </v-col>
-            <v-col cols="6">
-              <v-text-field
-                v-model="entryForm.project_code"
-                label="Project Code"
-                variant="outlined"
-                density="compact"
-                placeholder="e.g., PROJ-2026-001"
-              />
-            </v-col>
-
             <v-col cols="12">
               <v-divider class="my-1" />
               <div class="text-subtitle-2 text-grey mb-2 mt-2">Financial Amounts</div>
@@ -1398,16 +1686,65 @@ onMounted(async () => {
                 auto-grow
               />
             </v-col>
+
+            <!-- Phase HL: MOV type-selector UI for Financial (Directive 152) -->
+            <v-col cols="12">
+              <div class="text-subtitle-2 mb-2">Means of Verification (MOV)</div>
+              <v-btn-toggle v-model="movType" mandatory density="compact" color="primary" class="mb-2">
+                <v-btn value="text" size="small"><v-icon start size="small">mdi-text</v-icon>Text</v-btn>
+                <v-btn value="link" size="small"><v-icon start size="small">mdi-link</v-icon>Link</v-btn>
+                <v-btn value="file" size="small"><v-icon start size="small">mdi-file-upload</v-icon>File</v-btn>
+              </v-btn-toggle>
+
+              <v-textarea
+                v-if="movType === 'text'"
+                v-model="movValue"
+                label="MOV Description"
+                variant="outlined"
+                density="compact"
+                rows="2"
+                auto-grow
+                hint="Evidence or documentation supporting financial data"
+                persistent-hint
+              />
+              <v-text-field
+                v-else-if="movType === 'link'"
+                v-model="movValue"
+                label="MOV URL"
+                variant="outlined"
+                density="compact"
+                prepend-inner-icon="mdi-link"
+                hint="Paste a link to the supporting document or resource"
+                persistent-hint
+              />
+              <div v-else-if="movType === 'file'">
+                <input ref="movFileInputRef" type="file" style="display:none" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.txt" @change="handleMovFileUpload" />
+                <v-btn variant="outlined" size="small" :loading="movUploading" @click="movFileInputRef?.click()">
+                  <v-icon start size="small">mdi-upload</v-icon>
+                  {{ movFileMetadata ? 'Replace File' : 'Upload File' }}
+                </v-btn>
+                <div v-if="movFileMetadata" class="mt-2 text-body-2">
+                  <v-icon size="small" class="mr-1">mdi-file-check</v-icon>
+                  {{ movFileMetadata.filename }}
+                  <span class="text-grey ml-1">({{ (movFileMetadata.size / 1024).toFixed(1) }} KB)</span>
+                </div>
+                <div v-else-if="movValue" class="mt-2 text-body-2">
+                  <v-icon size="small" class="mr-1">mdi-file</v-icon>
+                  {{ movValue }}
+                </div>
+              </div>
+            </v-col>
           </v-row>
         </v-card-text>
 
         <v-card-actions>
           <v-spacer />
-          <v-btn variant="text" @click="entryDialog = false" :disabled="saving">Cancel</v-btn>
+          <v-btn variant="text" @click="entryDialog = false" :disabled="saving || movUploading">Cancel</v-btn>
           <v-btn
             color="primary"
             variant="flat"
             :loading="saving"
+            :disabled="movUploading"
             @click="saveFinancialRecord"
           >
             {{ editingRecord ? 'Update' : 'Save' }}
@@ -1505,9 +1842,78 @@ onMounted(async () => {
   cursor: pointer;
 }
 
+.cursor-pointer:hover {
+  background-color: #e3f2fd !important;
+}
+
 .financial-table th {
   font-size: 0.75rem !important;
   text-transform: uppercase;
   letter-spacing: 0.025em;
+  color: white !important;
+}
+
+/* Phase HF: Utilization Rate hero card emphasis (Directive 105) */
+.fin-stat-card--highlight {
+  border-width: 2px;
+  border-color: rgba(0, 0, 0, 0.18);
+  min-width: 130px;
+}
+
+/* Phase HE: Financial hero stat cards (Directive 390) */
+.fin-stat-card {
+  padding: 6px 14px;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  min-width: 110px;
+}
+.fin-stat-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+.fin-stat-value {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* Phase HL: Stacked panel styles — parity with Physical module (Directive 150) */
+.narrative-stacked-row {
+  background-color: #fafafa;
+}
+.narrative-stacked-row:hover {
+  background-color: #f0f4ff !important;
+}
+.narrative-stacked-panel {
+  padding: 8px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  border-top: 1px dashed #e0e0e0;
+}
+.narrative-stacked-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 200px;
+  flex: 1 1 auto;
+}
+.narrative-stacked-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+.narrative-stacked-text {
+  font-size: 0.82rem;
+  color: rgba(0, 0, 0, 0.8);
+  word-break: break-word;
 }
 </style>

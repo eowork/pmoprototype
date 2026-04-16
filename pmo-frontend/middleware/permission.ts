@@ -8,7 +8,7 @@
  * SECURITY: Backend must still enforce permissions. This is UX enhancement only.
  */
 export default defineNuxtRouteMiddleware((to) => {
-  const { canManageUsers, isSuperAdmin, canAdd, canEdit } = usePermissions()
+  const { canManageUsers, isSuperAdmin, isAdmin, canAdd, canEdit } = usePermissions()
 
   // User management routes: SuperAdmin or Admin with canManageUsers permission
   if (to.path.startsWith('/users')) {
@@ -23,6 +23,27 @@ export default defineNuxtRouteMiddleware((to) => {
     if (!isSuperAdmin.value && !canManageUsers.value) {
       console.warn('[Permission] Access denied to /admin - insufficient permissions')
       return navigateTo('/dashboard')
+    }
+  }
+
+  // Phase HU: University Operations sub-module guards (Directives 213–215)
+  // Admins/SuperAdmins bypass — only restrict Staff with explicit can_access=false overrides
+  if (!isAdmin.value && !isSuperAdmin.value) {
+    const uoSubModuleGuards = [
+      { path: '/university-operations/physical', key: 'university-operations-physical' },
+      { path: '/university-operations/financial', key: 'university-operations-financial' },
+    ]
+
+    const authStore = useAuthStore()
+    for (const { path: guardPath, key } of uoSubModuleGuards) {
+      if (to.path.startsWith(guardPath)) {
+        const overrides = authStore.user?.moduleOverrides || {}
+        if (key in overrides && overrides[key] === false) {
+          console.warn(`[Permission] Access denied to ${guardPath} - module override ${key}=false`)
+          return navigateTo('/dashboard')
+        }
+        break
+      }
     }
   }
 

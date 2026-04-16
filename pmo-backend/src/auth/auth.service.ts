@@ -130,6 +130,19 @@ export class AuthService {
     );
     const module_assignments = moduleAssignmentsResult.rows.map((row) => row.module);
 
+    // Pillar assignments for Physical/Financial tab access control (Phase HN)
+    // Phase HO (Directive 163): try-catch — auth must not fail if RBAC table missing
+    let pillar_assignments: string[] = [];
+    try {
+      const pillarAssignmentsResult = await this.db.query(
+        `SELECT pillar_type FROM user_pillar_assignments WHERE user_id = $1`,
+        [user.id],
+      );
+      pillar_assignments = pillarAssignmentsResult.rows.map((r) => r.pillar_type);
+    } catch {
+      this.logger.warn(`PILLAR_RBAC_UNAVAILABLE: defaulting to [] for user=${user.id}`);
+    }
+
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
@@ -152,6 +165,7 @@ export class AuthService {
         permissions,
         module_overrides,
         module_assignments,
+        pillar_assignments,
         rank_level: user.rank_level,
         campus: user.campus,  // Phase Y: Office-scoped visibility
         role: roles.length > 0 ? { name: roles[0] } : undefined,
@@ -211,6 +225,19 @@ export class AuthService {
     );
     const module_assignments = moduleAssignmentsResult.rows.map((row) => row.module);
 
+    // Pillar assignments for Physical/Financial tab access control (Phase HN)
+    // Phase HO (Directive 163): try-catch — auth must not fail if RBAC table missing
+    let pillar_assignments: string[] = [];
+    try {
+      const pillarAssignmentsResult = await this.db.query(
+        `SELECT pillar_type FROM user_pillar_assignments WHERE user_id = $1`,
+        [userId],
+      );
+      pillar_assignments = pillarAssignmentsResult.rows.map((r) => r.pillar_type);
+    } catch {
+      this.logger.warn(`PILLAR_RBAC_UNAVAILABLE: defaulting to [] for user=${userId}`);
+    }
+
     // Phase CF: Extract roles for reuse in role field
     const roles = rolesResult.rows.map((r) => ({ id: r.id, name: r.name }));
 
@@ -221,6 +248,7 @@ export class AuthService {
       permissions: permsResult.rows.map((p) => p.name),
       module_overrides,
       module_assignments,
+      pillar_assignments,
       rank_level: user.rank_level,
       campus: user.campus,  // Phase Y: Office-scoped visibility
       // Phase CF: Add role field to match login() response format for frontend adapter
@@ -230,5 +258,52 @@ export class AuthService {
 
   async logout(userId: string): Promise<void> {
     this.logger.log(`LOGOUT: user_id=${userId}`);
+  }
+
+  // Phase HQ: Password reset request (public endpoint, Directive 176)
+  async createPasswordResetRequest(identifier: string, notes?: string): Promise<{ message: string }> {
+    try {
+      await this.db.query(
+        `INSERT INTO password_reset_requests (identifier, notes) VALUES ($1, $2)`,
+        [identifier, notes || null],
+      );
+      this.logger.log(`PASSWORD_RESET_REQUEST: identifier=${identifier}`);
+    } catch (err) {
+      // Log but don't expose error to client (security)
+      this.logger.warn(`PASSWORD_RESET_REQUEST_FAILED: identifier=${identifier}, error=${err.message}`);
+    }
+    // Always return success (security best practice — don't reveal if user exists)
+    return { message: 'Reset request submitted. An administrator will contact you.' };
+  }
+
+  // Phase HT: Google OAuth — issue JWT for a pre-validated Google user
+  async loginWithGoogleUser(userId: string): Promise<{ access_token: string }> {
+    const rolesResult = await this.db.query(
+      `SELECT r.name, ur.is_superadmin
+       FROM user_roles ur
+       JOIN roles r ON ur.role_id = r.id
+       WHERE ur.user_id = $1`,
+      [userId],
+    );
+    const roles = rolesResult.rows.map((r) => r.name);
+    const is_superadmin = rolesResult.rows.some((r) => r.is_superadmin);
+
+    const userResult = await this.db.query(
+      `SELECT email, campus FROM users WHERE id = $1`,
+      [userId],
+    );
+    const user = userResult.rows[0];
+
+    const payload: JwtPayload = {
+      sub: userId,
+      email: user.email,
+      roles,
+      is_superadmin,
+      campus: user.campus || undefined,
+    };
+
+    this.logger.log(`GOOGLE_LOGIN_SUCCESS: user_id=${userId}`);
+
+    return { access_token: this.jwtService.sign(payload) };
   }
 }

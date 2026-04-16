@@ -9,6 +9,9 @@ export const VALID_MODULE_KEYS = [
   'contractors',
   'funding_sources',
   'university_operations',
+  // Phase HU: Sub-module access control (Directives 212–215)
+  'university-operations-physical',
+  'university-operations-financial',
   'users',
 ] as const;
 
@@ -78,4 +81,48 @@ export interface BulkPermissionResult {
   success: boolean;
   updated: number;
   deleted: number;
+}
+
+// Phase HV: Cross-user bulk access update (Directive 225)
+export class BulkCrossUserAccessDto {
+  @ApiProperty({
+    description: 'Array of user IDs to update',
+    example: ['uuid-1', 'uuid-2'],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  userIds: string[];
+
+  @ApiProperty({
+    description: 'Type of access to modify',
+    enum: ['permission', 'module', 'pillar'],
+    example: 'permission',
+  })
+  @IsString()
+  @IsIn(['permission', 'module', 'pillar'])
+  type: 'permission' | 'module' | 'pillar';
+
+  @ApiProperty({
+    description: 'Action to perform',
+    enum: ['grant', 'revoke'],
+    example: 'grant',
+  })
+  @IsString()
+  @IsIn(['grant', 'revoke'])
+  action: 'grant' | 'revoke';
+
+  @ApiProperty({
+    description: 'Key identifying the resource (module_key, module type, or pillar_type)',
+    example: 'university_operations',
+  })
+  @IsString()
+  key: string;
+}
+
+export interface BulkCrossUserResult {
+  success: boolean;
+  total: number;
+  applied: number;
+  skipped: number;
+  errors: string[];
 }

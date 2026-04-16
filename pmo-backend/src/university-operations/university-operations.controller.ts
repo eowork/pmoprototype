@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { UniversityOperationsService } from './university-operations.service';
@@ -157,6 +158,17 @@ export class UniversityOperationsController {
   @Get('analytics/financial-expense-breakdown')
   getFinancialExpenseBreakdown(@Query('fiscal_year') fiscalYear: number) {
     return this.service.getFinancialExpenseBreakdown(fiscalYear);
+  }
+
+  @Get('analytics/financial-campus-breakdown')
+  getFinancialCampusBreakdown(@Query('fiscal_year') fiscalYear: number) {
+    return this.service.getFinancialCampusBreakdown(fiscalYear);
+  }
+
+  // Phase GS-4: Financial Pillar × Expense Class Breakdown (Directive 314)
+  @Get('analytics/financial-pillar-expense-breakdown')
+  getFinancialPillarExpenseBreakdown(@Query('fiscal_year') fiscalYear: number) {
+    return this.service.getFinancialPillarExpenseBreakdown(fiscalYear);
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -311,6 +323,30 @@ export class UniversityOperationsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.denyQuarterlyReportUnlock(id, user.sub, user);
+  }
+
+  /**
+   * Phase HU: Resolve operation context for Physical/Financial display pages.
+   * Bypasses ownership filter — returns operation for any OPERATIONS module user.
+   * Directives 209, 211
+   */
+  @Get('pillar-operation')
+  async findPillarOperation(
+    @Query('pillar_type') pillarType: string,
+    @Query('fiscal_year') fiscalYear: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const op = await this.service.findOperationForDisplay(
+      pillarType,
+      parseInt(fiscalYear, 10),
+      user,
+    );
+    if (!op) {
+      throw new NotFoundException(
+        `No operation found for pillar ${pillarType}, fiscal year ${fiscalYear}`,
+      );
+    }
+    return op;
   }
 
   @Get(':id')

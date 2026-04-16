@@ -51,7 +51,7 @@ watch(administrationOpen, (val) => {
 const mainModules = computed(() => {
   const allModules = [
     { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/dashboard', key: 'dashboard' },
-    { title: 'Construction Projects', icon: 'mdi-office-building', to: '/coi', key: 'coi' },
+    { title: 'Infrastructure Projects', icon: 'mdi-office-building', to: '/coi', key: 'coi' },
     { title: 'Repair Projects', icon: 'mdi-tools', to: '/repairs', key: 'repairs' },
     { title: 'University Operations', icon: 'mdi-school', to: '/university-operations', key: 'university_operations' },
     { title: 'GAD Parity', icon: 'mdi-gender-male-female', to: '/gad', key: 'gad' },
@@ -107,7 +107,7 @@ async function handleLogout() {
       <v-app-bar-nav-icon @click="drawer = !drawer" />
 
       <v-toolbar-title class="font-weight-bold">
-        PMO Dashboard
+        CSU CORE Dashboard
       </v-toolbar-title>
 
       <v-spacer />
@@ -151,7 +151,7 @@ async function handleLogout() {
     <!-- Navigation Drawer -->
     <v-navigation-drawer v-model="drawer" elevation="1">
       <!-- Logo Header - Horizontal Layout -->
-      <div class="d-flex align-center pa-3 ga-3">
+      <div class="d-flex align-center pa-3 ga-2">
         <v-img
           src="/csu-logo.svg"
           alt="CSU Logo"
@@ -159,8 +159,8 @@ async function handleLogout() {
           height="44"
           class="flex-shrink-0"
         />
-        <span class="font-weight-bold text-grey-darken-2 sidebar-header-text">
-          Caraga State University
+        <span class="font-weight-bold text-grey-darken-2 text-align-left sidebar-header-text">
+        Caraga State University
         </span>
       </div>
 

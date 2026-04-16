@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
-import { CreateUserDto, UpdateUserDto, QueryUserDto, QueryEligibleUsersDto, AssignRoleDto, SetPermissionOverrideDto, BulkPermissionUpdateDto, AssignModuleDto, BulkModuleAssignmentDto } from './dto';
+import { CreateUserDto, UpdateUserDto, QueryUserDto, QueryEligibleUsersDto, AssignRoleDto, SetPermissionOverrideDto, BulkPermissionUpdateDto, BulkCrossUserAccessDto, AssignModuleDto, BulkModuleAssignmentDto } from './dto';
 import { JwtAuthGuard, RolesGuard } from '../auth/guards';
 import { Roles, CurrentUser } from '../auth/decorators';
 import { JwtPayload } from '../common/interfaces';
@@ -47,6 +47,38 @@ export class UsersController {
   @ApiOperation({ summary: 'List users eligible for record delegation (Admin/Staff) — Phase AV: Global, no campus filter' })
   findEligibleForAssignment() {
     return this.service.findEligibleForAssignment();
+  }
+
+  // Phase HQ: Password reset requests (must be before :id to avoid UUID parse)
+  @Get('password-reset-requests')
+  @Roles('Admin')
+  @ApiOperation({ summary: 'Get pending password reset requests (Admin only)' })
+  getPasswordResetRequests() {
+    return this.service.getPasswordResetRequests();
+  }
+
+  @Patch('password-reset-requests/:requestId/complete')
+  @Roles('Admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark password reset request as completed (Admin only)' })
+  completePasswordResetRequest(
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @CurrentUser() actor: JwtPayload,
+  ) {
+    return this.service.completePasswordResetRequest(requestId, actor.sub);
+  }
+
+  // Phase HV: Cross-user bulk access update (Directive 225)
+  @Post('bulk-access-update')
+  @Roles('Admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bulk update access for multiple users (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Bulk access update completed' })
+  bulkCrossUserAccessUpdate(
+    @Body() dto: BulkCrossUserAccessDto,
+    @CurrentUser() actor: JwtPayload,
+  ) {
+    return this.service.bulkCrossUserAccessUpdate(dto, actor.sub);
   }
 
   @Get(':id')
@@ -226,5 +258,38 @@ export class UsersController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.removeModuleAssignment(id, module, user.sub);
+  }
+
+  // --- Pillar Assignments: Admin can manage (Phase HN, Directive 160) ---
+
+  @Get(':id/pillar-assignments')
+  @Roles('Admin')
+  @ApiOperation({ summary: 'Get pillar assignments for user (Admin only)' })
+  getPillarAssignments(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.getPillarAssignments(id);
+  }
+
+  @Post(':id/pillar-assignments')
+  @Roles('Admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Assign pillar access to user (Admin only)' })
+  assignPillar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('pillar_type') pillarType: string,
+    @CurrentUser() actor: JwtPayload,
+  ) {
+    return this.service.assignPillar(id, pillarType, actor.sub);
+  }
+
+  @Delete(':id/pillar-assignments/:pillarType')
+  @Roles('Admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Revoke pillar access from user (Admin only)' })
+  revokePillar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('pillarType') pillarType: string,
+    @CurrentUser() actor: JwtPayload,
+  ) {
+    return this.service.revokePillar(id, pillarType, actor.sub);
   }
 }

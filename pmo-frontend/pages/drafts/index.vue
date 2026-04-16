@@ -29,7 +29,7 @@ const statusColors: Record<string, string> = {
 
 // Module labels
 const moduleLabels: Record<string, string> = {
-  coi: 'Construction (COI)',
+  coi: 'Infrastructure (COI)',
   repairs: 'Repair Projects',
   university_operations: 'University Operations',
 }

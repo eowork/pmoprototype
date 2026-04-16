@@ -8,10 +8,48 @@ const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 
+const api = useApi()
+
 const identifier = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const errorMessage = ref('')
+
+// Phase HQ: Password reset request
+const showResetDialog = ref(false)
+const resetIdentifier = ref('')
+const resetNotes = ref('')
+const resetSubmitting = ref(false)
+const resetSuccess = ref(false)
+
+async function submitResetRequest() {
+  if (!resetIdentifier.value.trim()) return
+  resetSubmitting.value = true
+  try {
+    await api.post('/api/auth/request-password-reset', {
+      identifier: resetIdentifier.value.trim(),
+      notes: resetNotes.value.trim() || undefined,
+    })
+    resetSuccess.value = true
+  } catch {
+    // Silent — show generic confirmation regardless (security best practice)
+    resetSuccess.value = true
+  } finally {
+    resetSubmitting.value = false
+  }
+}
+
+function closeResetDialog() {
+  showResetDialog.value = false
+  resetIdentifier.value = ''
+  resetNotes.value = ''
+  resetSuccess.value = false
+}
+
+// Phase HT: Google OAuth (Directive 206)
+function handleGoogleLogin() {
+  window.location.href = '/api/auth/google'
+}
 
 async function handleLogin() {
   errorMessage.value = ''
@@ -49,8 +87,8 @@ async function handleLogin() {
           width="120"
           class="mb-6"
         />
-        <h1 class="branding-title">PMO Dashboard</h1>
-        <p class="branding-subtitle">Project Management Office</p>
+        <h1 class="branding-title">CSU CORE </h1>
+        <h2 class="branding-subtitle">Centralized Operations and Reporting Engine (CORE) Dashboard System</h2>
         <div class="branding-divider" />
         <p class="branding-tagline">
           Caraga State University<br />
@@ -83,7 +121,7 @@ async function handleLogin() {
           class="mx-auto mb-4 seal-badge"
         />
 
-        <h2 class="form-title">PMO Dashboard Login</h2>
+        <h1 class="form-title">CSU CORE </h1>
         <p class="form-subtitle">Project Management Office</p>
 
         <!-- Error Alert -->
@@ -144,13 +182,84 @@ async function handleLogin() {
           >
             Sign In
           </v-btn>
+
+          <!-- Phase HT: Google OAuth divider + button -->
+          <div class="d-flex align-center my-5">
+            <v-divider />
+            <span class="text-caption text-medium-emphasis mx-1">or</span>
+            <v-divider />
+          </div>
+
+          <v-btn
+            variant="outlined"
+            size="large"
+            block
+            class="google-btn"
+            @click="handleGoogleLogin"
+          >
+            <v-icon start>mdi-google</v-icon>
+            Sign in with Google
+          </v-btn>
         </v-form>
+
+        <p class="text-caption text-center text-medium-emphasis mt-3">
+          Forgot your password?
+          <a href="#" @click.prevent="showResetDialog = true" class="text-primary">Request a reset</a>
+        </p>
 
         <p class="form-footer">
           &copy; {{ new Date().getFullYear() }} Caraga State University &bull; All Rights Reserved
         </p>
       </div>
     </div>
+
+    <!-- Phase HQ: Password Reset Request Dialog -->
+    <v-dialog v-model="showResetDialog" max-width="420" persistent>
+      <v-card>
+        <v-card-title class="text-h6">Request Password Reset</v-card-title>
+        <v-card-text v-if="!resetSuccess">
+          <p class="text-body-2 mb-4">
+            Enter your email or username. An administrator will be notified and will contact you.
+          </p>
+          <v-text-field
+            v-model="resetIdentifier"
+            label="Email or Username"
+            variant="outlined"
+            density="compact"
+            class="mb-2"
+          />
+          <v-text-field
+            v-model="resetNotes"
+            label="Notes (optional)"
+            variant="outlined"
+            density="compact"
+            hint="Describe your request or provide contact info"
+            persistent-hint
+          />
+        </v-card-text>
+        <v-card-text v-else>
+          <v-alert type="success" variant="tonal" density="compact">
+            Reset request submitted. An administrator will contact you.
+          </v-alert>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="closeResetDialog">
+            {{ resetSuccess ? 'Close' : 'Cancel' }}
+          </v-btn>
+          <v-btn
+            v-if="!resetSuccess"
+            color="primary"
+            variant="flat"
+            @click="submitResetRequest"
+            :loading="resetSubmitting"
+            :disabled="!resetIdentifier.trim()"
+          >
+            Submit Request
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -306,6 +415,17 @@ async function handleLogin() {
   text-transform: none;
   border-radius: 12px;
   color: #003300;
+}
+
+.google-btn {
+  border-color: #dadce0;
+  color: #3c4043;
+  font-weight: 500;
+  text-transform: none;
+  border-radius: 12px;
+}
+.google-btn:hover {
+  background-color: #f8f9fa;
 }
 
 .form-footer {
