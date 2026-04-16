@@ -278,10 +278,10 @@ onMounted(fetchProjects)
     <div class="d-flex justify-space-between align-center mb-4">
       <div>
         <h1 class="text-h4 font-weight-bold text-grey-darken-3">
-          Construction Projects
+          Infrastructure Projects
         </h1>
         <p class="text-subtitle-1 text-grey-darken-1">
-          Manage and monitor construction projects
+          Manage and monitor infrastructure projects
         </p>
       </div>
       <v-btn v-if="canAdd('coi')" color="primary" prepend-icon="mdi-plus" @click="createProject">

@@ -39,4 +39,14 @@ body {
   border-radius: 8px !important;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
 }
+
+/* Phase HS-1: Global table header branding — CSU Emerald */
+.v-data-table thead th {
+  background-color: #003300 !important;
+  color: white !important;
+}
+.v-data-table thead th .v-icon,
+.v-data-table thead th .v-data-table__th-sort-icon {
+  color: white !important;
+}
 </style>

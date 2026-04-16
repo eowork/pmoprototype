@@ -17,6 +17,16 @@ const deleting = ref(false)
 const deleteDialog = ref(false)
 const userToDelete = ref<UIUserList | null>(null)
 
+// Phase HV: Bulk selection (Directives 223–225)
+const selectedUsers = ref<string[]>([])
+const bulkProcessing = ref(false)
+const bulkMenuOpen = ref(false)
+
+// Password reset requests (Phase HQ)
+const pendingResetRequests = ref<any[]>([])
+const resetRequestsLoading = ref(false)
+const showResetPanel = ref(true)
+
 // Filter state
 const statusFilter = ref<boolean | null>(null)
 const roleFilter = ref<string>('')
@@ -70,6 +80,10 @@ function viewUser(user: UIUserList) {
 
 function editUser(user: UIUserList) {
   router.push(`/users/edit-${user.id}`)
+}
+
+function manageAccess(user: UIUserList) {
+  router.push(`/users/access-${user.id}`)
 }
 
 function createUser() {
@@ -171,7 +185,60 @@ async function fetchUsers() {
   }
 }
 
-onMounted(fetchUsers)
+// Password reset requests
+async function fetchResetRequests() {
+  resetRequestsLoading.value = true
+  try {
+    const response = await api.get<any[]>('/api/users/password-reset-requests')
+    pendingResetRequests.value = response || []
+  } catch {
+    // Silently fail — table may not exist yet
+    pendingResetRequests.value = []
+  } finally {
+    resetRequestsLoading.value = false
+  }
+}
+
+async function markResetComplete(requestId: string) {
+  try {
+    await api.patch(`/api/users/password-reset-requests/${requestId}/complete`)
+    pendingResetRequests.value = pendingResetRequests.value.filter(r => r.id !== requestId)
+    toast.success('Password reset request marked as completed')
+  } catch (err: unknown) {
+    const error = err as { message?: string }
+    toast.error(error.message || 'Failed to complete reset request')
+  }
+}
+
+// Phase HV: Bulk access update (Directive 225)
+async function bulkAccessUpdate(type: 'permission' | 'module' | 'pillar', action: 'grant' | 'revoke', key: string) {
+  if (selectedUsers.value.length === 0) return
+  bulkProcessing.value = true
+  try {
+    const result = await api.post<{ applied: number; skipped: number; errors: string[] }>(
+      '/api/users/bulk-access-update',
+      { userIds: selectedUsers.value, type, action, key },
+    )
+    const msg = `Bulk ${action}: ${result.applied} updated, ${result.skipped} skipped`
+    if (result.skipped > 0) {
+      toast.warning(msg)
+    } else {
+      toast.success(msg)
+    }
+    selectedUsers.value = []
+    bulkMenuOpen.value = false
+  } catch (err: unknown) {
+    const error = err as { message?: string }
+    toast.error(error.message || 'Bulk update failed')
+  } finally {
+    bulkProcessing.value = false
+  }
+}
+
+onMounted(() => {
+  fetchUsers()
+  fetchResetRequests()
+})
 </script>
 
 <template>
@@ -186,10 +253,72 @@ onMounted(fetchUsers)
           Manage user accounts and permissions
         </p>
       </div>
-      <v-btn v-if="canAdd('users')" color="primary" prepend-icon="mdi-account-plus" @click="createUser">
-        New User
-      </v-btn>
+      <div class="d-flex align-center ga-3">
+        <v-btn v-if="canAdd('users')" color="primary" prepend-icon="mdi-account-plus" @click="createUser">
+          New User
+        </v-btn>
+        <v-badge
+          v-if="pendingResetRequests.length > 0"
+          :content="pendingResetRequests.length"
+          color="warning"
+          inline
+        >
+          <v-btn
+            variant="tonal"
+            color="warning"
+            size="small"
+            prepend-icon="mdi-lock-reset"
+            @click="showResetPanel = !showResetPanel"
+          >
+            Reset Requests
+          </v-btn>
+        </v-badge>
+      </div>
     </div>
+
+    <!-- Pending Password Reset Requests (Phase HQ) -->
+    <v-expand-transition>
+      <v-alert
+        v-if="pendingResetRequests.length > 0 && showResetPanel"
+        type="warning"
+        variant="tonal"
+        class="mb-4"
+        closable
+        @click:close="showResetPanel = false"
+      >
+        <template #title>
+          Pending Password Reset Requests ({{ pendingResetRequests.length }})
+        </template>
+        <v-table density="compact" class="mt-2 bg-transparent">
+          <thead>
+            <tr class="bg-primary text-white">
+              <th>Identifier</th>
+              <th>Notes</th>
+              <th>Requested</th>
+              <th class="text-center">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="req in pendingResetRequests" :key="req.id">
+              <td class="font-weight-medium">{{ req.identifier }}</td>
+              <td>{{ req.notes || '—' }}</td>
+              <td>{{ formatDate(req.requested_at) }}</td>
+              <td class="text-center">
+                <v-btn
+                  size="small"
+                  color="success"
+                  variant="tonal"
+                  prepend-icon="mdi-check"
+                  @click="markResetComplete(req.id)"
+                >
+                  Mark Complete
+                </v-btn>
+              </td>
+            </tr>
+          </tbody>
+        </v-table>
+      </v-alert>
+    </v-expand-transition>
 
     <!-- Data Table Card -->
     <v-card>
@@ -261,6 +390,70 @@ onMounted(fetchUsers)
 
       <v-divider />
 
+      <!-- Phase HV: Bulk Actions Bar (Directives 223–224) -->
+      <v-slide-y-transition>
+        <v-toolbar v-if="selectedUsers.length > 0" density="compact" color="primary" class="px-4">
+          <v-toolbar-title class="text-body-2">
+            {{ selectedUsers.length }} user(s) selected
+          </v-toolbar-title>
+          <v-spacer />
+
+          <v-menu v-model="bulkMenuOpen" :close-on-content-click="false" location="bottom end">
+            <template #activator="{ props }">
+              <v-btn variant="tonal" color="white" size="small" v-bind="props" :loading="bulkProcessing">
+                Bulk Actions
+                <v-icon end>mdi-chevron-down</v-icon>
+              </v-btn>
+            </template>
+            <v-list density="compact" min-width="260">
+              <v-list-subheader>University Operations</v-list-subheader>
+              <v-list-item @click="bulkAccessUpdate('module', 'grant', 'OPERATIONS')" prepend-icon="mdi-plus-circle-outline">
+                <v-list-item-title>Grant UO Module</v-list-item-title>
+              </v-list-item>
+              <v-list-item @click="bulkAccessUpdate('module', 'revoke', 'OPERATIONS')" prepend-icon="mdi-minus-circle-outline">
+                <v-list-item-title>Revoke UO Module</v-list-item-title>
+              </v-list-item>
+
+              <v-divider class="my-1" />
+              <v-list-subheader>Sub-Module Access</v-list-subheader>
+              <v-list-item @click="bulkAccessUpdate('permission', 'grant', 'university-operations-physical')" prepend-icon="mdi-plus">
+                <v-list-item-title>Grant Physical</v-list-item-title>
+              </v-list-item>
+              <v-list-item @click="bulkAccessUpdate('permission', 'revoke', 'university-operations-physical')" prepend-icon="mdi-minus">
+                <v-list-item-title>Revoke Physical</v-list-item-title>
+              </v-list-item>
+              <v-list-item @click="bulkAccessUpdate('permission', 'grant', 'university-operations-financial')" prepend-icon="mdi-plus">
+                <v-list-item-title>Grant Financial</v-list-item-title>
+              </v-list-item>
+              <v-list-item @click="bulkAccessUpdate('permission', 'revoke', 'university-operations-financial')" prepend-icon="mdi-minus">
+                <v-list-item-title>Revoke Financial</v-list-item-title>
+              </v-list-item>
+
+              <v-divider class="my-1" />
+              <v-list-subheader>Pillar Access</v-list-subheader>
+              <v-list-item
+                v-for="p in ['GOVERNANCE', 'ADMINISTRATION', 'QASS', 'EXTERNAL_LINKAGES']"
+                :key="p"
+              >
+                <v-list-item-title class="text-caption">{{ p.replace('_', ' ') }}</v-list-item-title>
+                <template #append>
+                  <v-btn size="x-small" variant="tonal" color="success" class="mr-1" @click="bulkAccessUpdate('pillar', 'grant', p)">
+                    Grant
+                  </v-btn>
+                  <v-btn size="x-small" variant="tonal" color="error" @click="bulkAccessUpdate('pillar', 'revoke', p)">
+                    Revoke
+                  </v-btn>
+                </template>
+              </v-list-item>
+            </v-list>
+          </v-menu>
+
+          <v-btn variant="text" color="white" size="small" class="ml-2" @click="selectedUsers = []">
+            Clear
+          </v-btn>
+        </v-toolbar>
+      </v-slide-y-transition>
+
       <!-- Table -->
       <v-data-table
         :key="users.length"
@@ -268,9 +461,12 @@ onMounted(fetchUsers)
         :items="filteredUsers"
         :loading="loading"
         :search="search"
+        v-model="selectedUsers"
         item-value="id"
+        show-select
         hover
-        class="elevation-0"
+        class="elevation-0 cursor-pointer-rows"
+        @click:row="(_event: any, { item }: any) => viewUser(item)"
       >
         <!-- Name with Avatar -->
         <template #item.fullName="{ item }">
@@ -340,21 +536,31 @@ onMounted(fetchUsers)
                 variant="text"
                 size="small"
                 v-bind="props"
+                @click.stop
               />
             </template>
-            <v-list density="compact" min-width="150">
+            <v-list density="compact" min-width="180">
               <!-- View -->
-              <v-list-item @click="viewUser(item)" prepend-icon="mdi-eye">
+              <v-list-item @click.stop="viewUser(item)" prepend-icon="mdi-eye">
                 <v-list-item-title>View</v-list-item-title>
               </v-list-item>
 
               <!-- Edit -->
               <v-list-item
                 v-if="canEdit('users')"
-                @click="editUser(item)"
+                @click.stop="editUser(item)"
                 prepend-icon="mdi-pencil"
               >
-                <v-list-item-title>Edit</v-list-item-title>
+                <v-list-item-title>Edit Profile</v-list-item-title>
+              </v-list-item>
+
+              <!-- Manage Access -->
+              <v-list-item
+                v-if="canEdit('users')"
+                @click.stop="manageAccess(item)"
+                prepend-icon="mdi-shield-account"
+              >
+                <v-list-item-title>Manage Access</v-list-item-title>
               </v-list-item>
 
               <!-- Divider before Delete -->
@@ -406,4 +612,10 @@ onMounted(fetchUsers)
     </v-dialog>
   </div>
 </template>
+
+<style scoped>
+:deep(.cursor-pointer-rows tbody tr) {
+  cursor: pointer;
+}
+</style>
 

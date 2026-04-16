@@ -34,7 +34,7 @@ import { JwtAuthGuard } from './auth/guards';
     }),
     // Rate limiting
     ThrottlerModule.forRoot([
-      { name: 'short', ttl: 1000, limit: 3 },
+      { name: 'short', ttl: 1000, limit: 15 },  // Phase FW-1: raised from 3 — dashboard fires up to 11 parallel calls
       { name: 'medium', ttl: 10000, limit: 20 },
       { name: 'long', ttl: 60000, limit: 100 },
     ]),

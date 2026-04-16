@@ -70,6 +70,15 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // Phase HT: Google OAuth token-based login (Directive 208)
+  async function loginWithToken(accessToken: string): Promise<void> {
+    token.value = accessToken
+    if (import.meta.client) {
+      localStorage.setItem('access_token', accessToken)
+    }
+    await fetchCurrentUser()
+  }
+
   function hasPermission(permission: string): boolean {
     if (!user.value) return false
     if (user.value.isSuperAdmin) return true
@@ -97,6 +106,7 @@ export const useAuthStore = defineStore('auth', () => {
     userEmail,
     // Actions
     login,
+    loginWithToken,
     logout,
     fetchCurrentUser,
     hasPermission,

@@ -138,8 +138,8 @@ async function handleSubmit() {
       }
     }
 
-    toast.success('User created successfully')
-    router.push(`/users/detail-${response.id}`)
+    toast.success('User created. Configure module access and permissions below.')
+    router.push(`/users/edit-${response.id}`)
   } catch (err: unknown) {
     const apiError = err as { message?: string }
     toast.error(apiError.message || 'Failed to create user')

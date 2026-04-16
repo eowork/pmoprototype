@@ -7,9 +7,9 @@ import * as directives from 'vuetify/directives'
 const csuTheme = {
   dark: false,
   colors: {
-    primary: '#009900',    // CSU Green
+    primary: '#003300',     // CSU Emerald
     secondary: '#f9dc07',  // CSU Gold
-    accent: '#ff9900',     // CSU Orange
+    accent: '#f9dc07',     // CSU Yellow
     error: '#FF5252',
     info: '#2196F3',
     success: '#4CAF50',

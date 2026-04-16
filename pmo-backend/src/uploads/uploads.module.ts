@@ -12,7 +12,7 @@ import { StorageService } from './storage/storage.service';
     MulterModule.register({
       storage: memoryStorage(),
       limits: {
-        fileSize: 10 * 1024 * 1024, // 10MB
+        fileSize: 25 * 1024 * 1024, // 25MB
         files: 5,
       },
     }),

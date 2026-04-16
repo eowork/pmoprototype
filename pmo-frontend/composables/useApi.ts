@@ -102,6 +102,40 @@ export function useApi() {
     return request<T>(endpoint, { method: 'DELETE' })
   }
 
+  // Phase HL: File upload via FormData (Directive 143)
+  async function upload<T>(endpoint: string, formData: FormData): Promise<T> {
+    loading.value = true
+    error.value = null
+    try {
+      const token = import.meta.client ? localStorage.getItem('access_token') : null
+      const baseUrl = config.public.apiBase
+      const response = await fetch(`${baseUrl}${endpoint}`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          ...(token && { Authorization: `Bearer ${token}` }),
+        },
+      })
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type') || ''
+        const errorData = contentType.includes('application/json')
+          ? await response.json().catch(() => ({}))
+          : {}
+        throw {
+          message: errorData.message || `Upload error ${response.status}`,
+          statusCode: response.status,
+        }
+      }
+      return await response.json()
+    } catch (err) {
+      const apiError = err as ApiError
+      error.value = apiError
+      throw apiError
+    } finally {
+      loading.value = false
+    }
+  }
+
   return {
     loading,
     error,
@@ -111,5 +145,6 @@ export function useApi() {
     put,
     patch,
     del,
+    upload,
   }
 }

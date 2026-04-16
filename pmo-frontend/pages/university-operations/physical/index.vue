@@ -94,10 +94,23 @@ const PILLARS = [
   },
 ] as const
 
+// Phase HN: Pillar-based tab visibility (Directive 158)
+const visiblePillars = computed(() => {
+  if (isAdmin.value || isSuperAdmin.value) return PILLARS
+  const assignments = authStore.user?.pillarAssignments ?? []
+  if (assignments.length === 0) return PILLARS // no restriction if unassigned
+  return PILLARS.filter(p => assignments.includes(p.id))
+})
+
 // State
 // Phase DW-C: selectedFiscalYear now comes from fiscalYearStore (storeToRefs)
 // Phase DW-A: Remove ALL; default to Q1; Q4 = Final Year Projection
-const selectedQuarter = ref<string>('Q1')
+// Phase GA-3: Read quarter from URL query for deep-link support (Directive 222)
+const selectedQuarter = ref<string>(
+  (route.query.quarter as string) && ['Q1', 'Q2', 'Q3', 'Q4'].includes(route.query.quarter as string)
+    ? (route.query.quarter as string)
+    : 'Q1'
+)
 const activePillar = ref<string>(
   (route.query.pillar as string) && PILLARS.some(p => p.id === route.query.pillar)
     ? (route.query.pillar as string)
@@ -144,6 +157,24 @@ const selectedIndicator = ref<any>(null)
 const entryForm = ref<any>({})
 const saving = ref(false)
 
+// Phase FJ: Prior-quarter prefill state
+const wasPrefilled = ref(false)
+const prefillSourceQ = ref<string | null>(null)
+const PRIOR_QUARTER_MAP: Record<string, string | null> = {
+  Q1: null, Q2: 'Q1', Q3: 'Q2', Q4: 'Q3',
+}
+
+// Phase FM-1: Check if a record has all data fields empty (null/zero/empty string)
+function isRecordEffectivelyEmpty(data: any): boolean {
+  if (!data) return true
+  const fields = [
+    'target_q1', 'target_q2', 'target_q3', 'target_q4',
+    'accomplishment_q1', 'accomplishment_q2', 'accomplishment_q3', 'accomplishment_q4',
+    'score_q1', 'score_q2', 'score_q3', 'score_q4',
+  ]
+  return fields.every(f => data[f] == null || data[f] === '' || data[f] === 0)
+}
+
 // Phase GOV-UI: Governance dialogs for post-publication editing
 const publishedEditWarningDialog = ref(false)
 const pendingEditIndicator = ref<any>(null)
@@ -184,7 +215,7 @@ const currentQuarterStatus = computed(() => {
 const unitTypeConfig: Record<string, { suffix: string; color: string; icon: string; label: string; title: string }> = {
   PERCENTAGE: { suffix: '%', color: 'blue', icon: 'mdi-percent', label: 'PCT', title: 'Percentage' },
   COUNT: { suffix: '', color: 'green', icon: 'mdi-counter', label: 'CNT', title: 'Count' },
-  WEIGHTED_COUNT: { suffix: 'pts', color: 'orange', icon: 'mdi-scale-balance', label: 'WGT', title: 'Weighted Count' },
+  WEIGHTED_COUNT: { suffix: '', color: 'orange', icon: 'mdi-scale-balance', label: 'WGT', title: 'Weighted Count' },
 }
 
 function getUnitConfig(unitType: string) {
@@ -233,6 +264,15 @@ function getIndicatorData(taxonomyId: string) {
   return pillarIndicators.value.find(i => i.pillar_indicator_id === taxonomyId) || null
 }
 
+// Phase FM-1: Check if prior-quarter prefill is available for an indicator
+// Prefill available when current quarter has no record OR has an empty record
+function hasPrefillAvailable(taxonomyId: string): boolean {
+  const priorQ = PRIOR_QUARTER_MAP[selectedQuarter.value]
+  if (!priorQ) return false
+  const data = getIndicatorData(taxonomyId)
+  return data === null || isRecordEffectivelyEmpty(data)
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Phase DQ-A: Decoupled Data Fetching Architecture
 // Taxonomy (static, pillar-based) is fetched SEPARATELY from indicator data
@@ -276,13 +316,15 @@ async function fetchIndicatorData() {
   }
 
   try {
+    // Phase FL-3: Pass quarter to fetch — per-quarter record isolation
     const indicatorsRes = await api.get<any[]>(
-      `/api/university-operations/indicators?pillar_type=${activePillar.value}&fiscal_year=${selectedFiscalYear.value}`
+      `/api/university-operations/indicators?pillar_type=${activePillar.value}&fiscal_year=${selectedFiscalYear.value}&quarter=${selectedQuarter.value}`
     )
     pillarIndicators.value = Array.isArray(indicatorsRes) ? indicatorsRes : (indicatorsRes as any)?.data || []
     console.log('[Physical] Indicator data fetched:', {
       pillar: activePillar.value,
       fiscalYear: selectedFiscalYear.value,
+      quarter: selectedQuarter.value,
       count: pillarIndicators.value.length,
     })
   } catch (err: any) {
@@ -326,34 +368,19 @@ async function fetchPillarData() {
   loading.value = false
 }
 
-// Find or identify current operation
+// Phase HU: Use pillar-operation endpoint — no ownership filter, correct for display context (Directive 211)
 async function findCurrentOperation() {
   try {
-    // Phase DL-D: Diagnostic logging for operation lookup
     console.log('[Physical] findCurrentOperation: Searching for', {
       operation_type: activePillar.value,
       fiscal_year: selectedFiscalYear.value,
-      fiscal_year_type: typeof selectedFiscalYear.value,
     });
 
-    // Phase EK-C: Add filters to avoid pagination miss
-    const response = await api.get<any>(
-      `/api/university-operations?type=${activePillar.value}&fiscal_year=${selectedFiscalYear.value}&limit=100`
-    )
-    const data = Array.isArray(response) ? response : (response?.data || [])
+    const found = await api.get<any>(
+      `/api/university-operations/pillar-operation?pillar_type=${activePillar.value}&fiscal_year=${selectedFiscalYear.value}`
+    ).catch(() => null)
 
-    console.log('[Physical] findCurrentOperation: Available operations:', data.map((op: any) => ({
-      id: op.id,
-      operation_type: op.operation_type,
-      fiscal_year: op.fiscal_year,
-      fiscal_year_type: typeof op.fiscal_year,
-      title: op.title,
-    })));
-
-    // Phase DL-D: Type-safe comparison (convert both to numbers)
-    currentOperation.value = data.find(
-      (op: any) => op.operation_type === activePillar.value && Number(op.fiscal_year) === Number(selectedFiscalYear.value)
-    ) || null
+    currentOperation.value = found
 
     console.log('[Physical] findCurrentOperation: Result:', currentOperation.value ? {
       id: currentOperation.value.id,
@@ -441,6 +468,79 @@ function getRateColor(rate: number | null | undefined): string {
 function getVarianceColor(variance: number | null | undefined): string {
   if (variance === null || variance === undefined) return 'grey'
   return variance >= 0 ? 'success' : 'error'
+}
+
+
+// Phase HG: Unified column visibility config (Directives 107–110)
+const columnVisibility = reactive({
+  score: false,
+  remarks: false,
+  catch_up_plans: false,
+  facilitating_factors: false,
+  ways_forward: false,
+  mov: false,
+})
+
+// Phase HK: Stacked panel visibility guard (Directive 138)
+const anyNarrativeVisible = computed(() =>
+  columnVisibility.score || columnVisibility.remarks || columnVisibility.catch_up_plans || columnVisibility.facilitating_factors || columnVisibility.ways_forward || columnVisibility.mov
+)
+
+// Phase HK: Colspan = 13 base + edit col (Directive 136)
+const narrativeRowColspan = computed(() => {
+  let n = 13 // Indicator(1) + Q cols(8) + Totals(2) + Variance(1) + Rate(1)
+  if (canEditData()) n++
+  return n
+})
+
+// Phase HL: MOV type-selector state (Directive 146)
+const movType = ref<'text' | 'link' | 'file'>('text')
+const movValue = ref('')
+const movUploading = ref(false)
+const movFileMetadata = ref<{ filename: string; size: number; mimeType: string } | null>(null)
+const movFileInputRef = ref<HTMLInputElement | null>(null)
+
+function parseMov(raw: string | null | undefined): { type: 'text' | 'link' | 'file'; value: string; metadata: any } {
+  if (!raw) return { type: 'text', value: '', metadata: null }
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed.type && parsed.value !== undefined) return { type: parsed.type, value: parsed.value, metadata: parsed.metadata || null }
+  } catch {}
+  return { type: 'text', value: raw, metadata: null }
+}
+
+function serializeMov(): string | null {
+  if (!movValue.value && movType.value !== 'file') return null
+  const obj: any = { type: movType.value, value: movValue.value }
+  if (movType.value === 'file' && movFileMetadata.value) obj.metadata = movFileMetadata.value
+  return JSON.stringify(obj)
+}
+
+watch(movType, () => { movValue.value = ''; movFileMetadata.value = null })
+
+async function handleMovFileUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!input.files?.[0]) return
+  const file = input.files[0]
+  const MAX_UPLOAD_BYTES = 25 * 1024 * 1024 // 25MB
+  if (file.size > MAX_UPLOAD_BYTES) {
+    toast.error(`File too large. Maximum allowed size is 25MB (selected file: ${(file.size / 1024 / 1024).toFixed(1)}MB)`)
+    if (input) input.value = ''
+    return
+  }
+  const formData = new FormData()
+  formData.append('file', file)
+  movUploading.value = true
+  try {
+    const response = await api.upload<{ filePath: string; originalName: string; fileSize: number; mimeType: string }>('/api/uploads', formData)
+    movValue.value = response.filePath
+    movFileMetadata.value = { filename: response.originalName, size: response.fileSize, mimeType: response.mimeType }
+  } catch (err: any) {
+    toast.error(err.message || 'File upload failed')
+  } finally {
+    movUploading.value = false
+    if (input) input.value = ''
+  }
 }
 
 // Publication status helpers
@@ -560,7 +660,8 @@ function confirmPublishedEdit() {
 }
 
 // Phase GOV-UI: Internal helper — opens entry dialog without governance checks
-function openEntryDialogDirect(indicator: any) {
+// Phase FL-4: Made async for per-quarter prefill (API fetch of prior quarter's record)
+async function openEntryDialogDirect(indicator: any) {
   selectedIndicator.value = indicator
   const existingData = getIndicatorData(indicator.id)
 
@@ -570,29 +671,138 @@ function openEntryDialogDirect(indicator: any) {
     taxonomyName: indicator.indicator_name,
     existingData: existingData,
     existingDataId: existingData?.id,
+    quarter: selectedQuarter.value,
     pillarIndicatorsCount: pillarIndicators.value.length,
   })
 
-  entryForm.value = {
-    pillar_indicator_id: indicator.id,
-    fiscal_year: selectedFiscalYear.value,
-    target_q1: existingData?.target_q1 ?? null,
-    target_q2: existingData?.target_q2 ?? null,
-    target_q3: existingData?.target_q3 ?? null,
-    target_q4: existingData?.target_q4 ?? null,
-    accomplishment_q1: existingData?.accomplishment_q1 ?? null,
-    accomplishment_q2: existingData?.accomplishment_q2 ?? null,
-    accomplishment_q3: existingData?.accomplishment_q3 ?? null,
-    accomplishment_q4: existingData?.accomplishment_q4 ?? null,
-    score_q1: existingData?.score_q1 || '',
-    score_q2: existingData?.score_q2 || '',
-    score_q3: existingData?.score_q3 || '',
-    score_q4: existingData?.score_q4 || '',
-    remarks: existingData?.remarks || '',
-    _existingId: existingData?.id || null,
+  // Phase FM-1: Per-quarter record model — prefill from prior quarter's record
+  // Empty records (all data fields null) still allow prior-quarter reference
+  wasPrefilled.value = false
+  prefillSourceQ.value = null
+
+  const needsPrefill = !existingData || isRecordEffectivelyEmpty(existingData)
+
+  if (existingData && !needsPrefill) {
+    // Current quarter has a populated record — load it directly
+    entryForm.value = {
+      pillar_indicator_id: indicator.id,
+      fiscal_year: selectedFiscalYear.value,
+      target_q1: existingData.target_q1 ?? null,
+      target_q2: existingData.target_q2 ?? null,
+      target_q3: existingData.target_q3 ?? null,
+      target_q4: existingData.target_q4 ?? null,
+      accomplishment_q1: existingData.accomplishment_q1 ?? null,
+      accomplishment_q2: existingData.accomplishment_q2 ?? null,
+      accomplishment_q3: existingData.accomplishment_q3 ?? null,
+      accomplishment_q4: existingData.accomplishment_q4 ?? null,
+      score_q1: existingData.score_q1 || '',
+      score_q2: existingData.score_q2 || '',
+      score_q3: existingData.score_q3 || '',
+      score_q4: existingData.score_q4 || '',
+      remarks: existingData.remarks || '',
+      // Phase HE: APR/UPR narrative fields (Directive 386)
+      catch_up_plan: existingData.catch_up_plan || '',
+      facilitating_factors: existingData.facilitating_factors || '',
+      ways_forward: existingData.ways_forward || '',
+      // Phase HK: MOV field (Directive 140)
+      mov: existingData.mov || '',
+      // Phase GY/GZ: Annual-only overrides (Directive 359)
+      override_rate: existingData.override_rate ?? null,
+      override_variance: existingData.override_variance ?? null,
+      // Phase HA: Total overrides (Directive 371)
+      override_total_target: existingData.override_total_target ?? null,
+      override_total_actual: existingData.override_total_actual ?? null,
+      _existingId: existingData.id || null,
+    }
+  } else {
+    // No record OR empty record — check for prior quarter prefill
+    // Preserve _existingId if empty record exists (PATCH to update, not POST duplicate)
+    const preservedId = existingData?.id || null
+    const priorQ = PRIOR_QUARTER_MAP[selectedQuarter.value]
+    let priorData: any = null
+
+    if (priorQ) {
+      try {
+        const priorIndicators = await api.get<any[]>(
+          `/api/university-operations/indicators?pillar_type=${activePillar.value}&fiscal_year=${selectedFiscalYear.value}&quarter=${priorQ}`
+        )
+        const priorList = Array.isArray(priorIndicators) ? priorIndicators : (priorIndicators as any)?.data || []
+        priorData = priorList.find((i: any) => i.pillar_indicator_id === indicator.id) || null
+        console.log('[Physical] Prior quarter prefill lookup:', {
+          priorQ,
+          found: !!priorData,
+          priorDataId: priorData?.id,
+          emptyRecordId: preservedId,
+        })
+      } catch (err) {
+        console.warn('[Physical] Prior quarter fetch failed, starting empty:', err)
+      }
+    }
+
+    if (priorData) {
+      // Deep-copy ALL 12 columns from prior quarter's record as starting point
+      entryForm.value = {
+        pillar_indicator_id: indicator.id,
+        fiscal_year: selectedFiscalYear.value,
+        target_q1: priorData.target_q1 ?? null,
+        target_q2: priorData.target_q2 ?? null,
+        target_q3: priorData.target_q3 ?? null,
+        target_q4: priorData.target_q4 ?? null,
+        accomplishment_q1: priorData.accomplishment_q1 ?? null,
+        accomplishment_q2: priorData.accomplishment_q2 ?? null,
+        accomplishment_q3: priorData.accomplishment_q3 ?? null,
+        accomplishment_q4: priorData.accomplishment_q4 ?? null,
+        score_q1: priorData.score_q1 || '',
+        score_q2: priorData.score_q2 || '',
+        score_q3: priorData.score_q3 || '',
+        score_q4: priorData.score_q4 || '',
+        remarks: priorData.remarks || '',
+        // Phase HE: Do not inherit prior quarter's narrative fields (Directive 386)
+        catch_up_plan: '',
+        facilitating_factors: '',
+        ways_forward: '',
+        // Phase HK: MOV not inherited from prior quarter (Directive 142)
+        mov: '',
+        override_rate: null,
+        override_variance: null,
+        // Phase HA: Do not inherit prior quarter's total overrides (Directive 371)
+        override_total_target: null,
+        override_total_actual: null,
+        _existingId: preservedId,
+      }
+      wasPrefilled.value = true
+      prefillSourceQ.value = priorQ
+    } else {
+      // No prior data — start with empty form
+      entryForm.value = {
+        pillar_indicator_id: indicator.id,
+        fiscal_year: selectedFiscalYear.value,
+        target_q1: null, target_q2: null, target_q3: null, target_q4: null,
+        accomplishment_q1: null, accomplishment_q2: null, accomplishment_q3: null, accomplishment_q4: null,
+        score_q1: '', score_q2: '', score_q3: '', score_q4: '',
+        remarks: '',
+        // Phase HE: APR/UPR narrative fields (Directive 386)
+        catch_up_plan: '',
+        facilitating_factors: '',
+        ways_forward: '',
+        // Phase HK: MOV default empty (Directive 140)
+        mov: '',
+        override_rate: null,
+        override_variance: null,
+        // Phase HA: Total overrides default to null (Directive 371)
+        override_total_target: null,
+        override_total_actual: null,
+        _existingId: preservedId,
+      }
+    }
   }
 
   // Phase DT-A: Tab navigation removed — all quarters shown simultaneously
+  // Phase HL: Initialize MOV type-selector from stored JSON (Directive 146)
+  const movParsed = parseMov(entryForm.value.mov || null)
+  movType.value = movParsed.type
+  movValue.value = movParsed.value
+  movFileMetadata.value = movParsed.metadata
   entryDialog.value = true
 }
 
@@ -613,12 +823,15 @@ function sanitizeNumericPayload(data: any): any {
     'accomplishment_q2',
     'accomplishment_q3',
     'accomplishment_q4',
+    'override_total_target',
+    'override_total_actual',
   ]
 
   const sanitized = { ...data }
 
   numericFields.forEach(field => {
-    if (sanitized[field] === '') {
+    const val = sanitized[field]
+    if (val === '' || val === null || (typeof val === 'number' && isNaN(val))) {
       sanitized[field] = null
     }
   })
@@ -674,25 +887,36 @@ async function saveQuarterlyData() {
 
     const { _existingId } = entryForm.value
 
-    // Phase DT-B: Full 12-field payload — entryForm loaded from DB so all fields safe to send
+    // Phase FL-1: Full 12-field payload — record-level isolation via per-quarter DB records
+    // Each quarter has its own independent record; all columns are editable
     const quarterPayload: any = {
       pillar_indicator_id: entryForm.value.pillar_indicator_id,
       fiscal_year: entryForm.value.fiscal_year,
-      // Phase GOV-FIX: reported_quarter enables validateOperationEditable quarterly lock + autoRevertQuarterlyReport
       reported_quarter: selectedQuarter.value,
       target_q1: entryForm.value.target_q1,
-      accomplishment_q1: entryForm.value.accomplishment_q1,
-      score_q1: entryForm.value.score_q1,
       target_q2: entryForm.value.target_q2,
-      accomplishment_q2: entryForm.value.accomplishment_q2,
-      score_q2: entryForm.value.score_q2,
       target_q3: entryForm.value.target_q3,
-      accomplishment_q3: entryForm.value.accomplishment_q3,
-      score_q3: entryForm.value.score_q3,
       target_q4: entryForm.value.target_q4,
+      accomplishment_q1: entryForm.value.accomplishment_q1,
+      accomplishment_q2: entryForm.value.accomplishment_q2,
+      accomplishment_q3: entryForm.value.accomplishment_q3,
       accomplishment_q4: entryForm.value.accomplishment_q4,
+      score_q1: entryForm.value.score_q1,
+      score_q2: entryForm.value.score_q2,
+      score_q3: entryForm.value.score_q3,
       score_q4: entryForm.value.score_q4,
       remarks: entryForm.value.remarks,
+      // Phase HE: APR/UPR narrative fields (Directive 386)
+      catch_up_plan: entryForm.value.catch_up_plan?.trim() || null,
+      facilitating_factors: entryForm.value.facilitating_factors?.trim() || null,
+      ways_forward: entryForm.value.ways_forward?.trim() || null,
+      // Phase HK → Phase HL: MOV field — serialize from type-selector (Directive 146)
+      mov: serializeMov(),
+      override_rate: entryForm.value.override_rate,
+      override_variance: entryForm.value.override_variance,
+      // Phase HA: Total overrides (Directive 373)
+      override_total_target: entryForm.value.override_total_target,
+      override_total_actual: entryForm.value.override_total_actual,
     }
 
     // Phase DV-A: Sanitize empty strings to null for numeric fields
@@ -782,8 +1006,7 @@ async function saveQuarterlyData() {
   }
 }
 
-// Phase DO-A: BAR1 Standard — ALL indicator types use SUM aggregation
-// Total = sum of all quarterly values (Q1 + Q2 + Q3 + Q4)
+// Phase FY-1: DBM BAR1 standard — ALL indicator types use SUM (Directive 211/212)
 const computedPreview = computed(() => {
   const f = entryForm.value
   const targets = [f.target_q1, f.target_q2, f.target_q3, f.target_q4]
@@ -794,14 +1017,21 @@ const computedPreview = computed(() => {
   const totalTarget = targets.length > 0
     ? targets.reduce((a, b) => Number(a) + Number(b), 0)
     : null
-
   const totalActual = actuals.length > 0
     ? actuals.reduce((a, b) => Number(a) + Number(b), 0)
     : null
 
-  const variance = totalTarget !== null && totalActual !== null ? totalActual - totalTarget : null
-  const rate = totalTarget !== null && totalTarget !== 0 && totalActual !== null
-    ? (totalActual / totalTarget) * 100
+  // Phase HA: Apply override totals as effective base for variance/rate (Directive 374)
+  const effectiveTarget = (f.override_total_target != null && f.override_total_target !== '')
+    ? Number(f.override_total_target)
+    : totalTarget
+  const effectiveActual = (f.override_total_actual != null && f.override_total_actual !== '')
+    ? Number(f.override_total_actual)
+    : totalActual
+
+  const variance = effectiveTarget !== null && effectiveActual !== null ? effectiveActual - effectiveTarget : null
+  const rate = effectiveTarget !== null && effectiveTarget !== 0 && effectiveActual !== null
+    ? (effectiveActual / effectiveTarget) * 100
     : null
 
   return { totalTarget, totalActual, variance, rate }
@@ -926,13 +1156,19 @@ watch(selectedFiscalYear, async (newYear) => {
   loading.value = false
 })
 
-// Phase EM-C: Watch quarter changes — refetch quarterly report
+// Phase FL-3: Watch quarter changes — reload indicator data + quarterly report
+// Per-quarter record isolation: each quarter has its own DB records
 watch(selectedQuarter, async () => {
+  await fetchIndicatorData()
   await fetchQuarterlyReport()
 })
 
 // Phase DW-C: Fix race condition - await fiscal year fetch before indicator data
 onMounted(async () => {
+  // Phase HN: If current activePillar not in visiblePillars, select first visible
+  if (!visiblePillars.value.some(p => p.id === activePillar.value)) {
+    activePillar.value = visiblePillars.value[0]?.id ?? PILLARS[0].id
+  }
   // Ensure fiscal year is initialized before fetching pillar data
   await fiscalYearStore.fetchFiscalYears()
   await fetchPillarData()
@@ -947,8 +1183,8 @@ onMounted(async () => {
 
 <template>
   <div>
-    <!-- Header -->
-    <div class="d-flex flex-column flex-sm-row justify-space-between align-start align-sm-center mb-4 ga-3">
+    <!-- Row 1: Title + Submit/Status (Phase HK-1 — Directive 133) -->
+    <div class="d-flex align-center ga-3 mb-2" style="justify-content: space-between">
       <div class="d-flex align-center ga-3">
         <v-btn icon="mdi-arrow-left" variant="text" @click="goBack" />
         <div>
@@ -960,76 +1196,16 @@ onMounted(async () => {
           </p>
         </div>
       </div>
-      <!-- Phase EM-D: Expanded max-width to 760px for breathing room with all controls -->
-      <div class="d-flex flex-column flex-sm-row align-stretch align-sm-center ga-2 ga-sm-3" style="width: 100%; max-width: 760px">
-        <!-- Phase EE-D: Quarter Selector — tooltip removed (v-tooltip on v-select causes persistent display) -->
-        <v-select
-          v-model="selectedQuarter"
-          :items="quarterOptions"
-          item-title="title"
-          item-value="value"
-          label="Reporting Period"
-          variant="outlined"
-          density="compact"
-          hide-details
-          class="flex-sm-0-0-auto"
-          style="width: 100%; max-width: 200px"
-          prepend-inner-icon="mdi-calendar-range"
-        />
-        <!-- Fiscal Year Selector -->
-        <v-select
-          v-model="selectedFiscalYear"
-          :items="fiscalYearOptions"
-          label="Fiscal Year"
-          variant="outlined"
-          density="compact"
-          hide-details
-          class="flex-sm-0-0-auto"
-          style="width: 100%; max-width: 170px"
-          prepend-inner-icon="mdi-calendar"
-        />
-        <!-- Phase EO-F: Export menu (before Submit per header control order spec) -->
-        <v-menu>
-          <template v-slot:activator="{ props }">
-            <v-btn
-              color="primary"
-              variant="outlined"
-              density="compact"
-              prepend-icon="mdi-file-export"
-              class="flex-sm-0-0-auto"
-              v-bind="props"
-            >
-              <span class="d-none d-sm-inline">Export</span>
-              <v-icon class="d-sm-none">mdi-file-export</v-icon>
-            </v-btn>
-          </template>
-          <v-list density="compact">
-            <v-list-item disabled>
-              <template v-slot:prepend>
-                <v-icon>mdi-file-pdf-box</v-icon>
-              </template>
-              <v-list-item-title>Export to PDF</v-list-item-title>
-              <v-list-item-subtitle class="text-caption">Coming soon</v-list-item-subtitle>
-            </v-list-item>
-            <v-list-item disabled>
-              <template v-slot:prepend>
-                <v-icon>mdi-file-excel</v-icon>
-              </template>
-              <v-list-item-title>Export to Excel</v-list-item-title>
-              <v-list-item-subtitle class="text-caption">Coming soon</v-list-item-subtitle>
-            </v-list-item>
-          </v-list>
-        </v-menu>
-        <!-- Phase EO-F: Submit / status button (rightmost position) -->
+      <div class="d-flex align-center flex-wrap ga-2">
         <v-btn
           v-if="canSubmitAllPillars()"
           color="primary"
-          variant="tonal"
+          variant="flat"
           density="compact"
           :prepend-icon="currentQuarterlyReport?.publication_status === 'REJECTED' ? 'mdi-refresh' : 'mdi-send'"
           :loading="actionLoading"
           @click="submitAllPillarsForReview"
-          class="flex-sm-0-0-auto"
+          class="flex-shrink-0"
         >
           <span class="d-none d-sm-inline">{{ currentQuarterlyReport?.publication_status === 'REJECTED' ? 'Resubmit' : 'Submit for Review' }}</span>
           <v-icon class="d-sm-none">{{ currentQuarterlyReport?.publication_status === 'REJECTED' ? 'mdi-refresh' : 'mdi-send' }}</v-icon>
@@ -1042,7 +1218,7 @@ onMounted(async () => {
           prepend-icon="mdi-undo"
           :loading="actionLoading"
           @click="withdrawAllPillarsSubmission"
-          class="flex-sm-0-0-auto"
+          class="flex-shrink-0"
         >
           <span class="d-none d-sm-inline">Withdraw Submission</span>
           <v-icon class="d-sm-none">mdi-undo</v-icon>
@@ -1054,7 +1230,7 @@ onMounted(async () => {
           density="compact"
           prepend-icon="mdi-clock-outline"
           disabled
-          class="flex-sm-0-0-auto"
+          class="flex-shrink-0"
         >
           <span class="d-none d-sm-inline">Pending Review</span>
           <v-icon class="d-sm-none">mdi-clock-outline</v-icon>
@@ -1065,13 +1241,102 @@ onMounted(async () => {
           variant="tonal"
           size="small"
           prepend-icon="mdi-check-circle"
-          class="flex-sm-0-0-auto"
+          class="flex-shrink-0"
         >
           Approved
         </v-chip>
-        <!-- Phase DW-C: "Add Fiscal Year" button moved to main university-operations page -->
       </div>
     </div>
+
+    <!-- Row 2: Controls — Quarter + FY + Columns + Export (Phase HK-1) -->
+    <div class="d-flex align-center flex-wrap ga-2 mb-4">
+      <v-select
+        v-model="selectedQuarter"
+        :items="quarterOptions"
+        item-title="title"
+        item-value="value"
+        label="Reporting Period"
+        variant="outlined"
+        density="compact"
+        hide-details
+        style="width: 200px"
+        prepend-inner-icon="mdi-calendar-range"
+      />
+      <v-select
+        v-model="selectedFiscalYear"
+        :items="fiscalYearOptions"
+        label="Fiscal Year"
+        variant="outlined"
+        density="compact"
+        hide-details
+        style="width: 170px"
+        prepend-inner-icon="mdi-calendar"
+      />
+      <!-- Phase HG: Column visibility toggle (Directive 108) -->
+      <v-menu :close-on-content-click="false" location="bottom end">
+        <template #activator="{ props }">
+          <v-btn v-bind="props" variant="outlined" density="compact" prepend-icon="mdi-table-column" class="flex-shrink-0">
+            <span class="d-none d-sm-inline">Columns</span>
+            <v-icon class="d-sm-none">mdi-table-column</v-icon>
+          </v-btn>
+        </template>
+        <v-list density="compact" min-width="210">
+          <v-list-subheader class="text-caption">Optional Columns</v-list-subheader>
+          <v-list-item>
+            <v-checkbox v-model="columnVisibility.score" label="Score" density="compact" hide-details color="primary" />
+          </v-list-item>
+          <v-list-item>
+            <v-checkbox v-model="columnVisibility.remarks" label="Remarks" density="compact" hide-details color="primary" />
+          </v-list-item>
+          <v-list-subheader class="text-caption">Narrative Fields (APR/UPR)</v-list-subheader>
+          <v-list-item>
+            <v-checkbox v-model="columnVisibility.catch_up_plans" label="Catch-Up Plans" density="compact" hide-details color="primary" />
+          </v-list-item>
+          <v-list-item>
+            <v-checkbox v-model="columnVisibility.facilitating_factors" label="Facilitating Factors" density="compact" hide-details color="primary" />
+          </v-list-item>
+          <v-list-item>
+            <v-checkbox v-model="columnVisibility.ways_forward" label="Ways Forward" density="compact" hide-details color="primary" />
+          </v-list-item>
+          <!-- Phase HK: MOV toggle under Verification subheader (Directive 139) -->
+          <v-list-subheader class="text-caption">Verification</v-list-subheader>
+          <v-list-item>
+            <v-checkbox v-model="columnVisibility.mov" label="Means of Verification (MOV)" density="compact" hide-details color="primary" />
+          </v-list-item>
+        </v-list>
+      </v-menu>
+      <v-menu>
+        <template v-slot:activator="{ props }">
+          <v-btn
+            variant="outlined"
+            density="compact"
+            prepend-icon="mdi-file-export"
+            class="flex-shrink-0"
+            v-bind="props"
+          >
+            <span class="d-none d-sm-inline">Export</span>
+            <v-icon class="d-sm-none">mdi-file-export</v-icon>
+          </v-btn>
+        </template>
+        <v-list density="compact">
+          <v-list-item disabled>
+            <template v-slot:prepend>
+              <v-icon>mdi-file-pdf-box</v-icon>
+            </template>
+            <v-list-item-title>Export to PDF</v-list-item-title>
+            <v-list-item-subtitle class="text-caption">Coming soon</v-list-item-subtitle>
+          </v-list-item>
+          <v-list-item disabled>
+            <template v-slot:prepend>
+              <v-icon>mdi-file-excel</v-icon>
+            </template>
+            <v-list-item-title>Export to Excel</v-list-item-title>
+            <v-list-item-subtitle class="text-caption">Coming soon</v-list-item-subtitle>
+          </v-list-item>
+        </v-list>
+      </v-menu>
+    </div>
+    <!-- Phase DW-C: "Add Fiscal Year" button on main university-operations page -->
 
     <!-- Phase EO-B: Consolidated hero bar — single authoritative quarterly status -->
     <v-sheet v-if="currentPillar" rounded="lg" class="mb-4 pa-3 d-flex align-center justify-space-between flex-wrap ga-2" color="grey-lighten-4">
@@ -1180,7 +1445,7 @@ onMounted(async () => {
     <!-- Phase DR-C: Pillar Tabs with Full Program Names -->
     <v-card class="mb-4">
       <v-tabs v-model="activePillar" bg-color="primary" show-arrows class="pillar-tabs">
-        <v-tab v-for="pillar in PILLARS" :key="pillar.id" :value="pillar.id" class="pillar-tab">
+        <v-tab v-for="pillar in visiblePillars" :key="pillar.id" :value="pillar.id" class="pillar-tab">
           <v-icon start>{{ pillar.icon }}</v-icon>
           {{ pillar.fullName }}
         </v-tab>
@@ -1255,16 +1520,27 @@ onMounted(async () => {
           <v-expansion-panel-text>
             <div class="text-body-2">
               <p class="mb-2">
-                <strong>Reporting Structure:</strong> Each indicator collects Target and Actual values for all four quarters (Q1–Q4) within the fiscal year. The <em>Reporting Period</em> selector highlights the current quarter for quick reference but does not restrict data entry.
+                <strong>How It Works:</strong> Each quarter (Q1–Q4) stores your data as an independent record for that reporting period. When you select a quarter and save, only that quarter's record is affected — other quarters remain untouched.
               </p>
               <p class="mb-2">
-                <strong>How to Enter Data:</strong> Click any indicator row to open the data entry form. All four quarters are editable simultaneously — you may enter or update values for any quarter at any time.
+                <strong>Entering Data:</strong> 1) Select your reporting period using the Quarter dropdown. 2) Click any indicator row to open the data entry form. 3) Enter Target, Actual, and Score values for all four quarters — you can edit any column freely. 4) Click Save. Your data is saved to the selected quarter's record only.
               </p>
               <p class="mb-2">
-                <strong>Quarter Schedule:</strong> Q1 (Jan–Mar) · Q2 (Apr–Jun) · Q3 (Jul–Sep) · Q4 (Oct–Dec, Final Year Projection).
+                <strong>Prior-Quarter Reference:</strong> When you open an indicator in a new quarter with no existing data, the system automatically fills in values from the previous quarter as a starting point. You can edit these values before saving — they will not affect the previous quarter's record.
+              </p>
+              <p class="mb-2">
+                <strong>Quarter Schedule:</strong> Q1 (Jan–Mar) · Q2 (Apr–Jun) · Q3 (Jul–Sep) · Q4 (Oct–Dec)
+              </p>
+              <p class="mb-2">
+                <strong>Override Totals:</strong> The "Total Target" and "Total Actual" columns
+                show the sum of your Q1–Q4 entries by default. However, if the official BAR No. 1
+                report uses a different verified total (e.g., due to annual targets or official
+                adjustments), you can enter an override value in the entry dialog. When an override
+                is set, the table will display the official value instead of the auto-calculated sum.
+                Use this to ensure your entries match the submitted government report exactly.
               </p>
               <p class="mb-0">
-                <strong>Highlighted vs Dimmed:</strong> The highlighted quarter columns indicate the selected reporting period. Dimmed columns are still fully visible and their data is included in all computations (Total Target, Total Actual, Variance, Achievement Rate).
+                <strong>Submission &amp; Review:</strong> Once all indicators are complete for a quarter, submit for review using the Submit button. Your data goes through: Draft → Pending Review → Published. Published quarters are locked for editing unless unlocked by an administrator.
               </p>
             </div>
           </v-expansion-panel-text>
@@ -1279,6 +1555,7 @@ onMounted(async () => {
           <v-chip size="small" class="ml-2" color="primary" variant="tonal">
             {{ outcomeIndicators.length }}
           </v-chip>
+          <v-spacer />
         </v-card-title>
         <v-divider />
 
@@ -1286,12 +1563,18 @@ onMounted(async () => {
         <div v-if="outcomeIndicators.length > 0" class="responsive-table-wrapper">
           <v-table density="compact">
             <thead>
-              <tr class="bg-grey-lighten-4">
+              <tr class="bg-primary text-white">
                 <th class="text-left indicator-column" rowspan="2">Indicator</th>
                 <th v-for="q in QUARTERS" :key="q" colspan="2" class="text-center qgroup-header border-right-q" :class="{ 'q-active-group': q === selectedQuarter }">{{ q }}</th>
+                <!-- Phase GZ: Total Target + Total Actual columns (Directive 361) -->
+                <th class="text-center total-column" rowspan="2">Total Target</th>
+                <th class="text-center total-column" rowspan="2">Total Actual</th>
                 <th class="variance-column" rowspan="2">Variance</th>
                 <th class="rate-column" rowspan="2">Rate</th>
-                <th v-if="canEditData()" class="action-column" rowspan="2"></th>
+                <!-- Phase HL: Action column label (Directive 149) -->
+                <th v-if="canEditData()" class="action-column text-center" rowspan="2">
+                  <v-icon size="x-small" color="grey">mdi-pencil-outline</v-icon>
+                </th>
               </tr>
               <tr class="bg-grey-lighten-5">
                 <template v-for="q in QUARTERS" :key="q + '-sub'">
@@ -1301,9 +1584,8 @@ onMounted(async () => {
               </tr>
             </thead>
             <tbody>
+              <template v-for="indicator in outcomeIndicators" :key="indicator.id">
               <tr
-                v-for="indicator in outcomeIndicators"
-                :key="indicator.id"
                 class="cursor-pointer"
                 @click="canEditData() && openEntryDialog(indicator)"
               >
@@ -1346,6 +1628,14 @@ onMounted(async () => {
                     <td class="text-center qsub-cell" :class="qCellClass(q)">{{ formatNumber(getIndicatorData(indicator.id)?.[`target_${q.toLowerCase()}`]) }}{{ getUnitConfig(indicator.unit_type).suffix }}</td>
                     <td class="text-center qsub-cell text-success border-right-q" :class="qCellClass(q)">{{ formatNumber(getIndicatorData(indicator.id)?.[`accomplishment_${q.toLowerCase()}`]) }}{{ getUnitConfig(indicator.unit_type).suffix }}</td>
                   </template>
+                  <!-- Phase GZ: Total Target + Total Actual (Directive 361) -->
+                  <td class="text-center">
+                    {{ formatNumber(getIndicatorData(indicator.id)?.total_target) }}{{ getUnitConfig(indicator.unit_type).suffix }}
+                  </td>
+                  <td class="text-center text-success">
+                    {{ formatNumber(getIndicatorData(indicator.id)?.total_accomplishment) }}{{ getUnitConfig(indicator.unit_type).suffix }}
+                  </td>
+                  <!-- Phase GZ: Annual Variance + Rate (Directives 360, 363) -->
                   <td class="text-right">
                     <v-chip
                       size="x-small"
@@ -1365,7 +1655,8 @@ onMounted(async () => {
                     </v-chip>
                   </td>
                 </template>
-                <td v-else colspan="10" class="text-center">
+                <!-- Phase HK: No-data colspan (Directive 137) -->
+                <td v-else colspan="12" class="text-center">
                   <div class="no-data-hint pa-2">
                     <v-icon size="small" color="grey" class="mr-1">mdi-pencil-plus-outline</v-icon>
                     <span class="text-grey">Click row to enter quarterly data</span>
@@ -1375,8 +1666,71 @@ onMounted(async () => {
                   <v-btn icon="mdi-pencil" variant="text" size="x-small" @click.stop="openEntryDialog(indicator)" />
                 </td>
               </tr>
+              <!-- Phase HK: Below-row stacked panel — remarks + narratives + MOV (Directives 135, 138, 141) -->
+              <!-- Phase HL: Stacked panel click-to-edit (Directive 148) -->
+              <tr v-if="anyNarrativeVisible && getIndicatorData(indicator.id)" class="narrative-stacked-row" :class="{ 'cursor-pointer': canEditData() }" @click="canEditData() && openEntryDialog(indicator)">
+                <td :colspan="narrativeRowColspan" class="pa-0">
+                  <div class="narrative-stacked-panel">
+                    <div v-if="columnVisibility.score" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">Score:</span>
+                      <span class="narrative-stacked-text">
+                        Q1: {{ getIndicatorData(indicator.id)?.score_q1 || '—' }} |
+                        Q2: {{ getIndicatorData(indicator.id)?.score_q2 || '—' }} |
+                        Q3: {{ getIndicatorData(indicator.id)?.score_q3 || '—' }} |
+                        Q4: {{ getIndicatorData(indicator.id)?.score_q4 || '—' }}
+                      </span>
+                    </div>
+                    <div v-if="columnVisibility.remarks" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">Remarks:</span>
+                      <span v-if="getIndicatorData(indicator.id)?.remarks" class="narrative-stacked-text">{{ getIndicatorData(indicator.id)?.remarks }}</span>
+                      <span v-else class="text-grey text-caption">—</span>
+                    </div>
+                    <div v-if="columnVisibility.catch_up_plans" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">Catch-Up Plans:</span>
+                      <span v-if="getIndicatorData(indicator.id)?.catch_up_plan" class="narrative-stacked-text">{{ getIndicatorData(indicator.id)?.catch_up_plan }}</span>
+                      <span v-else class="text-grey text-caption">—</span>
+                    </div>
+                    <div v-if="columnVisibility.facilitating_factors" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">Facilitating Factors:</span>
+                      <span v-if="getIndicatorData(indicator.id)?.facilitating_factors" class="narrative-stacked-text">{{ getIndicatorData(indicator.id)?.facilitating_factors }}</span>
+                      <span v-else class="text-grey text-caption">—</span>
+                    </div>
+                    <div v-if="columnVisibility.ways_forward" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">Ways Forward:</span>
+                      <span v-if="getIndicatorData(indicator.id)?.ways_forward" class="narrative-stacked-text">{{ getIndicatorData(indicator.id)?.ways_forward }}</span>
+                      <span v-else class="text-grey text-caption">—</span>
+                    </div>
+                    <!-- Phase HL: Type-aware MOV display (Directive 147) -->
+                    <div v-if="columnVisibility.mov" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">MOV:</span>
+                      <template v-if="getIndicatorData(indicator.id)?.mov">
+                        <a v-if="parseMov(getIndicatorData(indicator.id).mov).type === 'link'"
+                           :href="parseMov(getIndicatorData(indicator.id).mov).value"
+                           target="_blank" rel="noopener" class="narrative-stacked-text text-primary"
+                           @click.stop>
+                          <v-icon size="x-small" class="mr-1">mdi-open-in-new</v-icon>
+                          {{ parseMov(getIndicatorData(indicator.id).mov).value }}
+                        </a>
+                        <span v-else-if="parseMov(getIndicatorData(indicator.id).mov).type === 'file'" class="narrative-stacked-text">
+                          <v-icon size="x-small" class="mr-1">mdi-file-check</v-icon>
+                          {{ parseMov(getIndicatorData(indicator.id).mov).metadata?.filename || parseMov(getIndicatorData(indicator.id).mov).value }}
+                        </span>
+                        <span v-else class="narrative-stacked-text">{{ parseMov(getIndicatorData(indicator.id).mov).value }}</span>
+                      </template>
+                      <span v-else class="text-grey text-caption">—</span>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              </template>
             </tbody>
           </v-table>
+
+          <!-- Phase FJ-3: Prefill availability notice for outcome indicators -->
+          <div v-if="outcomeIndicators.some(ind => hasPrefillAvailable(ind.id))" class="text-caption text-grey px-4 pb-2">
+            <v-icon size="x-small" color="info" class="mr-1">mdi-information-outline</v-icon>
+            {{ PRIOR_QUARTER_MAP[selectedQuarter] }} data available for some indicators — click a row to pre-fill {{ selectedQuarter }} values.
+          </div>
         </div>
 
         <v-card-text v-else class="text-center py-8">
@@ -1403,12 +1757,18 @@ onMounted(async () => {
         <div v-if="outputIndicators.length > 0" class="responsive-table-wrapper">
           <v-table density="compact">
             <thead>
-              <tr class="bg-grey-lighten-4">
+              <tr class="bg-primary text-white">
                 <th class="text-left indicator-column" rowspan="2">Indicator</th>
                 <th v-for="q in QUARTERS" :key="q" colspan="2" class="text-center qgroup-header border-right-q" :class="{ 'q-active-group': q === selectedQuarter }">{{ q }}</th>
+                <!-- Phase GZ: Total Target + Total Actual columns (Directive 361) -->
+                <th class="text-center total-column" rowspan="2">Total Target</th>
+                <th class="text-center total-column" rowspan="2">Total Actual</th>
                 <th class="variance-column" rowspan="2">Variance</th>
                 <th class="rate-column" rowspan="2">Rate</th>
-                <th v-if="canEditData()" class="action-column" rowspan="2"></th>
+                <!-- Phase HL: Action column label (Directive 149) -->
+                <th v-if="canEditData()" class="action-column text-center" rowspan="2">
+                  <v-icon size="x-small" color="grey">mdi-pencil-outline</v-icon>
+                </th>
               </tr>
               <tr class="bg-grey-lighten-5">
                 <template v-for="q in QUARTERS" :key="q + '-sub'">
@@ -1418,9 +1778,8 @@ onMounted(async () => {
               </tr>
             </thead>
             <tbody>
+              <template v-for="indicator in outputIndicators" :key="indicator.id">
               <tr
-                v-for="indicator in outputIndicators"
-                :key="indicator.id"
                 class="cursor-pointer"
                 @click="canEditData() && openEntryDialog(indicator)"
               >
@@ -1463,6 +1822,14 @@ onMounted(async () => {
                     <td class="text-center qsub-cell" :class="qCellClass(q)">{{ formatNumber(getIndicatorData(indicator.id)?.[`target_${q.toLowerCase()}`]) }}{{ getUnitConfig(indicator.unit_type).suffix }}</td>
                     <td class="text-center qsub-cell text-success border-right-q" :class="qCellClass(q)">{{ formatNumber(getIndicatorData(indicator.id)?.[`accomplishment_${q.toLowerCase()}`]) }}{{ getUnitConfig(indicator.unit_type).suffix }}</td>
                   </template>
+                  <!-- Phase GZ: Total Target + Total Actual (Directive 361) -->
+                  <td class="text-center">
+                    {{ formatNumber(getIndicatorData(indicator.id)?.total_target) }}{{ getUnitConfig(indicator.unit_type).suffix }}
+                  </td>
+                  <td class="text-center text-success">
+                    {{ formatNumber(getIndicatorData(indicator.id)?.total_accomplishment) }}{{ getUnitConfig(indicator.unit_type).suffix }}
+                  </td>
+                  <!-- Phase GZ: Annual Variance + Rate (Directives 360, 363) -->
                   <td class="text-right">
                     <v-chip
                       size="x-small"
@@ -1482,7 +1849,8 @@ onMounted(async () => {
                     </v-chip>
                   </td>
                 </template>
-                <td v-else colspan="10" class="text-center">
+                <!-- Phase HK: No-data colspan (Directive 137) -->
+                <td v-else colspan="12" class="text-center">
                   <div class="no-data-hint pa-2">
                     <v-icon size="small" color="grey" class="mr-1">mdi-pencil-plus-outline</v-icon>
                     <span class="text-grey">Click row to enter quarterly data</span>
@@ -1492,8 +1860,71 @@ onMounted(async () => {
                   <v-btn icon="mdi-pencil" variant="text" size="x-small" @click.stop="openEntryDialog(indicator)" />
                 </td>
               </tr>
+              <!-- Phase HK: Below-row stacked panel — remarks + narratives + MOV (Directives 135, 138, 141) -->
+              <!-- Phase HL: Stacked panel click-to-edit (Directive 148) -->
+              <tr v-if="anyNarrativeVisible && getIndicatorData(indicator.id)" class="narrative-stacked-row" :class="{ 'cursor-pointer': canEditData() }" @click="canEditData() && openEntryDialog(indicator)">
+                <td :colspan="narrativeRowColspan" class="pa-0">
+                  <div class="narrative-stacked-panel">
+                    <div v-if="columnVisibility.score" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">Score:</span>
+                      <span class="narrative-stacked-text">
+                        Q1: {{ getIndicatorData(indicator.id)?.score_q1 || '—' }} |
+                        Q2: {{ getIndicatorData(indicator.id)?.score_q2 || '—' }} |
+                        Q3: {{ getIndicatorData(indicator.id)?.score_q3 || '—' }} |
+                        Q4: {{ getIndicatorData(indicator.id)?.score_q4 || '—' }}
+                      </span>
+                    </div>
+                    <div v-if="columnVisibility.remarks" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">Remarks:</span>
+                      <span v-if="getIndicatorData(indicator.id)?.remarks" class="narrative-stacked-text">{{ getIndicatorData(indicator.id)?.remarks }}</span>
+                      <span v-else class="text-grey text-caption">—</span>
+                    </div>
+                    <div v-if="columnVisibility.catch_up_plans" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">Catch-Up Plans:</span>
+                      <span v-if="getIndicatorData(indicator.id)?.catch_up_plan" class="narrative-stacked-text">{{ getIndicatorData(indicator.id)?.catch_up_plan }}</span>
+                      <span v-else class="text-grey text-caption">—</span>
+                    </div>
+                    <div v-if="columnVisibility.facilitating_factors" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">Facilitating Factors:</span>
+                      <span v-if="getIndicatorData(indicator.id)?.facilitating_factors" class="narrative-stacked-text">{{ getIndicatorData(indicator.id)?.facilitating_factors }}</span>
+                      <span v-else class="text-grey text-caption">—</span>
+                    </div>
+                    <div v-if="columnVisibility.ways_forward" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">Ways Forward:</span>
+                      <span v-if="getIndicatorData(indicator.id)?.ways_forward" class="narrative-stacked-text">{{ getIndicatorData(indicator.id)?.ways_forward }}</span>
+                      <span v-else class="text-grey text-caption">—</span>
+                    </div>
+                    <!-- Phase HL: Type-aware MOV display (Directive 147) -->
+                    <div v-if="columnVisibility.mov" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">MOV:</span>
+                      <template v-if="getIndicatorData(indicator.id)?.mov">
+                        <a v-if="parseMov(getIndicatorData(indicator.id).mov).type === 'link'"
+                           :href="parseMov(getIndicatorData(indicator.id).mov).value"
+                           target="_blank" rel="noopener" class="narrative-stacked-text text-primary"
+                           @click.stop>
+                          <v-icon size="x-small" class="mr-1">mdi-open-in-new</v-icon>
+                          {{ parseMov(getIndicatorData(indicator.id).mov).value }}
+                        </a>
+                        <span v-else-if="parseMov(getIndicatorData(indicator.id).mov).type === 'file'" class="narrative-stacked-text">
+                          <v-icon size="x-small" class="mr-1">mdi-file-check</v-icon>
+                          {{ parseMov(getIndicatorData(indicator.id).mov).metadata?.filename || parseMov(getIndicatorData(indicator.id).mov).value }}
+                        </span>
+                        <span v-else class="narrative-stacked-text">{{ parseMov(getIndicatorData(indicator.id).mov).value }}</span>
+                      </template>
+                      <span v-else class="text-grey text-caption">—</span>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              </template>
             </tbody>
           </v-table>
+
+          <!-- Phase FJ-3: Prefill availability notice for output indicators -->
+          <div v-if="outputIndicators.some(ind => hasPrefillAvailable(ind.id))" class="text-caption text-grey px-4 pb-2">
+            <v-icon size="x-small" color="info" class="mr-1">mdi-information-outline</v-icon>
+            {{ PRIOR_QUARTER_MAP[selectedQuarter] }} data available for some indicators — click a row to pre-fill {{ selectedQuarter }} values.
+          </div>
         </div>
 
         <v-card-text v-else class="text-center py-8">
@@ -1509,7 +1940,8 @@ onMounted(async () => {
     <!-- Phase DW-C: Fiscal Year Creation Dialog moved to main university-operations page -->
 
     <!-- Phase DU-A: Quarterly Data Entry Dialog — Vertical Quarter-Row Table -->
-    <v-dialog v-model="entryDialog" max-width="700" persistent>
+    <!-- Phase HD: persistent removed — enables outside-click + ESC close (Directive 384) -->
+    <v-dialog v-model="entryDialog" max-width="700">
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon start>mdi-table-edit</v-icon>
@@ -1546,10 +1978,16 @@ onMounted(async () => {
             </div>
           </v-alert>
 
+          <!-- Phase FJ-2: Advisory notice when prior-quarter prefill occurred -->
+          <v-alert v-if="wasPrefilled" type="info" variant="tonal" class="mb-4" density="compact" closable>
+            <v-icon start size="small">mdi-content-copy</v-icon>
+            All values pre-filled from <strong>{{ prefillSourceQ }}</strong> record — edit freely. This will create a new {{ selectedQuarter }} record.
+          </v-alert>
+
           <!-- Phase DU-A: Vertical tabular data entry — rows = quarters, cols = T/A/S -->
           <v-table density="compact" class="mb-4">
             <thead>
-              <tr class="bg-grey-lighten-4">
+              <tr class="bg-primary text-white">
                 <th class="q-label-cell">Quarter</th>
                 <th class="text-center">Target</th>
                 <th class="text-center">Actual</th>
@@ -1557,6 +1995,7 @@ onMounted(async () => {
               </tr>
             </thead>
             <tbody>
+              <!-- Phase FL-1: All quarter fields are fully editable — record isolation at DB level -->
               <!-- Q1 -->
               <tr>
                 <td class="q-label-cell">
@@ -1572,7 +2011,7 @@ onMounted(async () => {
                 </td>
                 <td class="du-input-cell">
                   <v-text-field v-model="entryForm.score_q1" placeholder="e.g. 148/200"
-                    density="compact" variant="outlined" hide-details />
+                    maxlength="250" density="compact" variant="outlined" hide-details />
                 </td>
               </tr>
               <!-- Q2 -->
@@ -1590,7 +2029,7 @@ onMounted(async () => {
                 </td>
                 <td class="du-input-cell">
                   <v-text-field v-model="entryForm.score_q2" placeholder="e.g. 148/200"
-                    density="compact" variant="outlined" hide-details />
+                    maxlength="250" density="compact" variant="outlined" hide-details />
                 </td>
               </tr>
               <!-- Q3 -->
@@ -1608,7 +2047,7 @@ onMounted(async () => {
                 </td>
                 <td class="du-input-cell">
                   <v-text-field v-model="entryForm.score_q3" placeholder="e.g. 148/200"
-                    density="compact" variant="outlined" hide-details />
+                    maxlength="250" density="compact" variant="outlined" hide-details />
                 </td>
               </tr>
               <!-- Q4 -->
@@ -1626,30 +2065,24 @@ onMounted(async () => {
                 </td>
                 <td class="du-input-cell">
                   <v-text-field v-model="entryForm.score_q4" placeholder="e.g. 148/200"
-                    density="compact" variant="outlined" hide-details />
+                    maxlength="250" density="compact" variant="outlined" hide-details />
                 </td>
               </tr>
             </tbody>
           </v-table>
 
-          <!-- Remarks -->
-          <v-textarea
-            v-model="entryForm.remarks"
-            label="Remarks"
-            rows="2"
-            variant="outlined"
-            density="compact"
-            class="mb-3"
-          />
-
-          <!-- Annual Totals (Read-Only) -->
-          <v-card variant="outlined" class="bg-grey-lighten-4">
+          <!-- Phase HB: Annual Performance Summary (Directives 375–380) — Moved before remarks (HQ-8, Directive 180) -->
+          <v-card variant="outlined" class="bg-grey-lighten-4 mb-4">
             <v-card-text class="py-2">
-              <div class="text-subtitle-2 mb-1">
-                <v-icon start size="small">mdi-calculator</v-icon>
-                Annual Totals (Read-Only)
+              <!-- HB-1: Renamed header (Directive 375) -->
+              <div class="text-subtitle-2 mb-2">
+                <v-icon start size="small">mdi-chart-bar</v-icon>
+                Annual Performance Summary
               </div>
-              <div class="d-flex ga-4 flex-wrap">
+
+              <!-- HB-2: Group 1 — Auto-Calculated Values (Directive 376) -->
+              <div class="text-caption text-medium-emphasis font-weight-medium mb-1">Auto-Calculated Values</div>
+              <div class="d-flex ga-3 flex-wrap mb-2">
                 <v-chip variant="tonal" size="small">
                   Total Target: {{ formatNumber(computedPreview.totalTarget) }}
                 </v-chip>
@@ -1671,19 +2104,219 @@ onMounted(async () => {
                   Rate: {{ computedPreview.rate !== null ? formatPercent(computedPreview.rate) : '—' }}
                 </v-chip>
               </div>
+
+              <v-divider class="my-3" />
+
+              <!-- HB-2: Group 2 — Override Values (Directive 376) -->
+              <div class="text-caption text-medium-emphasis font-weight-medium mb-1">
+                Override Values
+                <span class="font-weight-regular ml-1">(Optional — use when official BAR1 values differ from system calculations)</span>
+              </div>
+
+              <!-- HB-3: 2-column grid, no max-width (Directives 377–379) -->
+              <v-row dense class="mt-1">
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model.number="entryForm.override_total_target"
+                    label="Override Total Target"
+                    type="number"
+                    step="0.01"
+                    :min="0"
+                    variant="outlined"
+                    density="compact"
+                    clearable
+                    hide-details="auto"
+                    hint="Replaces quarterly sum as base for variance/rate."
+                    persistent-hint
+                    class="mb-3"
+                    @click:clear="entryForm.override_total_target = null"
+                  />
+                  <v-text-field
+                    v-model.number="entryForm.override_rate"
+                    label="Override Rate (%)"
+                    type="number"
+                    :min="0"
+                    :max="9999.99"
+                    variant="outlined"
+                    density="compact"
+                    clearable
+                    hide-details="auto"
+                    hint="Overrides computed achievement rate."
+                    persistent-hint
+                    @click:clear="entryForm.override_rate = null"
+                  />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model.number="entryForm.override_total_actual"
+                    label="Override Total Actual"
+                    type="number"
+                    step="0.01"
+                    :min="0"
+                    variant="outlined"
+                    density="compact"
+                    clearable
+                    hide-details="auto"
+                    hint="Replaces quarterly sum as base for variance/rate."
+                    persistent-hint
+                    class="mb-3"
+                    @click:clear="entryForm.override_total_actual = null"
+                  />
+                  <v-text-field
+                    v-model.number="entryForm.override_variance"
+                    label="Override Variance"
+                    type="number"
+                    step="0.01"
+                    variant="outlined"
+                    density="compact"
+                    clearable
+                    hide-details="auto"
+                    hint="Overrides computed annual variance."
+                    persistent-hint
+                    @click:clear="entryForm.override_variance = null"
+                  />
+                </v-col>
+              </v-row>
+
+              <!-- HB-4: Active override badges — one per active field (Directive 380) -->
+              <div
+                v-if="entryForm.override_total_target != null || entryForm.override_total_actual != null || entryForm.override_rate != null || entryForm.override_variance != null"
+                class="d-flex ga-2 flex-wrap mt-3"
+              >
+                <v-chip v-if="entryForm.override_total_target != null && entryForm.override_total_target !== ''"
+                        color="warning" variant="tonal" size="small">
+                  <v-icon start size="x-small">mdi-pencil-circle</v-icon>
+                  Target Override
+                </v-chip>
+                <v-chip v-if="entryForm.override_total_actual != null && entryForm.override_total_actual !== ''"
+                        color="warning" variant="tonal" size="small">
+                  <v-icon start size="x-small">mdi-pencil-circle</v-icon>
+                  Actual Override
+                </v-chip>
+                <v-chip v-if="entryForm.override_rate != null && entryForm.override_rate !== ''"
+                        color="warning" variant="tonal" size="small">
+                  <v-icon start size="x-small">mdi-pencil-circle</v-icon>
+                  Rate Override: {{ entryForm.override_rate }}%
+                </v-chip>
+                <v-chip v-if="entryForm.override_variance != null && entryForm.override_variance !== ''"
+                        color="warning" variant="tonal" size="small">
+                  <v-icon start size="x-small">mdi-pencil-circle</v-icon>
+                  Variance Override
+                </v-chip>
+              </div>
+
             </v-card-text>
           </v-card>
+
+          <!-- Remarks -->
+          <v-textarea
+            v-model="entryForm.remarks"
+            label="Remarks"
+            rows="2"
+            variant="outlined"
+            density="compact"
+            class="mb-3"
+          />
+
+          <!-- Phase HE: APR/UPR Narrative Fields (Directive 386) -->
+          <v-divider class="my-2" />
+          <div class="text-subtitle-2 text-grey-darken-1 mb-2 mt-1">
+            <v-icon start size="small" color="grey">mdi-text-box-outline</v-icon>
+            Narrative Fields (APR/UPR)
+          </div>
+          <v-textarea
+            v-model="entryForm.catch_up_plan"
+            label="Catch-Up Plans (Not Met Targets)"
+            variant="outlined"
+            density="compact"
+            rows="3"
+            auto-grow
+            class="mb-2 narrative-textarea"
+            hint="Remediation actions planned for indicators that missed their targets"
+            persistent-hint
+          />
+          <v-textarea
+            v-model="entryForm.facilitating_factors"
+            label="Facilitating Factors (Met Targets)"
+            variant="outlined"
+            density="compact"
+            rows="3"
+            auto-grow
+            class="mb-2 narrative-textarea"
+            hint="Conditions or resources that enabled achievement of targets"
+            persistent-hint
+          />
+          <v-textarea
+            v-model="entryForm.ways_forward"
+            label="Ways Forward"
+            variant="outlined"
+            density="compact"
+            rows="3"
+            auto-grow
+            class="mb-3 narrative-textarea"
+            hint="Recommended next steps and improvements for the next period"
+            persistent-hint
+          />
+          <!-- Phase HL: MOV type-selector UI (Directive 146) -->
+          <div class="mb-3">
+            <div class="text-subtitle-2 mb-2">Means of Verification (MOV)</div>
+            <v-btn-toggle v-model="movType" mandatory density="compact" color="primary" class="mb-2">
+              <v-btn value="text" size="small"><v-icon start size="small">mdi-text</v-icon>Text</v-btn>
+              <v-btn value="link" size="small"><v-icon start size="small">mdi-link</v-icon>Link</v-btn>
+              <v-btn value="file" size="small"><v-icon start size="small">mdi-file-upload</v-icon>File</v-btn>
+            </v-btn-toggle>
+
+            <v-textarea
+              v-if="movType === 'text'"
+              v-model="movValue"
+              label="MOV Description"
+              variant="outlined"
+              density="compact"
+              rows="2"
+              auto-grow
+              hint="Evidence or documentation supporting accomplishment claims"
+              persistent-hint
+            />
+            <v-text-field
+              v-else-if="movType === 'link'"
+              v-model="movValue"
+              label="MOV URL"
+              variant="outlined"
+              density="compact"
+              prepend-inner-icon="mdi-link"
+              hint="Paste a link to the supporting document or resource"
+              persistent-hint
+            />
+            <div v-else-if="movType === 'file'">
+              <input ref="movFileInputRef" type="file" style="display:none" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.txt" @change="handleMovFileUpload" />
+              <v-btn variant="outlined" size="small" :loading="movUploading" @click="movFileInputRef?.click()">
+                <v-icon start size="small">mdi-upload</v-icon>
+                {{ movFileMetadata ? 'Replace File' : 'Upload File' }}
+              </v-btn>
+              <div v-if="movFileMetadata" class="mt-2 text-body-2">
+                <v-icon size="small" class="mr-1">mdi-file-check</v-icon>
+                {{ movFileMetadata.filename }}
+                <span class="text-grey ml-1">({{ (movFileMetadata.size / 1024).toFixed(1) }} KB)</span>
+              </div>
+              <div v-else-if="movValue" class="mt-2 text-body-2">
+                <v-icon size="small" class="mr-1">mdi-file</v-icon>
+                {{ movValue }}
+              </div>
+            </div>
+          </div>
+
         </v-card-text>
 
         <v-divider />
 
         <v-card-actions class="pa-4">
-          <v-btn variant="text" @click="entryDialog = false">Cancel</v-btn>
+          <v-btn variant="text" @click="entryDialog = false" :disabled="movUploading">Cancel</v-btn>
           <v-spacer />
           <v-btn
             color="primary"
             variant="elevated"
             :loading="saving"
+            :disabled="movUploading"
             @click="saveQuarterlyData"
           >
             <v-icon start>mdi-content-save</v-icon>
@@ -1781,7 +2414,8 @@ onMounted(async () => {
   position: sticky;
   top: 0;
   z-index: 1;
-  background-color: #f5f5f5;
+  background-color: #003300 !important;
+  color: white !important;
 }
 
 /* Phase DS-D: Multiline indicator text with preserved line breaks per BAR1 standard
@@ -1841,13 +2475,14 @@ onMounted(async () => {
 }
 
 /* Phase DR-F: Flexible indicator column for full BAR1 text display */
+/* Phase HA: Reduced from 320px → 220px to eliminate horizontal scroll at 1366px sidebar-open (Directive 365) */
 .indicator-column {
-  min-width: 320px;  /* Increased from 280px for longer indicators with sub-items */
+  min-width: 220px;
   width: auto;
 }
 
 .indicator-cell {
-  min-width: 320px;  /* Increased from 280px */
+  min-width: 220px;  /* Phase HA: Reduced from 320px (Directive 365) */
   padding: 14px 16px !important;  /* Increased vertical padding */
   vertical-align: top;
 }
@@ -1881,6 +2516,48 @@ onMounted(async () => {
   min-width: 80px;
   text-align: right;
   vertical-align: top;
+}
+
+/* Phase GZ: Total Target + Total Actual columns (Directive 361) */
+.total-column {
+  min-width: 90px;
+  white-space: nowrap;
+}
+
+/* Phase HJ: Narrative below-row stacked sections (Directive 128) */
+.narrative-stacked-row td {
+  background-color: #f9f9f9;
+  border-top: none;
+}
+.narrative-stacked-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 16px 10px;
+}
+.narrative-stacked-item {
+  flex: 1 1 280px;
+  min-width: 200px;
+}
+.narrative-stacked-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #616161;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+.narrative-stacked-text {
+  font-size: 0.8rem;
+  color: #212121;
+  white-space: pre-line;
+}
+
+/* Phase HF: Narrative textarea resize (Directive 102) */
+.narrative-textarea :deep(textarea) {
+  resize: vertical;
+  min-height: 72px;
 }
 
 .rate-column {
@@ -1976,13 +2653,14 @@ onMounted(async () => {
 }
 
 /* Phase DU-B: Expanded ALL-mode quarterly sub-columns */
+/* Phase HA: Reduced from 68px → 56px to eliminate table overflow (Directive 366) */
 .qgroup-header {
   font-weight: 600;
   font-size: 0.8rem;
 }
 .qsub-col {
-  min-width: 68px;
-  width: 68px;
+  min-width: 56px;
+  width: 56px;
   font-size: 0.75rem;
 }
 .qsub-col-score {
@@ -1991,7 +2669,7 @@ onMounted(async () => {
   font-size: 0.75rem;
 }
 .qsub-cell {
-  min-width: 68px;
+  min-width: 56px;
   font-size: 0.8rem;
 }
 .qsub-cell-score {

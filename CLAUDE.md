@@ -1,8 +1,8 @@
 # PMO Dashboard — Project Context
 
 > **Governance:** ACE Framework v2.4 (Operator LTS)
-> **Last Updated:** 2026-03-20
-> **Status:** Phase FB COMPLETE — Financial Module stabilized
+> **Last Updated:** 2026-04-13
+> **Status:** Phase HE COMPLETE — UI/UX + Data Structure Enhancement (Physical & Financial)
 
 ---
 
@@ -38,7 +38,7 @@ pmo-dash/
 │       ├── index.vue              Landing page + analytics dashboard
 │       ├── physical/index.vue     Physical Accomplishment (BAR No. 1)
 │       └── financial/index.vue    Financial Accomplishment (BAR No. 2)
-├── database/migrations/  PostgreSQL migration files (001–029)
+├── database/migrations/  PostgreSQL migration files (001–036)
 ├── docs/
 │   ├── plan.md           Execution contract (ACE Phase 2 artifact)
 │   ├── research.md       Research findings (ACE Phase 1 artifact)
@@ -71,8 +71,8 @@ pmo-dash/
 
 ## Active Governance Directives (Summary)
 
-97 governance directives established across Phases H through FB.
-Full table: `docs/plan.md` lines 9–109
+97+ governance directives established across Phases H through HE.
+Full table: `docs/plan.md` lines 9–111 (directives 1–97), plus Phase-specific directives (385–391 in Phase HE).
 
 **Critical active rules:**
 - Backend enforcement is authoritative; frontend is presentation only
@@ -80,6 +80,8 @@ Full table: `docs/plan.md` lines 9–109
 - `autoRevertQuarterlyReport()` must be called after every CUD operation
 - Financial and Physical modules share `quarterly_reports` entity
 - BAR1 indicator taxonomy (migration 019) is READONLY — never modify
+- Override fields (`override_total_target`, `override_total_actual`) use `??` merge pattern in `computeIndicatorMetrics()` — effective values returned as `total_target`/`total_accomplishment`
+- Narrative fields (`catch_up_plan`, `facilitating_factors`, `ways_forward`) rendered via expandable row only — never as direct table columns
 
 ---
 
@@ -90,15 +92,20 @@ Full table: `docs/plan.md` lines 9–109
 | 66 | UO operation assignment CRUD endpoints | Backend required |
 | 75 | Quarter-level submission (per-QN status) | Backend required |
 | 87 | Cross-module analytics preparation | YAGNI |
+| 96 | Financial analytics endpoints | YAGNI (until data entry stable) |
+| 148 | Prior-quarter prefill for Physical Accomplishment page | ✅ Phase FJ |
 
 ---
 
 ## Completed Milestones
 
-- **Physical Accomplishment Module:** Stable (declared Phase EU-A, 2026-03-17)
-- **Financial Accomplishment Module:** Data entry + governance + analytics implemented (Phases ET–FB)
+- **Physical Accomplishment Module:** Stable (declared Phase EU-A, 2026-03-17); remarks column + APR/UPR narrative fields added (Phase HE, 2026-04-13)
+- **Financial Accomplishment Module:** Data entry + governance + analytics implemented (Phases ET–FB); Balance→Disbursement swap + hero stat cards + chip enhancement (Phase HE)
 - **User Management Module:** Complete (commit `315152f`)
 - **Quarterly Report Governance:** Full lifecycle (submit, approve, reject, unlock, revert)
+- **Override System:** Per-quarter overrides (Phase GZ) + override-effective merge in metrics (Phase HD)
+- **UI Theme Fix:** Vuetify primary color `##` → `#` bug fixed (Phase GQ)
+- **Data Population:** FY 2022–2025 financial data seeded from Continuing Appropriations + BAR1 Analytics
 
 ---
 
@@ -106,7 +113,8 @@ Full table: `docs/plan.md` lines 9–109
 
 - Backend DTOs use class-validator decorators; computed fields are NEVER in DTOs
 - Frontend uses Vue 3 `<script setup>` with Composition API
-- Financial computed fields: `utilization_rate`, `balance`, `variance`, `disbursement_rate` — computed server-side in `computeFinancialMetrics()`
+- Financial computed fields: `utilization_rate`, `disbursement_rate` — computed server-side in `computeFinancialMetrics()`
+- Financial table shows Disbursement (not Balance) — Balance removed from table display in Phase HE
 - DELETE requests use `api.del()` (not `api.delete()`)
 - Quarterly data uses `reported_quarter` column for quarter-specific isolation
 - Watchers that switch context must synchronously clear stale state BEFORE async calls
@@ -142,3 +150,4 @@ Full table: `docs/plan.md` lines 9–109
 | 2026-03-21–25 | Testing, stabilization, edge cases |
 | 2026-03-26–31 | Data population, stakeholder prep |
 | **2026-04-06** | **Stakeholder feedback session (MIS/PMO Directors)** |
+| 2026-04-08–13 | Post-feedback phases (GQ–HE): UI fixes, data population, override system, narrative fields |

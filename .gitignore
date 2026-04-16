@@ -9,3 +9,9 @@ nul
 **/tmpclaude-*-cwd
 .claude/
 .trae/
+
+# Runtime / operational artifacts (not source code)
+database/backups/
+database/staging/
+pmo-backend/uploads/
+prototype/

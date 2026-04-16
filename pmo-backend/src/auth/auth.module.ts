@@ -5,6 +5,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { GoogleStrategy } from './strategies/google.strategy';
 import { JwtAuthGuard, RolesGuard } from './guards';
 import { DatabaseModule } from '../database/database.module';
 
@@ -24,7 +25,7 @@ import { DatabaseModule } from '../database/database.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard],
+  providers: [AuthService, JwtStrategy, GoogleStrategy, JwtAuthGuard, RolesGuard],
   exports: [AuthService, JwtAuthGuard, RolesGuard, JwtModule],
 })
 export class AuthModule {}

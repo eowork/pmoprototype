@@ -84,7 +84,7 @@ const batchRejectNotes = ref('')
 
 // Module labels
 const moduleLabels: Record<string, string> = {
-  coi: 'Construction (COI)',
+  coi: 'Infrastructure (COI)',
   repairs: 'Repair Projects',
   university_operations: 'University Operations',
 }
