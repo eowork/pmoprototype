@@ -27,8 +27,7 @@ export class LoggingInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const request = context.switchToHttp().getRequest<Request>();
-    const { method, url, ip } = request;
-    const userAgent = request.get('user-agent') || '';
+    const { method, url } = request;
     const startTime = Date.now();
 
     // Extract user ID from JWT payload if available
@@ -60,7 +59,9 @@ export class LoggingInterceptor implements NestInterceptor {
           if (process.env.NODE_ENV === 'production') {
             this.logger.log(JSON.stringify(logEntry));
           } else {
-            const userInfo = userId ? ` [User: ${userId.substring(0, 8)}...]` : '';
+            const userInfo = userId
+              ? ` [User: ${userId.substring(0, 8)}...]`
+              : '';
             this.logger.log(
               `${method} ${url} - ${statusCode} - ${duration}ms${userInfo}`,
             );
@@ -86,7 +87,9 @@ export class LoggingInterceptor implements NestInterceptor {
           if (process.env.NODE_ENV === 'production') {
             this.logger.error(JSON.stringify(logEntry));
           } else {
-            const userInfo = userId ? ` [User: ${userId.substring(0, 8)}...]` : '';
+            const userInfo = userId
+              ? ` [User: ${userId.substring(0, 8)}...]`
+              : '';
             this.logger.error(
               `${method} ${url} - ${statusCode} - ${duration}ms${userInfo}`,
             );

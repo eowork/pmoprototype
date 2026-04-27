@@ -1,4 +1,10 @@
-import { IsOptional, IsString, IsEnum, IsUUID, IsBoolean } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsEnum,
+  IsUUID,
+  IsBoolean,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
 import { DepartmentStatus } from '../../common/enums';
 

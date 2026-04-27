@@ -1,0 +1,6 @@
+export enum ModuleType {
+  CONSTRUCTION = 'CONSTRUCTION',
+  REPAIR = 'REPAIR',
+  OPERATIONS = 'OPERATIONS',
+  ALL = 'ALL',
+}

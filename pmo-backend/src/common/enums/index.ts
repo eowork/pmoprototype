@@ -10,3 +10,4 @@ export * from './gallery-category.enum';
 export * from './contractor-status.enum';
 export * from './department-status.enum';
 export * from './setting-data-type.enum';
+export * from './module-type.enum';

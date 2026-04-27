@@ -41,8 +41,13 @@ export class ConstructionProjectsController {
 
   @Get()
   @Roles('Admin', 'Staff', 'Viewer')
-  @ApiOperation({ summary: 'List all construction projects (non-Admin only see PUBLISHED)' })
-  findAll(@Query() query: QueryConstructionProjectDto, @CurrentUser() user: JwtPayload) {
+  @ApiOperation({
+    summary: 'List all construction projects (non-Admin only see PUBLISHED)',
+  })
+  findAll(
+    @Query() query: QueryConstructionProjectDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.findAll(query, user);
   }
 
@@ -72,8 +77,13 @@ export class ConstructionProjectsController {
   @Post()
   @Roles('Admin', 'Staff')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create construction project (Admin=PUBLISHED, Staff=DRAFT)' })
-  create(@Body() dto: CreateConstructionProjectDto, @CurrentUser() user: JwtPayload) {
+  @ApiOperation({
+    summary: 'Create construction project (Admin=PUBLISHED, Staff=DRAFT)',
+  })
+  create(
+    @Body() dto: CreateConstructionProjectDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.create(dto, user.sub, user);
   }
 
@@ -95,6 +105,19 @@ export class ConstructionProjectsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Publish (approve) a draft (Admin only)' })
   publish(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.publish(id, user.sub, user);
+  }
+
+  @Patch(':id/approve')
+  @Roles('Admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve (publish) a draft (Admin only) — alias for /publish',
+  })
+  approve(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ) {
@@ -141,7 +164,10 @@ export class ConstructionProjectsController {
   @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete construction project (Admin only)' })
-  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.remove(id, user.sub);
   }
 

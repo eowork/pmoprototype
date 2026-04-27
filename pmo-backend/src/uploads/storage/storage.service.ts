@@ -88,7 +88,9 @@ export class StorageService {
       }
       return false;
     } catch (error) {
-      this.logger.error(`FILE_DELETE_ERROR: path=${fullPath}, error=${error.message}`);
+      this.logger.error(
+        `FILE_DELETE_ERROR: path=${fullPath}, error=${error.message}`,
+      );
       return false;
     }
   }

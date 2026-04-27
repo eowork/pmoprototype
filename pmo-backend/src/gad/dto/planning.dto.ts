@@ -1,4 +1,12 @@
-import { IsString, IsNotEmpty, IsOptional, IsInt, IsNumber, IsDateString, Min } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsInt,
+  IsNumber,
+  IsDateString,
+  Min,
+} from 'class-validator';
 
 export class CreateGpbAccomplishmentDto {
   @IsString() @IsNotEmpty() title: string;

@@ -14,7 +14,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FundingSourcesService } from './funding-sources.service';
-import { CreateFundingSourceDto, UpdateFundingSourceDto, QueryFundingSourceDto } from './dto';
+import {
+  CreateFundingSourceDto,
+  UpdateFundingSourceDto,
+  QueryFundingSourceDto,
+} from './dto';
 import { JwtAuthGuard, RolesGuard } from '../auth/guards';
 import { Roles, CurrentUser } from '../auth/decorators';
 import { JwtPayload } from '../common/interfaces';
@@ -67,7 +71,10 @@ export class FundingSourcesController {
   @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete funding source (Admin only)' })
-  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.remove(id, user.sub);
   }
 }

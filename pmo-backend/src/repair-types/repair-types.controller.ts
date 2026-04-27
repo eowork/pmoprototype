@@ -14,7 +14,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { RepairTypesService } from './repair-types.service';
-import { CreateRepairTypeDto, UpdateRepairTypeDto, QueryRepairTypeDto } from './dto';
+import {
+  CreateRepairTypeDto,
+  UpdateRepairTypeDto,
+  QueryRepairTypeDto,
+} from './dto';
 import { JwtAuthGuard, RolesGuard } from '../auth/guards';
 import { Roles, CurrentUser } from '../auth/decorators';
 import { JwtPayload } from '../common/interfaces';
@@ -57,7 +61,10 @@ export class RepairTypesController {
   @Delete(':id')
   @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.remove(id, user.sub);
   }
 }

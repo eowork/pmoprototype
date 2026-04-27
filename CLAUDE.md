@@ -89,8 +89,8 @@ Full table: `docs/plan.md` lines 9–111 (directives 1–97), plus Phase-specifi
 
 | # | Item | Priority |
 |---|------|----------|
-| 66 | UO operation assignment CRUD endpoints | Backend required |
-| 75 | Quarter-level submission (per-QN status) | Backend required |
+| 66 | UO operation assignment CRUD endpoints | ✅ Built in Phase IJ |
+| 75 | Quarter-level submission (per-QN status) | ✅ Built in Phase DY-D — stale entry |
 | 87 | Cross-module analytics preparation | YAGNI |
 | 96 | Financial analytics endpoints | YAGNI (until data entry stable) |
 | 148 | Prior-quarter prefill for Physical Accomplishment page | ✅ Phase FJ |
@@ -116,6 +116,7 @@ Full table: `docs/plan.md` lines 9–111 (directives 1–97), plus Phase-specifi
 - Financial computed fields: `utilization_rate`, `disbursement_rate` — computed server-side in `computeFinancialMetrics()`
 - Financial table shows Disbursement (not Balance) — Balance removed from table display in Phase HE
 - DELETE requests use `api.del()` (not `api.delete()`)
+- Backend uses a **hybrid data access model**: ORM (`em.find`, `em.persist`) for CRUD; raw SQL (`em.getConnection().execute`) for complex analytics; legacy `DatabaseService` retained for health + auth strategies only — never introduce new `DatabaseService` usage.
 - Quarterly data uses `reported_quarter` column for quarter-specific isolation
 - Watchers that switch context must synchronously clear stale state BEFORE async calls
 

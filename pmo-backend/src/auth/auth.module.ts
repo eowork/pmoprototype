@@ -6,12 +6,36 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
+import { LdapStrategy } from './strategies/ldap.strategy';
 import { JwtAuthGuard, RolesGuard } from './guards';
 import { DatabaseModule } from '../database/database.module';
+import { MikroOrmModule } from '@mikro-orm/nestjs';
+import {
+  User,
+  Role,
+  UserRole,
+  Permission,
+  RolePermission,
+  UserPermissionOverride,
+  UserModuleAssignment,
+  UserPillarAssignment,
+  PasswordResetRequest,
+} from '../database/entities';
 
 @Module({
   imports: [
     DatabaseModule,
+    MikroOrmModule.forFeature([
+      User,
+      Role,
+      UserRole,
+      Permission,
+      RolePermission,
+      UserPermissionOverride,
+      UserModuleAssignment,
+      UserPillarAssignment,
+      PasswordResetRequest,
+    ]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -25,7 +49,16 @@ import { DatabaseModule } from '../database/database.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, GoogleStrategy, JwtAuthGuard, RolesGuard],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    GoogleStrategy,
+    // Phase HY: Only register LdapStrategy when LDAP_URL is configured
+    // Prevents app crash when IT has not yet provisioned the LDAP server (Directive 229)
+    ...(process.env.LDAP_URL ? [LdapStrategy] : []),
+    JwtAuthGuard,
+    RolesGuard,
+  ],
   exports: [AuthService, JwtAuthGuard, RolesGuard, JwtModule],
 })
 export class AuthModule {}

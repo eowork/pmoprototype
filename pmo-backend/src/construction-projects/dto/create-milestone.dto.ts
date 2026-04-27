@@ -1,4 +1,9 @@
-import { IsString, IsNotEmpty, IsOptional, IsDateString, IsNumber } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsDateString,
+} from 'class-validator';
 
 export class CreateMilestoneDto {
   @IsString()
@@ -12,7 +17,7 @@ export class CreateMilestoneDto {
   @IsOptional()
   @IsDateString()
   target_date?: string;
-  
+
   @IsOptional()
   @IsDateString()
   actual_date?: string;
@@ -24,6 +29,4 @@ export class CreateMilestoneDto {
   @IsOptional()
   @IsString()
   remarks?: string;
-
-
 }

@@ -4,134 +4,116 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
-import { DatabaseService } from '../database/database.service';
+import { InjectRepository } from '@mikro-orm/nestjs';
+import { EntityRepository } from '@mikro-orm/core';
+import type { FilterQuery } from '@mikro-orm/core';
 import { createPaginatedResponse, PaginatedResponse } from '../common/dto';
-import { CreateRepairTypeDto, UpdateRepairTypeDto, QueryRepairTypeDto } from './dto';
+import {
+  CreateRepairTypeDto,
+  UpdateRepairTypeDto,
+  QueryRepairTypeDto,
+} from './dto';
+import { RepairType } from '../database/entities';
 
 @Injectable()
 export class RepairTypesService {
   private readonly logger = new Logger(RepairTypesService.name);
-  private readonly ALLOWED_SORTS = ['created_at', 'updated_at', 'name'];
+  private readonly ALLOWED_SORTS = ['createdAt', 'updatedAt', 'name'];
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    @InjectRepository(RepairType)
+    private readonly repairTypeRepo: EntityRepository<RepairType>,
+  ) {}
 
   async findAll(query: QueryRepairTypeDto): Promise<PaginatedResponse<any>> {
-    const { page = 1, limit = 20, sort = 'created_at', order = 'desc' } = query;
-    const offset = (page - 1) * limit;
+    const { page = 1, limit = 20, sort = 'createdAt', order = 'desc' } = query;
 
-    const sortColumn = this.ALLOWED_SORTS.includes(sort) ? sort : 'created_at';
-    const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const sortKey = this.ALLOWED_SORTS.includes(sort) ? sort : 'createdAt';
+    const sortOrder = (order.toLowerCase() === 'asc' ? 'asc' : 'desc') as
+      | 'asc'
+      | 'desc';
 
-    const conditions: string[] = ['deleted_at IS NULL'];
-    const params: any[] = [];
-    let paramIndex = 1;
-
+    const where: FilterQuery<RepairType> = {};
     if (query.name) {
-      conditions.push(`name ILIKE $${paramIndex++}`);
-      params.push(`%${query.name}%`);
+      where.name = { $like: `%${query.name}%` };
     }
 
-    const whereClause = conditions.join(' AND ');
+    const [items, total] = await this.repairTypeRepo.findAndCount(where, {
+      limit,
+      offset: (page - 1) * limit,
+      orderBy: { [sortKey]: sortOrder },
+    });
 
-    const countResult = await this.db.query(
-      `SELECT COUNT(*) FROM repair_types WHERE ${whereClause}`,
-      params,
-    );
-    const total = parseInt(countResult.rows[0].count, 10);
-
-    const dataResult = await this.db.query(
-      `SELECT id, name, description, created_at, updated_at
-       FROM repair_types
-       WHERE ${whereClause}
-       ORDER BY ${sortColumn} ${sortOrder}
-       LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
-      [...params, limit, offset],
-    );
-
-    return createPaginatedResponse(dataResult.rows, total, page, limit);
+    return createPaginatedResponse(items, total, page, limit);
   }
 
-  async findOne(id: string): Promise<any> {
-    const result = await this.db.query(
-      `SELECT * FROM repair_types WHERE id = $1 AND deleted_at IS NULL`,
-      [id],
-    );
-
-    if (result.rows.length === 0) {
+  async findOne(id: string): Promise<RepairType> {
+    const item = await this.repairTypeRepo.findOne({ id });
+    if (!item) {
       throw new NotFoundException(`Repair type with ID ${id} not found`);
     }
-
-    return result.rows[0];
+    return item;
   }
 
-  async create(dto: CreateRepairTypeDto, userId: string): Promise<any> {
-    // Check for duplicate name
-    const existing = await this.db.query(
-      `SELECT id FROM repair_types WHERE name = $1 AND deleted_at IS NULL`,
-      [dto.name],
-    );
-    if (existing.rows.length > 0) {
-      throw new ConflictException(`Repair type name ${dto.name} already exists`);
+  async create(dto: CreateRepairTypeDto, userId: string): Promise<RepairType> {
+    const existing = await this.repairTypeRepo.findOne({ name: dto.name });
+    if (existing) {
+      throw new ConflictException(
+        `Repair type name ${dto.name} already exists`,
+      );
     }
 
-    const result = await this.db.query(
-      `INSERT INTO repair_types (name, description, metadata, created_by)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [
-        dto.name,
-        dto.description || null,
-        dto.metadata ? JSON.stringify(dto.metadata) : null,
-        userId,
-      ],
-    );
+    const entity = this.repairTypeRepo.create({
+      name: dto.name,
+      description: dto.description,
+      metadata: dto.metadata,
+      createdBy: userId,
+    });
 
-    this.logger.log(`REPAIR_TYPE_CREATED: id=${result.rows[0].id}, by=${userId}`);
-    return result.rows[0];
+    await this.repairTypeRepo.getEntityManager().persist(entity).flush();
+    this.logger.log(`REPAIR_TYPE_CREATED: id=${entity.id}, by=${userId}`);
+    return entity;
   }
 
-  async update(id: string, dto: UpdateRepairTypeDto, userId: string): Promise<any> {
-    await this.findOne(id);
+  async update(
+    id: string,
+    dto: UpdateRepairTypeDto,
+    userId: string,
+  ): Promise<RepairType> {
+    const entity = await this.findOne(id);
 
-    // Check for duplicate name if updating
-    if (dto.name) {
-      const existing = await this.db.query(
-        `SELECT id FROM repair_types WHERE name = $1 AND id != $2 AND deleted_at IS NULL`,
-        [dto.name, id],
-      );
-      if (existing.rows.length > 0) {
-        throw new ConflictException(`Repair type name ${dto.name} already exists`);
+    if (dto.name && dto.name !== entity.name) {
+      const existing = await this.repairTypeRepo.findOne({
+        name: dto.name,
+        id: { $ne: id },
+      });
+      if (existing) {
+        throw new ConflictException(
+          `Repair type name ${dto.name} already exists`,
+        );
       }
     }
 
-    const fields = Object.keys(dto).filter((k) => dto[k] !== undefined);
+    const fields = Object.keys(dto).filter(
+      (k) => (dto as any)[k] !== undefined,
+    );
     if (fields.length === 0) {
-      return this.findOne(id);
+      return entity;
     }
 
-    const setClause = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
-    const values = fields.map((f) => (f === 'metadata' ? JSON.stringify(dto[f]) : dto[f]));
-
-    const result = await this.db.query(
-      `UPDATE repair_types
-       SET ${setClause}, updated_by = $${fields.length + 1}, updated_at = NOW()
-       WHERE id = $${fields.length + 2} AND deleted_at IS NULL
-       RETURNING *`,
-      [...values, userId, id],
+    Object.assign(entity, { ...dto, updatedBy: userId });
+    await this.repairTypeRepo.getEntityManager().flush();
+    this.logger.log(
+      `REPAIR_TYPE_UPDATED: id=${id}, by=${userId}, fields=[${fields.join(',')}]`,
     );
-
-    this.logger.log(`REPAIR_TYPE_UPDATED: id=${id}, by=${userId}, fields=[${fields.join(',')}]`);
-    return result.rows[0];
+    return entity;
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    await this.findOne(id);
-
-    await this.db.query(
-      `UPDATE repair_types SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
-      [userId, id],
-    );
-
+    const entity = await this.findOne(id);
+    entity.deletedAt = new Date();
+    entity.deletedBy = userId;
+    await this.repairTypeRepo.getEntityManager().flush();
     this.logger.log(`REPAIR_TYPE_DELETED: id=${id}, by=${userId}`);
   }
 }

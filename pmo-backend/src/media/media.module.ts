@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
+import { MikroOrmModule } from '@mikro-orm/nestjs';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
-import { DatabaseModule } from '../database/database.module';
 import { UploadsModule } from '../uploads/uploads.module';
+import { Media } from '../database/entities';
 
 @Module({
-  imports: [DatabaseModule, UploadsModule],
+  imports: [MikroOrmModule.forFeature([Media]), UploadsModule],
   controllers: [MediaController],
   providers: [MediaService],
   exports: [MediaService],

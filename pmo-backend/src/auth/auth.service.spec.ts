@@ -1,16 +1,28 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { EntityManager } from '@mikro-orm/core';
 import { AuthService } from './auth.service';
-import { DatabaseService } from '../database/database.service';
+import {
+  User,
+  UserRole,
+  Role,
+  Permission,
+  RolePermission,
+  UserPermissionOverride,
+  UserModuleAssignment,
+  UserPillarAssignment,
+} from '../database/entities';
 
 describe('AuthService', () => {
   let service: AuthService;
-  let dbService: DatabaseService;
-  let jwtService: JwtService;
 
-  const mockDbService = {
-    query: jest.fn(),
+  const mockEm = {
+    findOne: jest.fn(),
+    find: jest.fn(),
+    flush: jest.fn(),
+    persistAndFlush: jest.fn(),
+    create: jest.fn(),
   };
 
   const mockJwtService = {
@@ -21,16 +33,13 @@ describe('AuthService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
-        { provide: DatabaseService, useValue: mockDbService },
+        { provide: EntityManager, useValue: mockEm },
         { provide: JwtService, useValue: mockJwtService },
       ],
     }).compile();
 
     service = module.get<AuthService>(AuthService);
-    dbService = module.get<DatabaseService>(DatabaseService);
-    jwtService = module.get<JwtService>(JwtService);
 
-    // Reset mocks before each test
     jest.clearAllMocks();
   });
 
@@ -42,30 +51,26 @@ describe('AuthService', () => {
 
   describe('validateUser', () => {
     it('should return null when user does not exist', async () => {
-      mockDbService.query.mockResolvedValueOnce({ rows: [] });
+      mockEm.findOne.mockResolvedValueOnce(null);
 
-      const result = await service.validateUser('nonexistent@test.com', 'password');
+      const result = await service.validateUser(
+        'nonexistent@test.com',
+        'password',
+      );
 
       expect(result).toBeNull();
-      expect(mockDbService.query).toHaveBeenCalledWith(
-        expect.stringContaining('SELECT u.id'),
-        ['nonexistent@test.com'],
-      );
+      expect(mockEm.findOne).toHaveBeenCalledWith(User, expect.any(Object));
     });
 
     it('should return null when account is inactive', async () => {
-      mockDbService.query.mockResolvedValueOnce({
-        rows: [
-          {
-            id: 'test-uuid',
-            email: 'test@test.com',
-            password_hash: 'hash',
-            is_active: false,
-            google_id: null,
-            failed_login_attempts: 0,
-            account_locked_until: null,
-          },
-        ],
+      mockEm.findOne.mockResolvedValueOnce({
+        id: 'test-uuid',
+        email: 'test@test.com',
+        passwordHash: 'hash',
+        isActive: false,
+        googleId: null,
+        failedLoginAttempts: 0,
+        accountLockedUntil: null,
       });
 
       const result = await service.validateUser('test@test.com', 'password');
@@ -74,19 +79,15 @@ describe('AuthService', () => {
     });
 
     it('should return null when account is locked', async () => {
-      const futureDate = new Date(Date.now() + 60000).toISOString();
-      mockDbService.query.mockResolvedValueOnce({
-        rows: [
-          {
-            id: 'test-uuid',
-            email: 'test@test.com',
-            password_hash: 'hash',
-            is_active: true,
-            google_id: null,
-            failed_login_attempts: 5,
-            account_locked_until: futureDate,
-          },
-        ],
+      const futureDate = new Date(Date.now() + 60000);
+      mockEm.findOne.mockResolvedValueOnce({
+        id: 'test-uuid',
+        email: 'test@test.com',
+        passwordHash: 'hash',
+        isActive: true,
+        googleId: null,
+        failedLoginAttempts: 5,
+        accountLockedUntil: futureDate,
       });
 
       const result = await service.validateUser('test@test.com', 'password');
@@ -97,7 +98,7 @@ describe('AuthService', () => {
 
   describe('login', () => {
     it('should throw UnauthorizedException when credentials are invalid', async () => {
-      mockDbService.query.mockResolvedValueOnce({ rows: [] });
+      mockEm.findOne.mockResolvedValueOnce(null);
 
       await expect(
         service.login({ identifier: 'invalid@test.com', password: 'wrong' }),
@@ -107,7 +108,7 @@ describe('AuthService', () => {
 
   describe('getProfile', () => {
     it('should throw UnauthorizedException when user not found', async () => {
-      mockDbService.query.mockResolvedValueOnce({ rows: [] });
+      mockEm.findOne.mockResolvedValueOnce(null);
 
       await expect(service.getProfile('nonexistent-uuid')).rejects.toThrow(
         UnauthorizedException,
@@ -115,31 +116,47 @@ describe('AuthService', () => {
     });
 
     it('should return user profile with roles and permissions', async () => {
-      // Mock user query
-      mockDbService.query
-        .mockResolvedValueOnce({
-          rows: [
-            {
-              id: 'test-uuid',
-              email: 'test@test.com',
-              first_name: 'Test',
-              last_name: 'User',
-              avatar_url: null,
-            },
-          ],
-        })
-        // Mock roles query
-        .mockResolvedValueOnce({
-          rows: [{ id: 'role-uuid', name: 'Admin', is_superadmin: false }],
-        })
-        // Mock permissions query
-        .mockResolvedValueOnce({
-          rows: [{ name: 'read:users' }, { name: 'write:users' }],
-        });
+      mockEm.findOne.mockResolvedValueOnce({
+        id: 'test-uuid',
+        email: 'test@test.com',
+        username: 'testuser',
+        firstName: 'Test',
+        lastName: 'User',
+        avatarUrl: null,
+        rankLevel: null,
+        campus: null,
+      });
+
+      mockEm.find.mockImplementation((entity: any) => {
+        if (entity === UserRole) {
+          return Promise.resolve([
+            { roleId: 'role-uuid', userId: 'test-uuid', isSuperadmin: false },
+          ]);
+        }
+        if (entity === Role) {
+          return Promise.resolve([{ id: 'role-uuid', name: 'Admin' }]);
+        }
+        if (entity === RolePermission) {
+          return Promise.resolve([
+            { roleId: 'role-uuid', permissionId: 'perm-1' },
+            { roleId: 'role-uuid', permissionId: 'perm-2' },
+          ]);
+        }
+        if (entity === Permission) {
+          return Promise.resolve([
+            { id: 'perm-1', name: 'read:users' },
+            { id: 'perm-2', name: 'write:users' },
+          ]);
+        }
+        if (entity === UserPermissionOverride) return Promise.resolve([]);
+        if (entity === UserModuleAssignment) return Promise.resolve([]);
+        if (entity === UserPillarAssignment) return Promise.resolve([]);
+        return Promise.resolve([]);
+      });
 
       const result = await service.getProfile('test-uuid');
 
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         id: 'test-uuid',
         email: 'test@test.com',
         first_name: 'Test',

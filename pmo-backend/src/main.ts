@@ -38,7 +38,9 @@ async function bootstrap() {
   // Swagger/OpenAPI documentation
   const config = new DocumentBuilder()
     .setTitle('PMO Dashboard API')
-    .setDescription('Project Management Office REST API for managing construction projects, repairs, university operations, and administrative functions.')
+    .setDescription(
+      'Project Management Office REST API for managing construction projects, repairs, university operations, and administrative functions.',
+    )
     .setVersion('2.8.0')
     .addBearerAuth(
       {
@@ -61,7 +63,10 @@ async function bootstrap() {
     .addTag('Reference: Funding Sources', 'Funding source reference data')
     .addTag('Reference: Departments', 'Department reference data')
     .addTag('Reference: Repair Types', 'Repair type reference data')
-    .addTag('Reference: Subcategories', 'Construction subcategory reference data')
+    .addTag(
+      'Reference: Subcategories',
+      'Construction subcategory reference data',
+    )
     .addTag('System Settings', 'System configuration settings')
     .addTag('File Uploads', 'File upload management')
     .addTag('Documents', 'Document attachment management')

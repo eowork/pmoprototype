@@ -25,6 +25,18 @@ const api = useApi()
 const toast = useToast()
 const { canAdd, isAdmin, isSuperAdmin } = usePermissions()
 
+// Phase IL-R: Operations assignment panel
+const operations = ref<any[]>([])
+const operationsLoading = ref(false)
+const assignDialog = ref(false)
+const assignDialogOp = ref<any>(null)
+const dialogAssignees = ref<any[]>([])
+const dialogAssigneesLoading = ref(false)
+const assignAddUserId = ref<string | null>(null)
+const assignActionLoading = ref(false)
+const eligibleUsers = ref<any[]>([])
+const eligibleUsersLoading = ref(false)
+
 // Phase DW-B: Centralized fiscal year store
 import { useFiscalYearStore } from '~/stores/fiscalYear'
 import { storeToRefs } from 'pinia'
@@ -1201,6 +1213,7 @@ watch(selectedFiscalYear, () => {
   } else if (selectedReportingType.value === 'FINANCIAL') {
     fetchFinancialAnalytics()
   }
+  if (isAdmin.value || isSuperAdmin.value) fetchOperations()
 }, { immediate: false })
 
 // Phase FP-1: Watch for reporting type changes — fetch appropriate analytics
@@ -1263,12 +1276,96 @@ function navigateToFinancial(pillarId?: string) {
   })
 }
 
+// Phase IL-R: Operations assignment management functions
+async function fetchOperations() {
+  if (!selectedFiscalYear.value) return
+  operationsLoading.value = true
+  try {
+    const res = await api.get<any>(`/api/university-operations?fiscal_year=${selectedFiscalYear.value}&limit=10`)
+    operations.value = Array.isArray(res) ? res : (res?.data || [])
+  } catch {
+    operations.value = []
+  } finally {
+    operationsLoading.value = false
+  }
+}
+
+async function openAssignDialog(op: any) {
+  assignDialogOp.value = op
+  assignDialog.value = true
+  dialogAssigneesLoading.value = true
+  eligibleUsersLoading.value = true
+  try {
+    const [assignees, users] = await Promise.all([
+      api.get<any[]>(`/api/university-operations/${op.id}/assignments`),
+      api.get<any[]>('/api/users/eligible-for-assignment'),
+    ])
+    dialogAssignees.value = Array.isArray(assignees) ? assignees : []
+    eligibleUsers.value = Array.isArray(users) ? users : []
+  } catch {
+    toast.error('Failed to load assignment data')
+  } finally {
+    dialogAssigneesLoading.value = false
+    eligibleUsersLoading.value = false
+  }
+}
+
+async function addAssignee() {
+  if (!assignAddUserId.value || !assignDialogOp.value) return
+  assignActionLoading.value = true
+  try {
+    await api.post(`/api/university-operations/${assignDialogOp.value.id}/assignments`, {
+      user_id: assignAddUserId.value,
+    })
+    dialogAssignees.value = await api.get<any[]>(
+      `/api/university-operations/${assignDialogOp.value.id}/assignments`
+    )
+    assignAddUserId.value = null
+    toast.success('Assignee added')
+  } catch (err: any) {
+    toast.error(err?.message || 'Failed to add assignee')
+  } finally {
+    assignActionLoading.value = false
+  }
+}
+
+function getAssigneeName(userId: string): string {
+  const user = eligibleUsers.value.find(u => u.id === userId)
+  return user ? `${user.first_name} ${user.last_name}` : userId
+}
+
+async function removeAssignee(userId: string) {
+  if (!assignDialogOp.value) return
+  assignActionLoading.value = true
+  try {
+    await api.del(
+      `/api/university-operations/${assignDialogOp.value.id}/assignments/${userId}`
+    )
+    dialogAssignees.value = dialogAssignees.value.filter(a => a.userId !== userId)
+    toast.success('Assignee removed')
+  } catch (err: any) {
+    toast.error(err?.message || 'Failed to remove assignee')
+  } finally {
+    assignActionLoading.value = false
+  }
+}
+
+watch(assignDialog, (open) => {
+  if (!open && assignDialogOp.value) {
+    fetchOperations()
+    assignDialogOp.value = null
+    dialogAssignees.value = []
+    assignAddUserId.value = null
+  }
+})
+
 // Phase FN-1: Initialize from store on mount — fetch cross-module + active reporting type
 onMounted(async () => {
   await fiscalYearStore.fetchFiscalYears()
   fetchCrossModuleSummary()
   fetchCrossModuleYoY()
   fetchAnalytics()
+  if (isAdmin.value || isSuperAdmin.value) fetchOperations()
 })
 </script>
 
@@ -2407,6 +2504,119 @@ onMounted(async () => {
           >
             Create
           </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Phase IL-R: Operations Assignment Management (Admin only) -->
+    <div v-if="isAdmin || isSuperAdmin" class="mt-6">
+      <v-expansion-panels variant="accordion">
+        <v-expansion-panel>
+          <v-expansion-panel-title>
+            <v-icon class="mr-2">mdi-account-group</v-icon>
+            Operations Assignment Management
+            <v-chip size="x-small" class="ml-2" color="primary" variant="flat">Admin</v-chip>
+          </v-expansion-panel-title>
+          <v-expansion-panel-text>
+            <v-progress-linear v-if="operationsLoading" indeterminate class="mb-3" />
+            <v-table v-else density="compact">
+              <thead>
+                <tr>
+                  <th>Operation</th>
+                  <th>Type</th>
+                  <th>Campus</th>
+                  <th>Assignees</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="op in operations" :key="op.id">
+                  <td class="text-body-2">{{ op.title }}</td>
+                  <td class="text-caption text-grey">{{ op.operation_type }}</td>
+                  <td class="text-caption text-grey">{{ op.campus }}</td>
+                  <td>
+                    <template v-if="op.assigned_users?.length">
+                      <v-chip
+                        v-for="u in op.assigned_users.slice(0, 2)"
+                        :key="u.id"
+                        size="x-small"
+                        class="mr-1"
+                      >{{ u.name }}</v-chip>
+                      <v-chip v-if="op.assigned_users.length > 2" size="x-small" color="grey" variant="flat">
+                        +{{ op.assigned_users.length - 2 }}
+                      </v-chip>
+                    </template>
+                    <span v-else class="text-grey text-caption">—</span>
+                  </td>
+                  <td>
+                    <v-tooltip text="Manage Assignees" location="top">
+                      <template #activator="{ props }">
+                        <v-btn
+                          v-bind="props"
+                          icon="mdi-account-multiple-plus"
+                          size="small"
+                          variant="text"
+                          @click="openAssignDialog(op)"
+                        />
+                      </template>
+                    </v-tooltip>
+                  </td>
+                </tr>
+                <tr v-if="!operationsLoading && !operations.length">
+                  <td colspan="5" class="text-center text-grey text-caption py-4">
+                    No operations found for FY {{ selectedFiscalYear }}
+                  </td>
+                </tr>
+              </tbody>
+            </v-table>
+          </v-expansion-panel-text>
+        </v-expansion-panel>
+      </v-expansion-panels>
+    </div>
+
+    <!-- Phase IL-R: Manage Assignees Dialog -->
+    <v-dialog v-model="assignDialog" max-width="520">
+      <v-card>
+        <v-card-title class="text-h6">
+          Manage Assignees
+          <span class="text-caption text-grey ml-2">{{ assignDialogOp?.title }}</span>
+        </v-card-title>
+        <v-card-text>
+          <div class="mb-4">
+            <div class="text-subtitle-2 mb-2">Current Assignees</div>
+            <v-progress-circular v-if="dialogAssigneesLoading" indeterminate size="20" />
+            <template v-else>
+              <v-chip
+                v-for="a in dialogAssignees"
+                :key="a.userId"
+                closable
+                class="mr-1 mb-1"
+                :disabled="assignActionLoading"
+                @click:close="removeAssignee(a.userId)"
+              >{{ getAssigneeName(a.userId) }}</v-chip>
+              <span v-if="!dialogAssignees.length" class="text-grey text-caption">No assignees yet</span>
+            </template>
+          </div>
+          <v-autocomplete
+            v-model="assignAddUserId"
+            label="Add Assignee"
+            :items="eligibleUsers"
+            :item-title="(u: any) => `${u.first_name} ${u.last_name}`"
+            item-value="id"
+            :loading="eligibleUsersLoading"
+            clearable
+            density="compact"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="assignDialog = false">Close</v-btn>
+          <v-btn
+            color="primary"
+            :loading="assignActionLoading"
+            :disabled="!assignAddUserId"
+            @click="addAssignee"
+          >Add</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

@@ -12,9 +12,24 @@ import {
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { UsersService } from './users.service';
-import { CreateUserDto, UpdateUserDto, QueryUserDto, QueryEligibleUsersDto, AssignRoleDto, SetPermissionOverrideDto, BulkPermissionUpdateDto, BulkCrossUserAccessDto, AssignModuleDto, BulkModuleAssignmentDto } from './dto';
+import {
+  CreateUserDto,
+  UpdateUserDto,
+  QueryUserDto,
+  AssignRoleDto,
+  SetPermissionOverrideDto,
+  BulkPermissionUpdateDto,
+  BulkCrossUserAccessDto,
+  AssignModuleDto,
+  BulkModuleAssignmentDto,
+} from './dto';
 import { JwtAuthGuard, RolesGuard } from '../auth/guards';
 import { Roles, CurrentUser } from '../auth/decorators';
 import { JwtPayload } from '../common/interfaces';
@@ -44,7 +59,10 @@ export class UsersController {
 
   @Get('eligible-for-assignment')
   @Roles('Admin', 'Staff')
-  @ApiOperation({ summary: 'List users eligible for record delegation (Admin/Staff) — Phase AV: Global, no campus filter' })
+  @ApiOperation({
+    summary:
+      'List users eligible for record delegation (Admin/Staff) — Phase AV: Global, no campus filter',
+  })
   findEligibleForAssignment() {
     return this.service.findEligibleForAssignment();
   }
@@ -60,7 +78,9 @@ export class UsersController {
   @Patch('password-reset-requests/:requestId/complete')
   @Roles('Admin')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Mark password reset request as completed (Admin only)' })
+  @ApiOperation({
+    summary: 'Mark password reset request as completed (Admin only)',
+  })
   completePasswordResetRequest(
     @Param('requestId', ParseUUIDPipe) requestId: string,
     @CurrentUser() actor: JwtPayload,
@@ -72,7 +92,9 @@ export class UsersController {
   @Post('bulk-access-update')
   @Roles('Admin')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Bulk update access for multiple users (Admin only)' })
+  @ApiOperation({
+    summary: 'Bulk update access for multiple users (Admin only)',
+  })
   @ApiResponse({ status: 200, description: 'Bulk access update completed' })
   bulkCrossUserAccessUpdate(
     @Body() dto: BulkCrossUserAccessDto,
@@ -114,7 +136,10 @@ export class UsersController {
   @Roles()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete user (SuperAdmin only)' })
-  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.remove(id, user.sub);
   }
 
@@ -150,14 +175,20 @@ export class UsersController {
   @Roles()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Unlock user account (SuperAdmin only)' })
-  unlockAccount(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  unlockAccount(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.unlockAccount(id, user.sub);
   }
 
   @Post(':id/reset-password')
   @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Reset user password (Admin/SuperAdmin, bypasses complexity for lower-rank users)' })
+  @ApiOperation({
+    summary:
+      'Reset user password (Admin/SuperAdmin, bypasses complexity for lower-rank users)',
+  })
   resetPassword(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('password') password: string,
@@ -170,7 +201,9 @@ export class UsersController {
 
   @Get(':id/permissions')
   @Roles('Admin')
-  @ApiOperation({ summary: 'Get user permission overrides (Admin/SuperAdmin only)' })
+  @ApiOperation({
+    summary: 'Get user permission overrides (Admin/SuperAdmin only)',
+  })
   getPermissionOverrides(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.getPermissionOverrides(id);
   }
@@ -190,7 +223,9 @@ export class UsersController {
   @Post(':id/permissions/bulk')
   @Roles('Admin')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Bulk update permission overrides (Admin/SuperAdmin only)' })
+  @ApiOperation({
+    summary: 'Bulk update permission overrides (Admin/SuperAdmin only)',
+  })
   @ApiResponse({ status: 200, description: 'Permissions updated successfully' })
   @ApiResponse({ status: 400, description: 'Invalid request' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
@@ -205,7 +240,9 @@ export class UsersController {
   @Delete(':id/permissions/:moduleKey')
   @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Remove permission override (Admin/SuperAdmin only)' })
+  @ApiOperation({
+    summary: 'Remove permission override (Admin/SuperAdmin only)',
+  })
   removePermissionOverride(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('moduleKey') moduleKey: string,
@@ -218,7 +255,9 @@ export class UsersController {
 
   @Get(':id/modules')
   @Roles('Admin')
-  @ApiOperation({ summary: 'Get user module assignments (Admin/SuperAdmin only)' })
+  @ApiOperation({
+    summary: 'Get user module assignments (Admin/SuperAdmin only)',
+  })
   getModuleAssignments(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.getModuleAssignments(id);
   }
@@ -238,8 +277,13 @@ export class UsersController {
   @Post(':id/modules/bulk')
   @Roles('Admin')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Bulk update module assignments (Admin/SuperAdmin only)' })
-  @ApiResponse({ status: 200, description: 'Module assignments updated successfully' })
+  @ApiOperation({
+    summary: 'Bulk update module assignments (Admin/SuperAdmin only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Module assignments updated successfully',
+  })
   bulkUpdateModuleAssignments(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: BulkModuleAssignmentDto,

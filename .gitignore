@@ -10,6 +10,9 @@ nul
 .claude/
 .trae/
 
+# VS Code workspace settings (may contain API keys/tokens)
+.vscode/mcp.json
+
 # Runtime / operational artifacts (not source code)
 database/backups/
 database/staging/

@@ -22,7 +22,8 @@ export class CreateUserDto {
   @MinLength(8)
   @MaxLength(72)
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
-    message: 'Password must contain at least one uppercase, one lowercase, and one number',
+    message:
+      'Password must contain at least one uppercase, one lowercase, and one number',
   })
   password: string;
 
@@ -41,7 +42,8 @@ export class CreateUserDto {
   @MinLength(3)
   @MaxLength(100)
   @Matches(/^[a-z0-9._-]+$/, {
-    message: 'Username must be lowercase and contain only letters, numbers, dots, underscores, or dashes',
+    message:
+      'Username must be lowercase and contain only letters, numbers, dots, underscores, or dashes',
   })
   username: string;
 
@@ -67,7 +69,7 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  campus?: string;  // Phase Y: Office-scoped visibility
+  campus?: string; // Phase Y: Office-scoped visibility
 
   @IsOptional()
   metadata?: Record<string, any>;

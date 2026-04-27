@@ -1,5 +1,7 @@
 import { Module, Global } from '@nestjs/common';
+import { MikroOrmModule } from '@mikro-orm/nestjs';
 import { PermissionResolverService } from './services';
+import { User, UserRole, UserModuleAssignment } from '../database/entities';
 
 /**
  * Common Module
@@ -9,6 +11,7 @@ import { PermissionResolverService } from './services';
  */
 @Global()
 @Module({
+  imports: [MikroOrmModule.forFeature([User, UserRole, UserModuleAssignment])],
   providers: [PermissionResolverService],
   exports: [PermissionResolverService],
 })

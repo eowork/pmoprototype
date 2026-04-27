@@ -4,15 +4,23 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { DatabaseService } from '../database/database.service';
+import { InjectRepository } from '@mikro-orm/nestjs';
+import { EntityRepository, EntityManager } from '@mikro-orm/core';
+import type { FilterQuery } from '@mikro-orm/core';
 import { createPaginatedResponse, PaginatedResponse } from '../common/dto';
 import { UploadsService } from '../uploads/uploads.service';
 import { CreateMediaDto, UpdateMediaDto, QueryMediaDto } from './dto';
+import { Media } from '../database/entities';
 
 @Injectable()
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
-  private readonly ALLOWED_SORTS = ['created_at', 'media_type', 'title', 'file_name'];
+  private readonly ALLOWED_SORTS = [
+    'createdAt',
+    'mediaType',
+    'title',
+    'fileName',
+  ];
   private readonly ALLOWED_ENTITY_TYPES = [
     'project',
     'construction_project',
@@ -21,7 +29,9 @@ export class MediaService {
   ];
 
   constructor(
-    private readonly db: DatabaseService,
+    @InjectRepository(Media)
+    private readonly mediaRepo: EntityRepository<Media>,
+    private readonly em: EntityManager,
     private readonly uploadsService: UploadsService,
   ) {}
 
@@ -37,64 +47,43 @@ export class MediaService {
     entityType: string,
     entityId: string,
     query: QueryMediaDto,
-  ): Promise<PaginatedResponse<any>> {
+  ): Promise<PaginatedResponse<Media>> {
     this.validateEntityType(entityType);
 
-    const { page = 1, limit = 20, sort = 'created_at', order = 'desc' } = query;
-    const offset = (page - 1) * limit;
+    const { page = 1, limit = 20, sort = 'createdAt', order = 'desc' } = query;
 
-    const sortColumn = this.ALLOWED_SORTS.includes(sort) ? sort : 'created_at';
-    const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const sortKey = this.ALLOWED_SORTS.includes(sort) ? sort : 'createdAt';
+    const sortOrder = (order.toLowerCase() === 'asc' ? 'asc' : 'desc') as
+      | 'asc'
+      | 'desc';
 
-    const conditions: string[] = [
-      'deleted_at IS NULL',
-      'mediable_type = $1',
-      'mediable_id = $2',
-    ];
-    const params: any[] = [entityType, entityId];
-    let paramIndex = 3;
+    const where: FilterQuery<Media> = {
+      mediableType: entityType,
+      mediableId: entityId,
+    };
 
     if (query.media_type) {
-      conditions.push(`media_type = $${paramIndex++}`);
-      params.push(query.media_type);
+      where.mediaType = query.media_type;
     }
     if (query.title) {
-      conditions.push(`title ILIKE $${paramIndex++}`);
-      params.push(`%${query.title}%`);
+      where.title = { $ilike: `%${query.title}%` };
     }
 
-    const whereClause = conditions.join(' AND ');
+    const [items, total] = await this.mediaRepo.findAndCount(where, {
+      limit,
+      offset: (page - 1) * limit,
+      orderBy: { [sortKey]: sortOrder },
+    });
 
-    const countResult = await this.db.query(
-      `SELECT COUNT(*) FROM media WHERE ${whereClause}`,
-      params,
-    );
-    const total = parseInt(countResult.rows[0].count, 10);
-
-    const dataResult = await this.db.query(
-      `SELECT id, mediable_type, mediable_id, media_type, file_name,
-              file_path, file_size, mime_type, title, description, alt_text, created_at, updated_at
-       FROM media
-       WHERE ${whereClause}
-       ORDER BY ${sortColumn} ${sortOrder}
-       LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
-      [...params, limit, offset],
-    );
-
-    return createPaginatedResponse(dataResult.rows, total, page, limit);
+    return createPaginatedResponse(items, total, page, limit);
   }
 
-  async findOne(id: string): Promise<any> {
-    const result = await this.db.query(
-      `SELECT * FROM media WHERE id = $1 AND deleted_at IS NULL`,
-      [id],
-    );
-
-    if (result.rows.length === 0) {
+  async findOne(id: string): Promise<Media> {
+    const entity = await this.mediaRepo.findOne({ id });
+    if (!entity) {
       throw new NotFoundException(`Media with ID ${id} not found`);
     }
-
-    return result.rows[0];
+    return entity;
   }
 
   async create(
@@ -103,14 +92,13 @@ export class MediaService {
     file: Express.Multer.File,
     dto: CreateMediaDto,
     userId: string,
-  ): Promise<any> {
+  ): Promise<Media> {
     this.validateEntityType(entityType);
 
     if (!file) {
       throw new BadRequestException('File is required');
     }
 
-    // Upload file using uploads service
     const uploadResult = await this.uploadsService.uploadFile(
       file,
       userId,
@@ -118,67 +106,62 @@ export class MediaService {
       entityId,
     );
 
-    const result = await this.db.query(
-      `INSERT INTO media
-       (mediable_type, mediable_id, media_type, file_name, file_path, file_size, mime_type, title, description, alt_text, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING *`,
-      [
-        entityType,
-        entityId,
-        dto.media_type,
-        uploadResult.originalName,
-        uploadResult.filePath,
-        uploadResult.fileSize,
-        uploadResult.mimeType,
-        dto.title || null,
-        dto.description || null,
-        dto.alt_text || null,
-        userId,
-      ],
-    );
+    const entity = this.mediaRepo.create({
+      mediableType: entityType,
+      mediableId: entityId,
+      mediaType: dto.media_type,
+      fileName: uploadResult.originalName,
+      filePath: uploadResult.filePath,
+      fileSize: uploadResult.fileSize,
+      mimeType: uploadResult.mimeType,
+      title: dto.title,
+      description: dto.description,
+      altText: dto.alt_text,
+      uploadedBy: userId,
+      createdBy: userId,
+    });
 
+    await this.em.persist(entity).flush();
     this.logger.log(
-      `MEDIA_CREATED: id=${result.rows[0].id}, entity=${entityType}/${entityId}, by=${userId}`,
+      `MEDIA_CREATED: id=${entity.id}, entity=${entityType}/${entityId}, by=${userId}`,
     );
-    return result.rows[0];
+    return entity;
   }
 
-  async update(id: string, dto: UpdateMediaDto, userId: string): Promise<any> {
-    await this.findOne(id);
+  async update(
+    id: string,
+    dto: UpdateMediaDto,
+    userId: string,
+  ): Promise<Media> {
+    const entity = await this.findOne(id);
 
-    const fields = Object.keys(dto).filter((k) => dto[k] !== undefined);
-    if (fields.length === 0) {
-      return this.findOne(id);
-    }
+    if (dto.media_type !== undefined) entity.mediaType = dto.media_type;
+    if (dto.title !== undefined) entity.title = dto.title;
+    if (dto.description !== undefined) entity.description = dto.description;
+    if (dto.alt_text !== undefined) entity.altText = dto.alt_text;
+    entity.updatedBy = userId;
 
-    const setClause = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
-    const values = fields.map((f) => dto[f]);
+    await this.em.flush();
 
-    const result = await this.db.query(
-      `UPDATE media
-       SET ${setClause}, updated_by = $${fields.length + 1}, updated_at = NOW()
-       WHERE id = $${fields.length + 2} AND deleted_at IS NULL
-       RETURNING *`,
-      [...values, userId, id],
+    const fields = Object.keys(dto).filter(
+      (k) => (dto as any)[k] !== undefined,
     );
-
-    this.logger.log(`MEDIA_UPDATED: id=${id}, by=${userId}, fields=[${fields.join(',')}]`);
-    return result.rows[0];
+    this.logger.log(
+      `MEDIA_UPDATED: id=${id}, by=${userId}, fields=[${fields.join(',')}]`,
+    );
+    return entity;
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    const media = await this.findOne(id);
+    const entity = await this.findOne(id);
 
-    // Delete the file from storage
-    if (media.file_path) {
-      await this.uploadsService.deleteFile(media.file_path);
+    if (entity.filePath) {
+      await this.uploadsService.deleteFile(entity.filePath);
     }
 
-    await this.db.query(
-      `UPDATE media SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
-      [userId, id],
-    );
+    entity.deletedAt = new Date();
+    entity.deletedBy = userId;
+    await this.em.flush();
 
     this.logger.log(`MEDIA_DELETED: id=${id}, by=${userId}`);
   }

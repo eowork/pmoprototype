@@ -1,12 +1,26 @@
 import {
-  Controller, Get, Post, Patch, Delete, Body, Param, Query,
-  ParseUUIDPipe, HttpCode, HttpStatus, UseGuards,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  ParseUUIDPipe,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { RepairProjectsService } from './repair-projects.service';
 import {
-  CreateRepairProjectDto, UpdateRepairProjectDto, QueryRepairProjectDto,
-  CreatePowItemDto, CreatePhaseDto, CreateTeamMemberDto,
+  CreateRepairProjectDto,
+  UpdateRepairProjectDto,
+  QueryRepairProjectDto,
+  CreatePowItemDto,
+  CreatePhaseDto,
+  CreateTeamMemberDto,
 } from './dto';
 import { JwtAuthGuard, RolesGuard } from '../auth/guards';
 import { Roles, CurrentUser } from '../auth/decorators';
@@ -23,8 +37,13 @@ export class RepairProjectsController {
 
   @Get()
   @Roles('Admin', 'Staff', 'Viewer')
-  @ApiOperation({ summary: 'List all repair projects (non-Admin only see PUBLISHED)' })
-  findAll(@Query() query: QueryRepairProjectDto, @CurrentUser() user: JwtPayload) {
+  @ApiOperation({
+    summary: 'List all repair projects (non-Admin only see PUBLISHED)',
+  })
+  findAll(
+    @Query() query: QueryRepairProjectDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.findAll(query, user);
   }
 
@@ -54,7 +73,9 @@ export class RepairProjectsController {
   @Post()
   @Roles('Admin', 'Staff')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create repair project (Admin=PUBLISHED, Staff=DRAFT)' })
+  @ApiOperation({
+    summary: 'Create repair project (Admin=PUBLISHED, Staff=DRAFT)',
+  })
   create(@Body() dto: CreateRepairProjectDto, @CurrentUser() user: JwtPayload) {
     return this.service.create(dto, user.sub, user);
   }
@@ -109,7 +130,11 @@ export class RepairProjectsController {
   @Patch(':id')
   @Roles('Admin', 'Staff')
   @ApiOperation({ summary: 'Update repair project (Admin/Staff)' })
-  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateRepairProjectDto, @CurrentUser() user: JwtPayload) {
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateRepairProjectDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.update(id, dto, user.sub, user);
   }
 
@@ -119,7 +144,10 @@ export class RepairProjectsController {
   @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete repair project (Admin only)' })
-  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.remove(id, user.sub);
   }
 
@@ -128,7 +156,11 @@ export class RepairProjectsController {
   @Get(':id/pow-items')
   @Roles('Admin', 'Staff', 'Viewer')
   @ApiOperation({ summary: 'List POW items' })
-  findPowItems(@Param('id', ParseUUIDPipe) id: string, @Query('category') category?: string, @Query('phase') phase?: string) {
+  findPowItems(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('category') category?: string,
+    @Query('phase') phase?: string,
+  ) {
     return this.service.findPowItems(id, category, phase);
   }
 
@@ -136,14 +168,23 @@ export class RepairProjectsController {
   @Roles('Admin', 'Staff')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create POW item (Admin/Staff)' })
-  createPowItem(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CreatePowItemDto, @CurrentUser() user: JwtPayload) {
+  createPowItem(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreatePowItemDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.createPowItem(id, dto, user.sub);
   }
 
   @Patch(':id/pow-items/:itemId')
   @Roles('Admin', 'Staff')
   @ApiOperation({ summary: 'Update POW item (Admin/Staff)' })
-  updatePowItem(@Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body() dto: Partial<CreatePowItemDto>, @CurrentUser() user: JwtPayload) {
+  updatePowItem(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() dto: Partial<CreatePowItemDto>,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.updatePowItem(id, itemId, dto, user.sub);
   }
 
@@ -151,7 +192,11 @@ export class RepairProjectsController {
   @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete POW item (Admin only)' })
-  removePowItem(@Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @CurrentUser() user: JwtPayload) {
+  removePowItem(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.removePowItem(id, itemId, user.sub);
   }
 
@@ -168,14 +213,21 @@ export class RepairProjectsController {
   @Roles('Admin', 'Staff')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create phase (Admin/Staff)' })
-  createPhase(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CreatePhaseDto) {
+  createPhase(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreatePhaseDto,
+  ) {
     return this.service.createPhase(id, dto);
   }
 
   @Patch(':id/phases/:phaseId')
   @Roles('Admin', 'Staff')
   @ApiOperation({ summary: 'Update phase (Admin/Staff)' })
-  updatePhase(@Param('id', ParseUUIDPipe) id: string, @Param('phaseId', ParseUUIDPipe) phaseId: string, @Body() dto: Partial<CreatePhaseDto>) {
+  updatePhase(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('phaseId', ParseUUIDPipe) phaseId: string,
+    @Body() dto: Partial<CreatePhaseDto>,
+  ) {
     return this.service.updatePhase(id, phaseId, dto);
   }
 
@@ -192,7 +244,10 @@ export class RepairProjectsController {
   @Roles('Admin', 'Staff')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Add team member (Admin/Staff)' })
-  createTeamMember(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CreateTeamMemberDto) {
+  createTeamMember(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateTeamMemberDto,
+  ) {
     return this.service.createTeamMember(id, dto);
   }
 
@@ -200,7 +255,10 @@ export class RepairProjectsController {
   @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove team member (Admin only)' })
-  removeTeamMember(@Param('id', ParseUUIDPipe) id: string, @Param('memberId', ParseUUIDPipe) memberId: string) {
+  removeTeamMember(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('memberId', ParseUUIDPipe) memberId: string,
+  ) {
     return this.service.removeTeamMember(id, memberId);
   }
 }

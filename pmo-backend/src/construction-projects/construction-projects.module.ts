@@ -1,11 +1,29 @@
 import { Module } from '@nestjs/common';
+import { MikroOrmModule } from '@mikro-orm/nestjs';
 import { ConstructionProjectsController } from './construction-projects.controller';
 import { ConstructionProjectsService } from './construction-projects.service';
-import { DatabaseModule } from '../database/database.module';
 import { UploadsModule } from '../uploads/uploads.module';
+import {
+  ConstructionProject,
+  ConstructionMilestone,
+  ConstructionProjectFinancial,
+  ConstructionGallery,
+  RecordAssignment,
+  Project,
+} from '../database/entities';
 
 @Module({
-  imports: [DatabaseModule, UploadsModule],
+  imports: [
+    MikroOrmModule.forFeature([
+      ConstructionProject,
+      ConstructionMilestone,
+      ConstructionProjectFinancial,
+      ConstructionGallery,
+      RecordAssignment,
+      Project,
+    ]),
+    UploadsModule,
+  ],
   controllers: [ConstructionProjectsController],
   providers: [ConstructionProjectsService],
   exports: [ConstructionProjectsService],

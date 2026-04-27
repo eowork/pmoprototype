@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { MikroOrmModule } from '@mikro-orm/nestjs';
+import type { MikroOrmModuleOptions } from '@mikro-orm/nestjs';
+import { PostgreSqlDriver } from '@mikro-orm/postgresql';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DatabaseModule } from './database/database.module';
@@ -34,11 +37,34 @@ import { JwtAuthGuard } from './auth/guards';
     }),
     // Rate limiting
     ThrottlerModule.forRoot([
-      { name: 'short', ttl: 1000, limit: 15 },  // Phase FW-1: raised from 3 — dashboard fires up to 11 parallel calls
+      { name: 'short', ttl: 1000, limit: 15 }, // Phase FW-1: raised from 3 — dashboard fires up to 11 parallel calls
       { name: 'medium', ttl: 10000, limit: 20 },
       { name: 'long', ttl: 60000, limit: 100 },
     ]),
-    // Database connection
+    // MikroORM (Phase HY — phased migration alongside DatabaseService)
+    MikroOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService): MikroOrmModuleOptions => ({
+        driver: PostgreSqlDriver,
+        host: configService.get('DATABASE_HOST', 'localhost'),
+        port: configService.get<number>('DATABASE_PORT', 5432),
+        dbName: configService.get('DATABASE_NAME', 'pmo_dashboard'),
+        user: configService.get('DATABASE_USER', 'postgres'),
+        password: configService.get('DATABASE_PASSWORD', 'postgres'),
+        autoLoadEntities: true,
+        migrations: {
+          tableName: 'mikro_orm_migrations',
+          path: './dist/database/mikro-migrations',
+        },
+        filters: {
+          notDeleted: { cond: { deletedAt: null }, default: false },
+        },
+        pool: { min: 2, max: 10 },
+        debug: configService.get('NODE_ENV') === 'development',
+      }),
+    }),
+    // Raw SQL pool (DatabaseService) — retained for all non-migrated services
     DatabaseModule,
     // Common services (shared across modules)
     CommonModule,

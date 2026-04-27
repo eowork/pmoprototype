@@ -1,8 +1,13 @@
-import { IsString, IsIn, IsArray, IsOptional } from 'class-validator';
+import { IsString, IsIn, IsArray } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 // Module types matching database enum
-export const MODULE_TYPES = ['CONSTRUCTION', 'REPAIR', 'OPERATIONS', 'ALL'] as const;
+export const MODULE_TYPES = [
+  'CONSTRUCTION',
+  'REPAIR',
+  'OPERATIONS',
+  'ALL',
+] as const;
 export type ModuleType = (typeof MODULE_TYPES)[number];
 
 export class AssignModuleDto {
@@ -18,7 +23,8 @@ export class AssignModuleDto {
 
 export class BulkModuleAssignmentDto {
   @ApiProperty({
-    description: 'List of modules to assign (replaces all existing assignments)',
+    description:
+      'List of modules to assign (replaces all existing assignments)',
     type: [String],
     enum: MODULE_TYPES,
     example: ['CONSTRUCTION', 'REPAIR'],

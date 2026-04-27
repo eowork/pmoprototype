@@ -4,7 +4,6 @@ import {
   IsOptional,
   IsInt,
   IsNumber,
-  IsEnum,
   IsUUID,
   IsIn,
   Min,

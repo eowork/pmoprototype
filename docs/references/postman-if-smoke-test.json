@@ -1,0 +1,1958 @@
+{
+  "info": {
+    "_postman_id": "pmo-if-smoke-2026",
+    "name": "PMO Dashboard — Phase IF Smoke Test (Post IE Fixes)",
+    "description": "Updated smoke test collection after Phase IE deployment.\n\nCHANGES FROM IA-3 VERSION:\n✅ 03-A2: Renamed query param type= → operation_type= (Phase IE DTO fix)\n✅ 08-E: UNBLOCKED — submit now works (Phase IE fixed 'role' column drift)\n✅ 08-F: UNBLOCKED — approve works after successful submit\n✅ IF-V gate assertions added to 08-E, 08-F, 08-G\n\nEXECUTION ORDER (STRICT — variables chain across requests):\n  00-A → 01-A → 02-A → 03-A → 03-B → 03-C → 04-A → 04-B → 04-C\n  → 05-A → 06-A → 06-B → 06-C → 06-D → 06-E → 07-A → 07-B → 07-C\n  → 07-D → 08-A → 08-B → 08-C → 08-D → 08-E → 08-F → 08-G\n  → 09-A → 09-B → 09-C → 09-D → 10-A..10-I → 11-1..11-6 → 12-1..12-6\n  → CLEANUP\n\nCRITICAL: Run 03-B before any /:id/ endpoint (sets {{op_id}}).\nCRITICAL: Run 06-A before 06-D (sets {{tax_id}}).\nCRITICAL: Run 08-A before 08-E (sets {{qr_id}}).\nCRITICAL: 08-E must succeed (PENDING_REVIEW) before 08-F (approve).\n\nGATE CRITERIA:\n  IF-V1: 08-E returns 200 + publication_status = PENDING_REVIEW\n  IF-V2: 08-F returns 200 + publication_status = PUBLISHED\n  IF-V3: 06-A returns 200 with valid {{op_id}} in URL\n  IF-V4: IA-V7–IA-V12 (no this.db.query / DatabaseModule regressions)\n  IF-V5: IE-V1–IE-V5 (operation_type= filter works; no 'role' column 500)\n\nSection 13: Phase IJ — Assignment CRUD endpoints (IJ-V1 through IJ-V5). Requires {{staff_user_id}} collection variable to be set to a valid Staff user UUID.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000", "type": "string", "description": "Backend base URL" },
+    { "key": "token", "value": "", "type": "string", "description": "JWT — auto-set by 00-A Login" },
+    { "key": "op_id", "value": "", "type": "string", "description": "Operation UUID — auto-set by 03-B" },
+    { "key": "tax_id", "value": "", "type": "string", "description": "Taxonomy item UUID — auto-set by 06-A (first item id)" },
+    { "key": "indicator_id", "value": "", "type": "string", "description": "Indicator record UUID — auto-set by 06-D" },
+    { "key": "financial_id", "value": "", "type": "string", "description": "Financial record UUID — auto-set by 07-B" },
+    { "key": "qr_id", "value": "", "type": "string", "description": "Quarterly report UUID — auto-set by 08-A" },
+    { "key": "staff_user_id", "value": "", "type": "string", "description": "Staff user UUID — operator-supplied for Phase IJ Section 13 assignment tests" },
+    { "key": "ij_assignment_user_id", "value": "", "type": "string", "description": "Assignment user UUID — auto-set by 13-B" }
+  ],
+  "item": [
+    {
+      "name": "00 — Auth",
+      "item": [
+        {
+          "name": "00-A: Login as Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.access_token) { pm.collectionVariables.set('token', json.access_token); }",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has access_token', () => pm.expect(json.access_token).to.be.a('string'));",
+                  "pm.test('token set', () => pm.expect(pm.collectionVariables.get('token')).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json", "type": "text" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"admin\",\n  \"password\": \"admin123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Login to get Bearer token. Token is auto-set to {{token}} collection variable."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "01 — Fiscal Year (ORM IA-2a)",
+      "item": [
+        {
+          "name": "01-A: List Fiscal Years",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/config/fiscal-years",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "config", "fiscal-years"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "01-B: Create Fiscal Year (FY 2026)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 or 200', () => pm.expect([200, 201]).to.include(pm.response.code));",
+                  "pm.test('Has year field', () => pm.expect(pm.response.json()).to.have.property('year'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": 2027,\n  \"label\": \"FY 2027 (smoke test)\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/config/fiscal-years",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "config", "fiscal-years"]
+            },
+            "description": "Uses FY 2027 to avoid conflicts with existing data."
+          },
+          "response": []
+        },
+        {
+          "name": "01-C: Toggle Fiscal Year Active State",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/config/fiscal-years/2027",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "config", "fiscal-years", "2027"]
+            },
+            "description": "Toggle the smoke-test FY back off so it doesn't pollute selectors."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 — Taxonomy (ORM IA-2b — taxonomyRepo.find)",
+      "item": [
+        {
+          "name": "02-A: Taxonomy — HIGHER_EDUCATION",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test('Returns array', () => pm.expect(json).to.be.an('array'));",
+                  "if (json.length > 0) {",
+                  "  pm.test('Has pillar_type (snake_case)', () => pm.expect(json[0]).to.have.property('pillar_type'));",
+                  "  pm.test('Has indicator_name', () => pm.expect(json[0]).to.have.property('indicator_name'));",
+                  "  pm.test('Has indicator_code', () => pm.expect(json[0]).to.have.property('indicator_code'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/taxonomy/HIGHER_EDUCATION",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "taxonomy", "HIGHER_EDUCATION"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "02-B: Taxonomy — ADVANCED_EDUCATION",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/taxonomy/ADVANCED_EDUCATION",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "taxonomy", "ADVANCED_EDUCATION"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "02-C: Taxonomy — RESEARCH",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/taxonomy/RESEARCH",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "taxonomy", "RESEARCH"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "02-D: Taxonomy — TECHNICAL_ADVISORY",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/taxonomy/TECHNICAL_ADVISORY",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "taxonomy", "TECHNICAL_ADVISORY"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "02-E: Taxonomy — INVALID_PILLAR (guard → empty array)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('No 500 error', () => pm.expect(pm.response.code).to.not.equal(500));",
+                  "pm.test('Status 200 or 400', () => pm.expect([200, 400]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/taxonomy/INVALID_PILLAR",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "taxonomy", "INVALID_PILLAR"]
+            },
+            "description": "Guard test: invalid pillar returns empty array, NOT 500."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 — Operations CRUD",
+      "item": [
+        {
+          "name": "03-A: List Operations (baseline)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test('Has data array', () => pm.expect(json).to.have.property('data'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "03-A2: List Operations with operation_type Filter ✅ (Phase IE — IE-V1 gate)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[IE-V1] Status 200 with operation_type= filter', () => pm.response.to.have.status(200));",
+                  "pm.test('Has data property', () => pm.expect(pm.response.json()).to.have.property('data'));",
+                  "if (pm.response.code === 400) {",
+                  "  var body = pm.response.json();",
+                  "  console.error('❌ 400 error — Phase IE DTO fix may not be deployed:', JSON.stringify(body));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations?fiscal_year=2025&operation_type=HIGHER_EDUCATION",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations"],
+              "query": [
+                { "key": "fiscal_year", "value": "2025" },
+                { "key": "operation_type", "value": "HIGHER_EDUCATION" }
+              ]
+            },
+            "description": "✅ PHASE IE FIX: DTO field renamed from 'type' to 'operation_type'. This was 400 before IE.\n\nIE-V1 gate: must return 200 (not 400 'property type should not exist').\nIE-V2 gate (separate): sending ?type= now returns 400 — run that manually if needed."
+          },
+          "response": []
+        },
+        {
+          "name": "03-B: Create Operation ⭐ (sets {{op_id}})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) { pm.collectionVariables.set('op_id', json.id); }",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has id', () => pm.expect(json.id).to.be.a('string'));",
+                  "pm.test('op_id set', () => pm.expect(pm.collectionVariables.get('op_id')).to.be.a('string').and.not.empty);",
+                  "console.log('✅ op_id set to:', json.id, '— all /:id/ endpoints will use this.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"operation_type\": \"HIGHER_EDUCATION\",\n  \"title\": \"IF Smoke Test — HIGHER EDUCATION FY2025\",\n  \"description\": \"Smoke test operation for Phase IF verification\",\n  \"code\": \"HE-IF-2025\",\n  \"start_date\": \"2025-01-01\",\n  \"end_date\": \"2025-12-31\",\n  \"status\": \"ONGOING\",\n  \"campus\": \"MAIN\",\n  \"fiscal_year\": 2025\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations"]
+            },
+            "description": "Creates test operation. ID auto-set to {{op_id}}.\n\nMUST run before: 04-A, 04-B, 06-A, 06-C, 06-D, 07-A, 07-B, 08-A, 12-3"
+          },
+          "response": []
+        },
+        {
+          "name": "03-C: Get Operation by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test('Has operation_type', () => pm.expect(json).to.have.property('operation_type'));",
+                  "pm.test('Has title', () => pm.expect(json).to.have.property('title'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "03-D: Update Operation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Updated — Phase IF smoke test verification\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "04 — Organizational Info (ORM IA-2b — orgInfoRepo)",
+      "item": [
+        {
+          "name": "04-A: Get Org Info",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test('Has agency_entity (snake_case)', () => pm.expect(json).to.have.property('agency_entity'));",
+                  "pm.test('Has department', () => pm.expect(json).to.have.property('department'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/organizational-info",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "organizational-info"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "04-B: Update Org Info (ORM upsert)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"department\": \"Office of the Vice President for Academic Affairs\",\n  \"agency_entity\": \"Caraga State University\",\n  \"operating_unit\": \"Main Campus\",\n  \"organization_code\": \"CSU-OVPAA-IF\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/organizational-info",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "organizational-info"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "04-C: Verify Org Info Persisted",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test('Agency entity persisted', () => pm.expect(json.agency_entity).to.equal('Caraga State University'));",
+                  "pm.test('Organization code persisted', () => pm.expect(json.organization_code).to.equal('CSU-OVPAA-IF'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/organizational-info",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "organizational-info"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "05 — Pillar Operation Lookup",
+      "item": [
+        {
+          "name": "05-A: Find by Pillar + Fiscal Year",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('No 500 error', () => pm.expect(pm.response.code).to.not.equal(500));",
+                  "pm.test('Status 200 or 404', () => pm.expect([200, 404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/pillar-operation?pillar_type=HIGHER_EDUCATION&fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "pillar-operation"],
+              "query": [
+                { "key": "pillar_type", "value": "HIGHER_EDUCATION" },
+                { "key": "fiscal_year", "value": "2025" }
+              ]
+            },
+            "description": "Physical/Financial page entry point. 404 acceptable if no operation exists for this pillar+year."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "06 — Indicators",
+      "item": [
+        {
+          "name": "06-A: Get Indicator Taxonomy for Operation ⭐ (IF-V3 gate — sets {{tax_id}})",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var opId = pm.collectionVariables.get('op_id');",
+                  "if (!opId || opId === '') {",
+                  "  console.error('❌ PRE-REQUEST: {{op_id}} is not set. Run 03-B first.');",
+                  "  throw new Error('op_id not set — run 03-B before 06-A');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[IF-V3] Status 200 (valid op_id in URL)', () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test('Returns array', () => pm.expect(json).to.be.an('array'));",
+                  "if (json.length > 0) {",
+                  "  pm.collectionVariables.set('tax_id', json[0].id);",
+                  "  pm.test('Has id field', () => pm.expect(json[0]).to.have.property('id'));",
+                  "  pm.test('tax_id set', () => pm.expect(pm.collectionVariables.get('tax_id')).to.be.a('string').and.not.empty);",
+                  "  console.log('✅ IF-V3 PASS: indicator-taxonomy returned 200 with valid op_id.');",
+                  "  console.log('✅ tax_id set to:', json[0].id);",
+                  "} else {",
+                  "  console.error('❌ Taxonomy empty. Ensure operation has a valid operation_type matching a seeded pillar.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/indicator-taxonomy",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "indicator-taxonomy"]
+            },
+            "description": "IF-V3 gate: must return 200 (was 404 when {{op_id}} was empty in IA-3 smoke run).\n\nPre-request guard aborts if {{op_id}} is unset, preventing the empty-URL 404.\n\nFirst taxonomy item id auto-saved to {{tax_id}} for 06-D."
+          },
+          "response": []
+        },
+        {
+          "name": "06-B: Get Indicators by Pillar + Year + Quarter",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/indicators?pillar_type=HIGHER_EDUCATION&fiscal_year=2025&quarter=Q1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "indicators"],
+              "query": [
+                { "key": "pillar_type", "value": "HIGHER_EDUCATION" },
+                { "key": "fiscal_year", "value": "2025" },
+                { "key": "quarter", "value": "Q1" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "06-C: Get Indicators for Operation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/indicators?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "indicators"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "06-D: Create Quarterly Indicator (uses {{tax_id}} from 06-A) → sets {{indicator_id}}",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var taxId = pm.collectionVariables.get('tax_id');",
+                  "if (!taxId || taxId === '') {",
+                  "  console.error('❌ PRE-REQUEST: {{tax_id}} not set. Run 06-A first.');",
+                  "  throw new Error('tax_id not set — run 06-A before 06-D');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) { pm.collectionVariables.set('indicator_id', json.id); }",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has id', () => pm.expect(json.id).to.be.a('string'));",
+                  "pm.test('indicator_id set', () => pm.expect(pm.collectionVariables.get('indicator_id')).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pillar_indicator_id\": \"{{tax_id}}\",\n  \"fiscal_year\": 2025,\n  \"reported_quarter\": \"Q1\",\n  \"target_q1\": 100,\n  \"accomplishment_q1\": 85,\n  \"score_q1\": \"85/100\",\n  \"remarks\": \"IF smoke test Q1 entry\",\n  \"facilitating_factors\": \"Strong departmental support\",\n  \"catch_up_plan\": null,\n  \"ways_forward\": \"Continue current momentum\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/indicators/quarterly",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "indicators", "quarterly"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "06-E: Update Quarterly Indicator Data",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accomplishment_q1\": 90,\n  \"score_q1\": \"90/100\",\n  \"remarks\": \"Updated after IF smoke test\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/indicators/{{indicator_id}}/quarterly",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "indicators", "{{indicator_id}}", "quarterly"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "07 — Financials",
+      "item": [
+        {
+          "name": "07-A: Get Financials for Operation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/financials?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "financials"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "07-B: Create Financial Record ⭐ (sets {{financial_id}})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) { pm.collectionVariables.set('financial_id', json.id); }",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has id', () => pm.expect(json.id).to.be.a('string'));",
+                  "pm.test('Has allotment', () => pm.expect(json).to.have.property('allotment'));",
+                  "pm.test('financial_id set', () => pm.expect(pm.collectionVariables.get('financial_id')).to.be.a('string').and.not.empty);",
+                  "if (json.utilization_rate !== undefined) {",
+                  "  pm.test('Has utilization_rate computed', () => pm.expect(json.utilization_rate).to.be.a('number'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fiscal_year\": 2025,\n  \"quarter\": \"Q1\",\n  \"operations_programs\": \"General Administration and Support Services\",\n  \"department\": \"Office of the President\",\n  \"fund_type\": \"RAF_PROGRAMS\",\n  \"expense_class\": \"MOOE\",\n  \"allotment\": 5000000,\n  \"target\": 4500000,\n  \"obligation\": 4200000,\n  \"disbursement\": 3900000,\n  \"performance_indicator\": \"Q1 operational expenditure\",\n  \"remarks\": \"IF smoke test financial entry\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/financials",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "financials"]
+            },
+            "description": "Creates financial record. Verify computed metrics: utilization_rate ≈ 84, disbursement_rate ≈ 92.86."
+          },
+          "response": []
+        },
+        {
+          "name": "07-C: Update Financial Record",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"disbursement\": 4000000,\n  \"remarks\": \"Updated disbursement — IF smoke test\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/financials/{{financial_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "financials", "{{financial_id}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "07-D: Get Financials with Filters",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/financials?fiscal_year=2025&quarter=Q1&expense_class=MOOE",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "financials"],
+              "query": [
+                { "key": "fiscal_year", "value": "2025" },
+                { "key": "quarter", "value": "Q1" },
+                { "key": "expense_class", "value": "MOOE" }
+              ]
+            },
+            "description": "Should return the record created in 07-B."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "08 — Quarterly Reports + Workflow Lifecycle (IF-V1, IF-V2)",
+      "item": [
+        {
+          "name": "08-A: Create Quarterly Report ⭐ (sets {{qr_id}})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) { pm.collectionVariables.set('qr_id', json.id); }",
+                  "pm.test('Status 201 or 200', () => pm.expect([200, 201]).to.include(pm.response.code));",
+                  "pm.test('Has id', () => pm.expect(json.id).to.be.a('string'));",
+                  "pm.test('Has publication_status', () => pm.expect(json).to.have.property('publication_status'));",
+                  "pm.test('Status is DRAFT', () => pm.expect(json.publication_status).to.equal('DRAFT'));",
+                  "pm.test('qr_id set', () => pm.expect(pm.collectionVariables.get('qr_id')).to.be.a('string').and.not.empty);",
+                  "console.log('✅ qr_id set to:', json.id, '— 08-E and 08-F will use this.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fiscal_year\": 2025,\n  \"quarter\": \"Q2\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/quarterly-reports",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "quarterly-reports"]
+            },
+            "description": "Uses Q2 to avoid conflict with Q1 records from prior smoke runs. ORM path: em.create(QuarterlyReport)."
+          },
+          "response": []
+        },
+        {
+          "name": "08-B: Create Same QR Again → idempotent (same id)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "pm.test('Status 201 or 200', () => pm.expect([200, 201]).to.include(pm.response.code));",
+                  "pm.test('Same id as 08-A (idempotent)', () => pm.expect(json.id).to.equal(pm.collectionVariables.get('qr_id')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fiscal_year\": 2025,\n  \"quarter\": \"Q2\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/quarterly-reports",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "quarterly-reports"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "08-C: List Quarterly Reports",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/quarterly-reports?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "quarterly-reports"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "08-D: Get Quarterly Report by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test('Correct id returned', () => pm.expect(json.id).to.equal(pm.collectionVariables.get('qr_id')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/quarterly-reports/{{qr_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "quarterly-reports", "{{qr_id}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "08-E: Submit Quarterly Report ✅ (IF-V1 gate — Phase IE fix)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var qrId = pm.collectionVariables.get('qr_id');",
+                  "if (!qrId || qrId === '') {",
+                  "  console.error('❌ PRE-REQUEST: {{qr_id}} not set. Run 08-A first.');",
+                  "  throw new Error('qr_id not set — run 08-A before 08-E');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[IF-V1] Status 200 — no 500 role column error', () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test('[IF-V1] publication_status = PENDING_REVIEW', () => pm.expect(json.publication_status).to.equal('PENDING_REVIEW'));",
+                  "if (pm.response.code === 200) {",
+                  "  console.log('✅ IF-V1 PASS: submit returned 200, status = PENDING_REVIEW. Phase IE role fix confirmed.');",
+                  "}",
+                  "if (pm.response.code === 500) {",
+                  "  var body = pm.response.json();",
+                  "  console.error('❌ IF-V1 FAIL: 500 error —', JSON.stringify(body));",
+                  "  console.error('Phase IE (permissionResolver.isAdminFromDatabase) may not be deployed.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/quarterly-reports/{{qr_id}}/submit",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "quarterly-reports", "{{qr_id}}", "submit"]
+            },
+            "description": "✅ UNBLOCKED — Phase IE deployed.\n\nIF-V1 gate: must return 200 + publication_status = PENDING_REVIEW.\n\nFix applied (Phase IE): submitQuarterlyReport() now calls\n  this.permissionResolver.isAdminFromDatabase(userId)\ninstead of the broken 'SELECT role FROM users WHERE id=$1'.\n\n08-F (approve) depends on this returning PENDING_REVIEW."
+          },
+          "response": []
+        },
+        {
+          "name": "08-F: Approve Quarterly Report ✅ (IF-V2 gate — Admin)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var qrId = pm.collectionVariables.get('qr_id');",
+                  "if (!qrId || qrId === '') {",
+                  "  console.error('❌ PRE-REQUEST: {{qr_id}} not set. Run 08-A first.');",
+                  "  throw new Error('qr_id not set — run 08-A before 08-F');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[IF-V2] Status 200', () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test('[IF-V2] publication_status = PUBLISHED', () => pm.expect(json.publication_status).to.equal('PUBLISHED'));",
+                  "if (pm.response.code === 200) {",
+                  "  console.log('✅ IF-V2 PASS: approve returned 200, status = PUBLISHED. Full workflow lifecycle confirmed.');",
+                  "}",
+                  "if (pm.response.code === 400) {",
+                  "  var body = pm.response.json();",
+                  "  if (body.message && body.message.includes('PENDING_REVIEW')) {",
+                  "    console.error('❌ IF-V2 FAIL: QR still in DRAFT. 08-E (submit) must have failed. Check IF-V1 first.');",
+                  "  } else {",
+                  "    console.error('❌ IF-V2 FAIL: 400 —', JSON.stringify(body));",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/quarterly-reports/{{qr_id}}/approve",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "quarterly-reports", "{{qr_id}}", "approve"]
+            },
+            "description": "✅ UNBLOCKED — depends on 08-E succeeding (PENDING_REVIEW state).\n\nIF-V2 gate: must return 200 + publication_status = PUBLISHED.\n\nIf this returns 400 'Only PENDING_REVIEW reports can be approved', it means 08-E failed — resolve IF-V1 first."
+          },
+          "response": []
+        },
+        {
+          "name": "08-G: Get Submission History (audit trail after 08-E + 08-F)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "var json = pm.response.json();",
+                  "pm.test('Returns array', () => pm.expect(json).to.be.an('array'));",
+                  "pm.test('Has SUBMITTED + APPROVED events (≥2 rows)', () => pm.expect(json.length).to.be.at.least(2));",
+                  "var eventTypes = json.map(function(r) { return r.event_type; });",
+                  "pm.test('Contains SUBMITTED event', () => pm.expect(eventTypes).to.include('SUBMITTED'));",
+                  "pm.test('Contains APPROVED event', () => pm.expect(eventTypes).to.include('APPROVED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/quarterly-reports/submission-history?fiscal_year=2025&quarter=Q2",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "quarterly-reports", "submission-history"],
+              "query": [
+                { "key": "fiscal_year", "value": "2025" },
+                { "key": "quarter", "value": "Q2" }
+              ]
+            },
+            "description": "Verifies submission audit trail. Expects SUBMITTED (from 08-E) + APPROVED (from 08-F) events."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "09 — Operation Workflow",
+      "item": [
+        {
+          "name": "09-A: My Drafts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/my-drafts",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "my-drafts"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "09-B: Pending Review List (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/pending-review",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "pending-review"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10 — Analytics (IA-3 converted CTE queries)",
+      "item": [
+        {
+          "name": "10-A: Physical Pillar Summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/analytics/pillar-summary?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "analytics", "pillar-summary"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10-B: Physical Quarterly Trend",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/analytics/quarterly-trend?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "analytics", "quarterly-trend"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10-C: Physical Quarterly Trend (Pillar Filter)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/analytics/quarterly-trend?fiscal_year=2025&pillar_type=HIGHER_EDUCATION",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "analytics", "quarterly-trend"],
+              "query": [
+                { "key": "fiscal_year", "value": "2025" },
+                { "key": "pillar_type", "value": "HIGHER_EDUCATION" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10-D: Yearly Comparison",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/analytics/yearly-comparison?years=2023,2024,2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "analytics", "yearly-comparison"],
+              "query": [{ "key": "years", "value": "2023,2024,2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10-E: Financial Pillar Summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/analytics/financial-pillar-summary?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "analytics", "financial-pillar-summary"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10-F: Financial Quarterly Trend",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/analytics/financial-quarterly-trend?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "analytics", "financial-quarterly-trend"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10-G: Financial Expense Breakdown",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/analytics/financial-expense-breakdown?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "analytics", "financial-expense-breakdown"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10-H: Financial Campus Breakdown",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/analytics/financial-campus-breakdown?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "analytics", "financial-campus-breakdown"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "10-I: Financial Pillar × Expense Breakdown",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/analytics/financial-pillar-expense-breakdown?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "analytics", "financial-pillar-expense-breakdown"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "11 — REGRESSION: Physical Page Flow (IA-V12)",
+      "description": "6-step flow mimicking what the Physical Accomplishment page does on load. ALL 6 must return 200 to satisfy IA-V12.",
+      "item": [
+        {
+          "name": "11-1: List Fiscal Years (Physical page init)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Physical Step 1/6] Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/config/fiscal-years",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "config", "fiscal-years"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "11-2: Find Pillar Operation (Physical page context)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Physical Step 2/6] No 500 error', () => pm.expect(pm.response.code).to.not.equal(500));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/pillar-operation?pillar_type=HIGHER_EDUCATION&fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "pillar-operation"],
+              "query": [
+                { "key": "pillar_type", "value": "HIGHER_EDUCATION" },
+                { "key": "fiscal_year", "value": "2025" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "11-3: Get Taxonomy (Physical page indicator definitions)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Physical Step 3/6] Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/taxonomy/HIGHER_EDUCATION",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "taxonomy", "HIGHER_EDUCATION"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "11-4: Get Indicators Data Rows (Physical page table)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Physical Step 4/6] Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/indicators?pillar_type=HIGHER_EDUCATION&fiscal_year=2025&quarter=Q1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "indicators"],
+              "query": [
+                { "key": "pillar_type", "value": "HIGHER_EDUCATION" },
+                { "key": "fiscal_year", "value": "2025" },
+                { "key": "quarter", "value": "Q1" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "11-5: Physical Pillar Summary (KPI cards)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Physical Step 5/6] Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/analytics/pillar-summary?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "analytics", "pillar-summary"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "11-6: List QR Status (Physical page report status) — IA-V12 Physical PASS",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Physical Step 6/6 — IA-V12] Status 200', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  console.log('✅ IA-V12 Physical page regression PASS');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/quarterly-reports?fiscal_year=2025&quarter=Q1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "quarterly-reports"],
+              "query": [
+                { "key": "fiscal_year", "value": "2025" },
+                { "key": "quarter", "value": "Q1" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "12 — REGRESSION: Financial Page Flow (IA-V12)",
+      "description": "6-step flow mimicking what the Financial Accomplishment page does on load. ALL 6 must return 200 to satisfy IA-V12.",
+      "item": [
+        {
+          "name": "12-1: List Fiscal Years (Financial page init)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Financial Step 1/6] Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/config/fiscal-years",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "config", "fiscal-years"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "12-2: Find Pillar Operation (Financial page context)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Financial Step 2/6] No 500 error', () => pm.expect(pm.response.code).to.not.equal(500));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/pillar-operation?pillar_type=HIGHER_EDUCATION&fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "pillar-operation"],
+              "query": [
+                { "key": "pillar_type", "value": "HIGHER_EDUCATION" },
+                { "key": "fiscal_year", "value": "2025" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "12-3: Get Financial Records (Financial page table)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Financial Step 3/6] Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/financials?fiscal_year=2025&quarter=Q1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "financials"],
+              "query": [
+                { "key": "fiscal_year", "value": "2025" },
+                { "key": "quarter", "value": "Q1" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "12-4: Financial Pillar Summary (Hero KPI cards)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Financial Step 4/6] Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/analytics/financial-pillar-summary?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "analytics", "financial-pillar-summary"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "12-5: Financial Quarterly Trend (Trend chart)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Financial Step 5/6] Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/analytics/financial-quarterly-trend?fiscal_year=2025",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "analytics", "financial-quarterly-trend"],
+              "query": [{ "key": "fiscal_year", "value": "2025" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "12-6: List QR Status (Financial page report status) — IA-V12 Financial PASS",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('[Financial Step 6/6 — IA-V12] Status 200', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  console.log('✅ IA-V12 Financial page regression PASS');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/quarterly-reports?fiscal_year=2025&quarter=Q1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "quarterly-reports"],
+              "query": [
+                { "key": "fiscal_year", "value": "2025" },
+                { "key": "quarter", "value": "Q1" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "13 — Assignments (IJ)",
+      "description": "Phase IJ — Assignment CRUD endpoints (IJ-V1 through IJ-V5). Requires {{staff_user_id}} collection variable set to a valid Staff user UUID.",
+      "item": [
+        {
+          "name": "13-A: GET /:id/assignments (List)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('13-A: GET assignments returns 200 with array', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/assignments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "assignments"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "13-B: POST /:id/assignments (Add — IJ-V2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('13-B: POST assignment returns 201 with assignment object', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.property('id');",
+                  "  pm.expect(body).to.have.property('userId');",
+                  "  pm.collectionVariables.set('ij_assignment_user_id', body.userId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{staff_user_id}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/assignments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "assignments"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "13-C: POST /:id/assignments same user (Idempotency — IJ-V3)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('13-C: Repeat POST returns existing assignment (idempotent — no duplicate)', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.userId).to.equal(pm.collectionVariables.get('staff_user_id'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{staff_user_id}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/assignments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "assignments"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "13-D: DELETE /:id/assignments/:userId (IJ-V4)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('13-D: DELETE assignment returns 204 No Content', function () {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}/assignments/{{ij_assignment_user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}", "assignments", "{{ij_assignment_user_id}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "CLEANUP (run after all tests pass)",
+      "item": [
+        {
+          "name": "CLEANUP: Delete Test Operation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204 or 200', () => pm.expect([200, 204]).to.include(pm.response.code));",
+                  "console.log('✅ Cleanup complete. Test operation soft-deleted.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}", "type": "text" }],
+            "url": {
+              "raw": "{{base_url}}/api/university-operations/{{op_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "university-operations", "{{op_id}}"]
+            },
+            "description": "Soft-deletes the test operation created in 03-B. Does not affect existing FY2025 production data."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

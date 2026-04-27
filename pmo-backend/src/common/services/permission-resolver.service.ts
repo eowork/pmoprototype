@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { DatabaseService } from '../../database/database.service';
+import { EntityManager } from '@mikro-orm/core';
 import { JwtPayload } from '../interfaces';
+import { User, UserRole, Role } from '../../database/entities';
 
 /**
  * Permission Result for detailed responses
@@ -25,7 +26,7 @@ export interface PermissionResult {
 export class PermissionResolverService {
   private readonly logger = new Logger(PermissionResolverService.name);
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(private readonly em: EntityManager) {}
 
   /**
    * Check if user has Admin role (from JWT - for read operations)
@@ -47,55 +48,35 @@ export class PermissionResolverService {
    * This prevents JWT token manipulation attacks for critical operations
    */
   async isAdminFromDatabase(userId: string): Promise<boolean> {
-    const result = await this.db.query(
-      `SELECT COALESCE(
-                (SELECT TRUE
-                 FROM user_roles ur
-                 WHERE ur.user_id = $1 AND ur.is_superadmin = TRUE
-                 LIMIT 1),
-                FALSE
-              ) as is_superadmin,
-              COALESCE(
-                (SELECT array_agg(r.name)
-                 FROM user_roles ur
-                 JOIN roles r ON r.id = ur.role_id
-                 WHERE ur.user_id = $1),
-                ARRAY[]::varchar[]
-              ) as roles`,
-      [userId],
-    );
+    const superadminRole = await this.em.findOne(UserRole, {
+      userId,
+      isSuperadmin: true,
+    });
+    if (superadminRole) return true;
 
-    if (result.rows.length === 0) {
-      return false;
-    }
+    const userRoles = await this.em.find(UserRole, { userId });
+    if (userRoles.length === 0) return false;
 
-    const { is_superadmin, roles } = result.rows[0];
-    return is_superadmin || roles.includes('Admin');
+    const roleIds = userRoles.map((ur) => ur.roleId);
+    const adminRole = await this.em.findOne(Role, {
+      id: { $in: roleIds },
+      name: 'Admin',
+    });
+    return !!adminRole;
   }
 
   /**
    * Check if approver can approve a submission based on rank authority
-   *
-   * Rules (per research.md Section 1.35):
-   * - SuperAdmin bypasses rank check
-   * - Approver must have lower rank_level (higher authority) than submitter
-   * - Equal rank cannot approve each other
-   *
-   * @param approverId - The user attempting to approve
-   * @param submitterId - The user who created/submitted the record
-   * @param isSuperAdmin - Whether the approver is SuperAdmin (bypasses rank check)
    */
   async canApproveByRank(
     approverId: string,
     submitterId: string,
     isSuperAdmin: boolean,
   ): Promise<PermissionResult> {
-    // SuperAdmin bypasses rank check
     if (isSuperAdmin) {
       return { allowed: true };
     }
 
-    // Self-approval prevention
     if (approverId === submitterId) {
       return {
         allowed: false,
@@ -103,27 +84,21 @@ export class PermissionResolverService {
       };
     }
 
-    // Fetch both users' rank levels in a single query
-    const result = await this.db.query(
-      `SELECT
-        (SELECT rank_level FROM users WHERE id = $1 AND deleted_at IS NULL) as approver_rank,
-        (SELECT rank_level FROM users WHERE id = $2 AND deleted_at IS NULL) as submitter_rank`,
-      [approverId, submitterId],
-    );
+    const approver = await this.em.findOne(User, { id: approverId });
+    const submitter = await this.em.findOne(User, { id: submitterId });
 
-    const approverLevel = result.rows[0]?.approver_rank ?? 100;
-    const submitterLevel = result.rows[0]?.submitter_rank ?? 100;
+    const approverLevel = approver?.rankLevel ?? 100;
+    const submitterLevel = submitter?.rankLevel ?? 100;
 
-    // Lower rank_level = higher authority
-    // Approver must have strictly lower rank_level than submitter
     if (approverLevel >= submitterLevel) {
       this.logger.debug(
         `RANK_APPROVAL_DENIED: approver=${approverId} (rank ${approverLevel}) ` +
-        `cannot approve submitter=${submitterId} (rank ${submitterLevel})`,
+          `cannot approve submitter=${submitterId} (rank ${submitterLevel})`,
       );
       return {
         allowed: false,
-        reason: 'Insufficient authority: Your rank does not allow you to approve this submission',
+        reason:
+          'Insufficient authority: Your rank does not allow you to approve this submission',
       };
     }
 
@@ -132,40 +107,32 @@ export class PermissionResolverService {
 
   /**
    * Check if user can modify a target user based on rank hierarchy
-   *
-   * Rules:
-   * - SuperAdmin can modify anyone
-   * - Others can only modify users with higher rank_level (lower authority)
-   *
-   * @param actorId - The user performing the modification
-   * @param targetId - The user being modified
-   * @param isSuperAdmin - Whether the actor is SuperAdmin
+   * HYBRID: uses can_modify_user() PG stored function
    */
   async canModifyUserByRank(
     actorId: string,
     targetId: string,
     isSuperAdmin: boolean,
   ): Promise<PermissionResult> {
-    // SuperAdmin can modify anyone
     if (isSuperAdmin) {
       return { allowed: true };
     }
 
-    // Cannot modify yourself via this check (self-edit handled elsewhere)
     if (actorId === targetId) {
       return { allowed: true };
     }
 
-    // Use database function for rank comparison
-    const result = await this.db.query(
-      `SELECT can_modify_user($1, $2) as can_modify`,
+    const conn = this.em.getConnection();
+    const result = await conn.execute(
+      'SELECT can_modify_user(?, ?) as can_modify',
       [actorId, targetId],
     );
 
-    if (!result.rows[0]?.can_modify) {
+    if (!result[0]?.can_modify) {
       return {
         allowed: false,
-        reason: 'Insufficient authority: Cannot modify a user with equal or higher rank',
+        reason:
+          'Insufficient authority: Cannot modify a user with equal or higher rank',
       };
     }
 
@@ -174,15 +141,14 @@ export class PermissionResolverService {
 
   /**
    * Check if user has module assignment for approval
-   *
-   * @param userId - The user to check
-   * @param module - Module type ('CONSTRUCTION', 'REPAIR', 'OPERATIONS', 'ALL')
+   * HYBRID: uses user_has_module_access() PG stored function
    */
   async hasModuleAssignment(userId: string, module: string): Promise<boolean> {
-    const result = await this.db.query(
-      `SELECT user_has_module_access($1, $2::module_type) as has_access`,
+    const conn = this.em.getConnection();
+    const result = await conn.execute(
+      'SELECT user_has_module_access(?, ?::module_type) as has_access',
       [userId, module],
     );
-    return result.rows[0]?.has_access ?? false;
+    return result[0]?.has_access ?? false;
   }
 }

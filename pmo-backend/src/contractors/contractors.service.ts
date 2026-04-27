@@ -1,146 +1,136 @@
-import {
-  Injectable,
-  NotFoundException,
-  ConflictException,
-  Logger,
-} from '@nestjs/common';
-import { DatabaseService } from '../database/database.service';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { InjectRepository } from '@mikro-orm/nestjs';
+import { EntityRepository } from '@mikro-orm/core';
+import type { FilterQuery } from '@mikro-orm/core';
 import { createPaginatedResponse, PaginatedResponse } from '../common/dto';
-import { CreateContractorDto, UpdateContractorDto, QueryContractorDto } from './dto';
+import {
+  CreateContractorDto,
+  UpdateContractorDto,
+  QueryContractorDto,
+} from './dto';
+import { Contractor } from '../database/entities';
 
 @Injectable()
 export class ContractorsService {
   private readonly logger = new Logger(ContractorsService.name);
-  private readonly ALLOWED_SORTS = ['created_at', 'updated_at', 'name', 'status'];
+  private readonly ALLOWED_SORTS = ['createdAt', 'updatedAt', 'name', 'status'];
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    @InjectRepository(Contractor)
+    private readonly repo: EntityRepository<Contractor>,
+  ) {}
 
   async findAll(query: QueryContractorDto): Promise<PaginatedResponse<any>> {
-    const { page = 1, limit = 20, sort = 'created_at', order = 'desc' } = query;
-    const offset = (page - 1) * limit;
+    const { page = 1, limit = 20, sort = 'createdAt', order = 'desc' } = query;
 
-    const sortColumn = this.ALLOWED_SORTS.includes(sort) ? sort : 'created_at';
-    const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const sortKey = this.ALLOWED_SORTS.includes(sort) ? sort : 'createdAt';
+    const sortOrder = (order.toLowerCase() === 'asc' ? 'asc' : 'desc') as
+      | 'asc'
+      | 'desc';
 
-    const conditions: string[] = ['deleted_at IS NULL'];
-    const params: any[] = [];
-    let paramIndex = 1;
-
+    const where: FilterQuery<Contractor> = {};
     if (query.status) {
-      conditions.push(`status = $${paramIndex++}`);
-      params.push(query.status);
+      where.status = query.status;
     }
     if (query.name) {
-      conditions.push(`name ILIKE $${paramIndex++}`);
-      params.push(`%${query.name}%`);
+      where.name = { $ilike: `%${query.name}%` };
     }
 
-    const whereClause = conditions.join(' AND ');
+    const [items, total] = await this.repo.findAndCount(where, {
+      limit,
+      offset: (page - 1) * limit,
+      orderBy: { [sortKey]: sortOrder },
+    });
 
-    const countResult = await this.db.query(
-      `SELECT COUNT(*) FROM contractors WHERE ${whereClause}`,
-      params,
-    );
-    const total = parseInt(countResult.rows[0].count, 10);
-
-    const dataResult = await this.db.query(
-      `SELECT id, name, contact_person, email, phone, address, tin_number,
-              registration_number, validity_date, status, created_at, updated_at
-       FROM contractors
-       WHERE ${whereClause}
-       ORDER BY ${sortColumn} ${sortOrder}
-       LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
-      [...params, limit, offset],
-    );
-
-    return createPaginatedResponse(dataResult.rows, total, page, limit);
+    return createPaginatedResponse(items, total, page, limit);
   }
 
-  async findOne(id: string): Promise<any> {
-    const result = await this.db.query(
-      `SELECT * FROM contractors WHERE id = $1 AND deleted_at IS NULL`,
-      [id],
-    );
-
-    if (result.rows.length === 0) {
+  async findOne(id: string): Promise<Contractor> {
+    const item = await this.repo.findOne({ id });
+    if (!item) {
       throw new NotFoundException(`Contractor with ID ${id} not found`);
     }
-
-    return result.rows[0];
+    return item;
   }
 
-  async create(dto: CreateContractorDto, userId: string): Promise<any> {
-    const result = await this.db.query(
-      `INSERT INTO contractors
-       (name, contact_person, email, phone, address, tin_number, registration_number,
-        validity_date, status, metadata, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING *`,
-      [
-        dto.name,
-        dto.contact_person || null,
-        dto.email || null,
-        dto.phone || null,
-        dto.address || null,
-        dto.tin_number || null,
-        dto.registration_number || null,
-        dto.validity_date || null,
-        dto.status,
-        dto.metadata ? JSON.stringify(dto.metadata) : null,
-        userId,
-      ],
+  async create(dto: CreateContractorDto, userId: string): Promise<Contractor> {
+    const entity = this.repo.create({
+      name: dto.name,
+      contactPerson: dto.contact_person,
+      email: dto.email,
+      phone: dto.phone,
+      address: dto.address,
+      tinNumber: dto.tin_number,
+      registrationNumber: dto.registration_number,
+      validityDate: dto.validity_date ? new Date(dto.validity_date) : undefined,
+      status: dto.status,
+      metadata: dto.metadata,
+      createdBy: userId,
+    });
+
+    await this.repo.getEntityManager().persist(entity).flush();
+    this.logger.log(`CONTRACTOR_CREATED: id=${entity.id}, by=${userId}`);
+    return entity;
+  }
+
+  async update(
+    id: string,
+    dto: UpdateContractorDto,
+    userId: string,
+  ): Promise<Contractor> {
+    const entity = await this.findOne(id);
+
+    const fields = Object.keys(dto).filter(
+      (k) => (dto as any)[k] !== undefined,
     );
-
-    this.logger.log(`CONTRACTOR_CREATED: id=${result.rows[0].id}, by=${userId}`);
-    return result.rows[0];
-  }
-
-  async update(id: string, dto: UpdateContractorDto, userId: string): Promise<any> {
-    await this.findOne(id);
-
-    const fields = Object.keys(dto).filter((k) => dto[k] !== undefined);
     if (fields.length === 0) {
-      return this.findOne(id);
+      return entity;
     }
 
-    const setClause = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
-    const values = fields.map((f) => (f === 'metadata' ? JSON.stringify(dto[f]) : dto[f]));
+    if (dto.name !== undefined) entity.name = dto.name;
+    if (dto.contact_person !== undefined)
+      entity.contactPerson = dto.contact_person;
+    if (dto.email !== undefined) entity.email = dto.email;
+    if (dto.phone !== undefined) entity.phone = dto.phone;
+    if (dto.address !== undefined) entity.address = dto.address;
+    if (dto.tin_number !== undefined) entity.tinNumber = dto.tin_number;
+    if (dto.registration_number !== undefined)
+      entity.registrationNumber = dto.registration_number;
+    if (dto.validity_date !== undefined)
+      entity.validityDate = dto.validity_date
+        ? new Date(dto.validity_date)
+        : undefined;
+    if (dto.status !== undefined) entity.status = dto.status;
+    if (dto.metadata !== undefined) entity.metadata = dto.metadata;
+    entity.updatedBy = userId;
 
-    const result = await this.db.query(
-      `UPDATE contractors
-       SET ${setClause}, updated_by = $${fields.length + 1}, updated_at = NOW()
-       WHERE id = $${fields.length + 2} AND deleted_at IS NULL
-       RETURNING *`,
-      [...values, userId, id],
+    await this.repo.getEntityManager().flush();
+    this.logger.log(
+      `CONTRACTOR_UPDATED: id=${id}, by=${userId}, fields=[${fields.join(',')}]`,
     );
-
-    this.logger.log(`CONTRACTOR_UPDATED: id=${id}, by=${userId}, fields=[${fields.join(',')}]`);
-    return result.rows[0];
+    return entity;
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    await this.findOne(id);
-
-    await this.db.query(
-      `UPDATE contractors SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
-      [userId, id],
-    );
-
+    const entity = await this.findOne(id);
+    entity.deletedAt = new Date();
+    entity.deletedBy = userId;
+    await this.repo.getEntityManager().flush();
     this.logger.log(`CONTRACTOR_DELETED: id=${id}, by=${userId}`);
   }
 
-  async updateStatus(id: string, status: string, userId: string): Promise<any> {
-    await this.findOne(id);
-
-    const result = await this.db.query(
-      `UPDATE contractors
-       SET status = $1, updated_by = $2, updated_at = NOW()
-       WHERE id = $3 AND deleted_at IS NULL
-       RETURNING *`,
-      [status, userId, id],
+  async updateStatus(
+    id: string,
+    status: string,
+    userId: string,
+  ): Promise<Contractor> {
+    const entity = await this.findOne(id);
+    entity.status = status;
+    entity.updatedBy = userId;
+    await this.repo.getEntityManager().flush();
+    this.logger.log(
+      `CONTRACTOR_STATUS_UPDATED: id=${id}, status=${status}, by=${userId}`,
     );
-
-    this.logger.log(`CONTRACTOR_STATUS_UPDATED: id=${id}, status=${status}, by=${userId}`);
-    return result.rows[0];
+    return entity;
   }
 }
