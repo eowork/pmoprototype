@@ -8,7 +8,6 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { LdapStrategy } from './strategies/ldap.strategy';
 import { JwtAuthGuard, RolesGuard } from './guards';
-import { DatabaseModule } from '../database/database.module';
 import { MikroOrmModule } from '@mikro-orm/nestjs';
 import {
   User,
@@ -24,7 +23,6 @@ import {
 
 @Module({
   imports: [
-    DatabaseModule,
     MikroOrmModule.forFeature([
       User,
       Role,

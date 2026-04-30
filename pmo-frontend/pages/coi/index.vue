@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { adaptProjects, type UIProject, type BackendProject, type PublicationStatus } from '~/utils/adapters'
+import VueApexCharts from 'vue3-apexcharts'
 
 definePageMeta({
   middleware: ['auth', 'permission'],
@@ -243,16 +244,63 @@ function formatCurrency(amount: number): string {
   }).format(amount)
 }
 
-// Filtered projects
+// Phase JB: KPI stats + filter bar
+const filterStatus = ref('')
+const filterCampus = ref('')
+
+const statusFilterOptions = [
+  { title: 'All', value: '' },
+  { title: 'Planning', value: 'PLANNING' },
+  { title: 'Ongoing', value: 'ONGOING' },
+  { title: 'Completed', value: 'COMPLETED' },
+  { title: 'On Hold', value: 'ON_HOLD' },
+  { title: 'Cancelled', value: 'CANCELLED' },
+]
+const campusFilterOptions = [
+  { title: 'All Campuses', value: '' },
+  { title: 'Main Campus', value: 'MAIN' },
+  { title: 'Cabadbaran', value: 'CABADBARAN' },
+]
+
+const stats = ref({
+  total: 0,
+  ongoing: 0,
+  completed: 0,
+  pendingReview: 0,
+  totalContractValue: 0,
+  avgProgress: 0,
+})
+
+function computeStats(projectList: UIProject[]) {
+  stats.value.total = projectList.length
+  stats.value.ongoing = projectList.filter(p => p.status === 'ONGOING' || p.status?.toLowerCase() === 'ongoing').length
+  stats.value.completed = projectList.filter(p => p.status === 'COMPLETED' || p.status?.toLowerCase() === 'completed').length
+  stats.value.pendingReview = projectList.filter(p => p.publicationStatus === 'PENDING_REVIEW').length
+  stats.value.totalContractValue = projectList.reduce((sum, p) => sum + (p.totalContractAmount || 0), 0)
+  stats.value.avgProgress = projectList.length > 0
+    ? projectList.reduce((sum, p) => sum + (p.physicalAccomplishment || 0), 0) / projectList.length
+    : 0
+}
+
+// Filtered projects (search + status + campus)
 const filteredProjects = computed(() => {
-  if (!search.value) return projects.value
-  const term = search.value.toLowerCase()
-  return projects.value.filter(
-    (p) =>
-      p.projectName.toLowerCase().includes(term) ||
-      p.campus.toLowerCase().includes(term) ||
-      p.status.toLowerCase().includes(term)
-  )
+  let result = projects.value
+  if (filterStatus.value) {
+    result = result.filter(p => p.status?.toUpperCase() === filterStatus.value)
+  }
+  if (filterCampus.value) {
+    result = result.filter(p => p.campus?.toUpperCase() === filterCampus.value)
+  }
+  if (search.value) {
+    const term = search.value.toLowerCase()
+    result = result.filter(
+      (p) =>
+        p.projectName.toLowerCase().includes(term) ||
+        p.campus.toLowerCase().includes(term) ||
+        p.status.toLowerCase().includes(term)
+    )
+  }
+  return result
 })
 
 async function fetchProjects() {
@@ -260,6 +308,7 @@ async function fetchProjects() {
   try {
     const response = await api.get<{ data: BackendProject[] }>('/api/construction-projects')
     projects.value = adaptProjects(response.data || [])
+    computeStats(projects.value)
   } catch (err: unknown) {
     const error = err as { message?: string }
     toast.error(error.message || 'Failed to load projects')
@@ -267,6 +316,65 @@ async function fetchProjects() {
   } finally {
     loading.value = false
   }
+}
+
+// --- Phase JF: Analytics ---
+const activeTab = ref('projects')
+const analyticsLoading = ref(false)
+const analyticsSummary = ref<any>(null)
+const financialSummary = ref<any>(null)
+const analyticsError = ref<string | null>(null)
+
+async function fetchAnalytics() {
+  analyticsLoading.value = true
+  analyticsError.value = null
+  try {
+    const [summary, financial] = await Promise.all([
+      api.get<any>('/api/construction-projects/analytics/summary'),
+      api.get<any>('/api/construction-projects/analytics/financial-summary'),
+    ])
+    analyticsSummary.value = summary
+    financialSummary.value = financial
+  } catch (err: any) {
+    console.error('[COI Analytics] Failed to fetch:', err)
+    analyticsError.value = err?.message || 'Failed to load analytics data'
+  } finally {
+    analyticsLoading.value = false
+  }
+}
+
+watch(activeTab, (tab) => {
+  if (tab === 'analytics' && !analyticsSummary.value) fetchAnalytics()
+})
+
+const statusChartOptions = computed(() => ({
+  chart: { type: 'donut' as const, toolbar: { show: false } },
+  labels: (analyticsSummary.value?.by_status || []).map((s: any) => s.status),
+  legend: { position: 'bottom' as const },
+  colors: ['#059669', '#3b82f6', '#f59e0b', '#ef4444', '#6b7280'],
+}))
+
+const statusChartSeries = computed(() =>
+  (analyticsSummary.value?.by_status || []).map((s: any) => s.count)
+)
+
+const campusChartOptions = computed(() => ({
+  chart: { type: 'bar' as const, toolbar: { show: false } },
+  xaxis: { categories: (analyticsSummary.value?.by_campus || []).map((c: any) => c.campus || 'Unknown') },
+  plotOptions: { bar: { borderRadius: 4, columnWidth: '50%' } },
+  colors: ['#059669'],
+  dataLabels: { enabled: false },
+}))
+
+const campusChartSeries = computed(() => [{
+  name: 'Projects',
+  data: (analyticsSummary.value?.by_campus || []).map((c: any) => c.count),
+}])
+
+function formatCurrencyShort(amount: number): string {
+  if (amount >= 1_000_000_000) return `₱${(amount / 1_000_000_000).toFixed(1)}B`
+  if (amount >= 1_000_000) return `₱${(amount / 1_000_000).toFixed(1)}M`
+  return `₱${amount.toLocaleString()}`
 }
 
 onMounted(fetchProjects)
@@ -289,21 +397,84 @@ onMounted(fetchProjects)
       </v-btn>
     </div>
 
+    <!-- Tab Navigation (Phase JF) -->
+    <v-tabs v-model="activeTab" class="mb-4" color="primary">
+      <v-tab value="projects" prepend-icon="mdi-format-list-bulleted">Projects</v-tab>
+      <v-tab value="analytics" prepend-icon="mdi-chart-bar">Analytics</v-tab>
+    </v-tabs>
+
+    <v-window v-model="activeTab">
+
+    <!-- Projects Tab -->
+    <v-window-item value="projects">
+
+    <!-- KPI Stats Panel (Phase JB) -->
+    <v-row class="mb-4" dense>
+      <v-col cols="6" md="3">
+        <v-card color="primary" variant="tonal" class="pa-4">
+          <p class="text-caption">Total Projects</p>
+          <p class="text-h4 font-weight-bold">{{ stats.total }}</p>
+        </v-card>
+      </v-col>
+      <v-col cols="6" md="3">
+        <v-card color="success" variant="tonal" class="pa-4">
+          <p class="text-caption">Completed</p>
+          <p class="text-h4 font-weight-bold">{{ stats.completed }}</p>
+        </v-card>
+      </v-col>
+      <v-col cols="6" md="3">
+        <v-card color="info" variant="tonal" class="pa-4">
+          <p class="text-caption">Ongoing</p>
+          <p class="text-h4 font-weight-bold">{{ stats.ongoing }}</p>
+        </v-card>
+      </v-col>
+      <v-col cols="6" md="3">
+        <v-card color="orange" variant="tonal" class="pa-4">
+          <p class="text-caption">Avg. Progress</p>
+          <p class="text-h4 font-weight-bold">{{ stats.avgProgress.toFixed(1) }}%</p>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <!-- Filter Bar (Phase JB) -->
+    <v-row dense class="mb-3">
+      <v-col cols="12" sm="4">
+        <v-text-field
+          v-model="search"
+          label="Search projects..."
+          prepend-inner-icon="mdi-magnify"
+          variant="outlined"
+          density="compact"
+          clearable
+          hide-details
+        />
+      </v-col>
+      <v-col cols="6" sm="3">
+        <v-select
+          v-model="filterStatus"
+          :items="statusFilterOptions"
+          label="Status"
+          variant="outlined"
+          density="compact"
+          hide-details
+        />
+      </v-col>
+      <v-col cols="6" sm="3">
+        <v-select
+          v-model="filterCampus"
+          :items="campusFilterOptions"
+          label="Campus"
+          variant="outlined"
+          density="compact"
+          hide-details
+        />
+      </v-col>
+    </v-row>
+
     <!-- Data Table Card -->
     <v-card>
       <!-- Toolbar -->
       <v-card-title class="d-flex align-center pa-4">
-        <v-text-field
-          v-model="search"
-          prepend-inner-icon="mdi-magnify"
-          label="Search projects"
-          single-line
-          hide-details
-          density="compact"
-          variant="outlined"
-          class="mr-4"
-          style="max-width: 300px"
-        />
         <v-spacer />
         <v-chip color="primary" variant="tonal">
           {{ filteredProjects.length }} projects
@@ -472,6 +643,110 @@ onMounted(fetchProjects)
         </template>
       </v-data-table>
     </v-card>
+
+    </v-window-item>
+    <!-- End Projects Tab -->
+
+    <!-- Analytics Tab (Phase JF) -->
+    <v-window-item value="analytics">
+      <div v-if="analyticsLoading" class="text-center py-12">
+        <v-progress-circular indeterminate color="primary" size="48" />
+        <p class="mt-4 text-grey">Loading analytics...</p>
+      </div>
+      <div v-else-if="analyticsError" class="text-center py-12">
+        <v-icon icon="mdi-alert-circle-outline" size="64" color="error" class="mb-2" />
+        <p class="text-h6 text-error">Failed to load analytics</p>
+        <p class="text-body-2 text-grey mb-4">{{ analyticsError }}</p>
+        <v-btn color="primary" variant="tonal" prepend-icon="mdi-refresh" @click="fetchAnalytics">Retry</v-btn>
+      </div>
+      <template v-else-if="analyticsSummary">
+        <!-- Financial Hero Row -->
+        <v-row class="mb-4" dense>
+          <v-col cols="6" md="3">
+            <v-card color="primary" variant="tonal" class="pa-4">
+              <p class="text-caption">Total Appropriation</p>
+              <p class="text-h5 font-weight-bold">{{ formatCurrencyShort(financialSummary?.total_appropriation || 0) }}</p>
+            </v-card>
+          </v-col>
+          <v-col cols="6" md="3">
+            <v-card color="info" variant="tonal" class="pa-4">
+              <p class="text-caption">Total Obligation</p>
+              <p class="text-h5 font-weight-bold">{{ formatCurrencyShort(financialSummary?.total_obligation || 0) }}</p>
+            </v-card>
+          </v-col>
+          <v-col cols="6" md="3">
+            <v-card color="success" variant="tonal" class="pa-4">
+              <p class="text-caption">Total Disbursement</p>
+              <p class="text-h5 font-weight-bold">{{ formatCurrencyShort(financialSummary?.total_disbursement || 0) }}</p>
+            </v-card>
+          </v-col>
+          <v-col cols="6" md="3">
+            <v-card color="orange" variant="tonal" class="pa-4">
+              <p class="text-caption">Utilization Rate</p>
+              <p class="text-h5 font-weight-bold">{{ (financialSummary?.utilization_rate || 0).toFixed(1) }}%</p>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <!-- Charts Row -->
+        <v-row>
+          <v-col cols="12" md="5">
+            <v-card class="pa-4">
+              <v-card-title class="text-body-1 font-weight-bold mb-2">Status Distribution</v-card-title>
+              <VueApexCharts
+                v-if="statusChartSeries.length > 0"
+                type="donut"
+                height="280"
+                :options="statusChartOptions"
+                :series="statusChartSeries"
+              />
+              <div v-else class="text-center py-8 text-grey">No project data</div>
+            </v-card>
+          </v-col>
+          <v-col cols="12" md="7">
+            <v-card class="pa-4">
+              <v-card-title class="text-body-1 font-weight-bold mb-2">Projects by Campus</v-card-title>
+              <VueApexCharts
+                v-if="campusChartSeries[0]?.data?.length > 0"
+                type="bar"
+                height="280"
+                :options="campusChartOptions"
+                :series="campusChartSeries"
+              />
+              <div v-else class="text-center py-8 text-grey">No campus data</div>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <!-- Publication Status Breakdown -->
+        <v-row class="mt-4">
+          <v-col cols="12">
+            <v-card class="pa-4">
+              <v-card-title class="text-body-1 font-weight-bold mb-3">Publication Status Breakdown</v-card-title>
+              <div class="d-flex flex-wrap ga-3">
+                <v-chip
+                  v-for="item in analyticsSummary.by_publication_status"
+                  :key="item.publication_status"
+                  :color="item.publication_status === 'PUBLISHED' ? 'success' : item.publication_status === 'PENDING_REVIEW' ? 'orange' : item.publication_status === 'REJECTED' ? 'error' : 'grey'"
+                  variant="tonal"
+                  size="large"
+                >
+                  {{ item.publication_status }}: {{ item.count }}
+                </v-chip>
+              </div>
+            </v-card>
+          </v-col>
+        </v-row>
+      </template>
+      <div v-else class="text-center py-12 text-grey">
+        <v-icon icon="mdi-chart-bar" size="64" class="mb-2" />
+        <p class="text-h6">No analytics data yet</p>
+        <v-btn color="primary" variant="tonal" prepend-icon="mdi-refresh" class="mt-3" @click="fetchAnalytics">Load Analytics</v-btn>
+      </div>
+    </v-window-item>
+    <!-- End Analytics Tab -->
+
+    </v-window>
 
     <!-- Delete Confirmation Dialog -->
     <v-dialog v-model="deleteDialog" max-width="400" persistent>

@@ -214,6 +214,16 @@ export interface BackendProjectDetail extends BackendProject {
   building_type?: string
   floor_area?: number
   number_of_floors?: number
+  latitude?: number
+  longitude?: number
+  ideal_infrastructure_image?: string
+  original_contract_duration?: string
+  objectives?: string[]
+  key_features?: string[]
+  physical_progress?: number
+  financial_progress?: number
+  target_physical_progress?: number
+  target_financial_progress?: number
   subcategory?: { id: string; name: string }
   milestones?: BackendMilestone[]
   financials?: BackendFinancial[]
@@ -221,20 +231,34 @@ export interface BackendProjectDetail extends BackendProject {
 
 export interface BackendMilestone {
   id: string
-  milestone_name: string
-  target_date?: string
-  actual_date?: string
-  weight_percentage?: number
-  progress_percentage?: number
+  title: string
+  description?: string
+  targetDate?: string
+  actualDate?: string
   status: string
+  remarks?: string
+  createdAt?: string
 }
 
 export interface BackendFinancial {
   id: string
-  description: string
-  amount: number
-  date_recorded?: string
-  financial_type: string
+  projectId: string
+  fiscalYear: number
+  appropriation: string
+  obligation: string
+  disbursement: string
+  metadata?: Record<string, unknown>
+  createdAt?: string
+}
+
+export interface BackendGalleryItem {
+  id: string
+  projectId: string
+  imageUrl: string
+  caption?: string
+  category: string
+  isFeatured: boolean
+  uploadedAt: string
 }
 
 export interface UIProjectDetail extends UIProject {
@@ -247,32 +271,52 @@ export interface UIProjectDetail extends UIProject {
   targetCompletionDate: string
   actualCompletionDate: string
   projectDuration: string
+  originalContractDuration: string
   projectEngineer: string
   projectManager: string
   buildingType: string
   floorArea: number
   numberOfFloors: number
+  idealInfrastructureImage: string
+  latitude: number | null
+  longitude: number | null
+  physicalProgress: number
+  financialProgress: number
+  targetPhysicalProgress: number
+  targetFinancialProgress: number
   subcategory: string
   milestones: UIMilestone[]
   financials: UIFinancial[]
+  gallery: UIGalleryItem[]
 }
 
 export interface UIMilestone {
   id: string
   name: string
+  description: string
   targetDate: string
   actualDate: string
-  weight: number
-  progress: number
   status: string
+  remarks: string
 }
 
 export interface UIFinancial {
   id: string
-  description: string
-  amount: number
-  dateRecorded: string
-  type: string
+  fiscalYear: number
+  appropriation: number
+  obligation: number
+  disbursement: number
+  utilizationRate: number
+  disbursementRate: number
+}
+
+export interface UIGalleryItem {
+  id: string
+  imageUrl: string
+  caption: string
+  category: string
+  isFeatured: boolean
+  uploadedAt: string
 }
 
 export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDetail {
@@ -287,36 +331,61 @@ export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDeta
     targetCompletionDate: backend.target_completion_date || '',
     actualCompletionDate: backend.actual_completion_date || '',
     projectDuration: backend.project_duration || '',
+    originalContractDuration: backend.original_contract_duration || '',
     projectEngineer: backend.project_engineer || '',
     projectManager: backend.project_manager || '',
     buildingType: backend.building_type || '',
     floorArea: backend.floor_area || 0,
     numberOfFloors: backend.number_of_floors || 0,
+    idealInfrastructureImage: backend.ideal_infrastructure_image || '',
+    latitude: typeof backend.latitude === 'number' ? backend.latitude : (backend.latitude ? Number(backend.latitude) : null),
+    longitude: typeof backend.longitude === 'number' ? backend.longitude : (backend.longitude ? Number(backend.longitude) : null),
+    physicalProgress: typeof backend.physical_progress === 'number' ? backend.physical_progress : Number(backend.physical_progress || 0),
+    financialProgress: typeof backend.financial_progress === 'number' ? backend.financial_progress : Number(backend.financial_progress || 0),
+    targetPhysicalProgress: typeof backend.target_physical_progress === 'number' ? backend.target_physical_progress : Number(backend.target_physical_progress || 100),
+    targetFinancialProgress: typeof backend.target_financial_progress === 'number' ? backend.target_financial_progress : Number(backend.target_financial_progress || 100),
     subcategory: backend.subcategory?.name || '',
     milestones: (backend.milestones || []).map(adaptMilestone),
     financials: (backend.financials || []).map(adaptFinancial),
+    gallery: [],
   }
 }
 
 export function adaptMilestone(backend: BackendMilestone): UIMilestone {
   return {
     id: backend.id,
-    name: backend.milestone_name,
-    targetDate: backend.target_date || '',
-    actualDate: backend.actual_date || '',
-    weight: backend.weight_percentage || 0,
-    progress: backend.progress_percentage || 0,
-    status: backend.status,
+    name: backend.title || '',
+    description: backend.description || '',
+    targetDate: backend.targetDate || '',
+    actualDate: backend.actualDate || '',
+    status: backend.status || 'PENDING',
+    remarks: backend.remarks || '',
   }
 }
 
 export function adaptFinancial(backend: BackendFinancial): UIFinancial {
+  const appropriation = parseFloat(backend.appropriation || '0')
+  const obligation = parseFloat(backend.obligation || '0')
+  const disbursement = parseFloat(backend.disbursement || '0')
   return {
     id: backend.id,
-    description: backend.description,
-    amount: backend.amount,
-    dateRecorded: backend.date_recorded || '',
-    type: backend.financial_type,
+    fiscalYear: backend.fiscalYear,
+    appropriation,
+    obligation,
+    disbursement,
+    utilizationRate: appropriation > 0 ? (obligation / appropriation) * 100 : 0,
+    disbursementRate: obligation > 0 ? (disbursement / obligation) * 100 : 0,
+  }
+}
+
+export function adaptGalleryItem(backend: BackendGalleryItem): UIGalleryItem {
+  return {
+    id: backend.id,
+    imageUrl: backend.imageUrl,
+    caption: backend.caption || '',
+    category: backend.category || 'PROGRESS',
+    isFeatured: backend.isFeatured || false,
+    uploadedAt: backend.uploadedAt || '',
   }
 }
 

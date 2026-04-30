@@ -124,6 +124,22 @@ export class CreateConstructionProjectDto {
   longitude?: number;
 
   @IsOptional()
+  @IsNumber()
+  target_physical_progress?: number;
+
+  @IsOptional()
+  @IsNumber()
+  target_financial_progress?: number;
+
+  @IsOptional()
+  @IsNumber()
+  physical_progress?: number;
+
+  @IsOptional()
+  @IsNumber()
+  financial_progress?: number;
+
+  @IsOptional()
   metadata?: Record<string, any>;
 
   // Phase AN: Inline assignment during creation (DEPRECATED - use assigned_user_ids)

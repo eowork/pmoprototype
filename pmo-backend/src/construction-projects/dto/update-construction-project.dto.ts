@@ -17,6 +17,18 @@ export class UpdateConstructionProjectDto extends PartialType(
   @Max(100)
   financial_progress?: number;
 
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  target_physical_progress?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  target_financial_progress?: number;
+
   // Phase AF: Record-level delegation
   @IsOptional()
   @IsUUID()

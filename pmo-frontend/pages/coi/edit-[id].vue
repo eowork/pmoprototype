@@ -27,6 +27,9 @@ const form = ref({
   project_code: '',
   title: '',
   description: '',
+  ideal_infrastructure_image: '',
+  objectives: '',
+  key_features: '',
   campus: '',
   status: '',
   funding_source_id: '',
@@ -37,13 +40,19 @@ const form = ref({
   target_completion_date: '',
   actual_completion_date: '',
   project_duration: '',
+  original_contract_duration: '',
   project_engineer: '',
   project_manager: '',
   building_type: '',
   floor_area: null as number | null,
   number_of_floors: null as number | null,
+  latitude: null as number | null,
+  longitude: null as number | null,
   beneficiaries: '',
   physical_progress: null as number | null,
+  financial_progress: null as number | null,
+  target_physical_progress: 100 as number,
+  target_financial_progress: 100 as number,
   // Phase AW: Multi-select assignment
   assigned_user_ids: [] as string[],
 })
@@ -107,6 +116,9 @@ async function fetchData() {
       project_code: p.project_code || '',
       title: p.title || '',
       description: p.description || '',
+      ideal_infrastructure_image: p.ideal_infrastructure_image || '',
+      objectives: Array.isArray(p.objectives) ? p.objectives.join('\n') : '',
+      key_features: Array.isArray(p.key_features) ? p.key_features.join('\n') : '',
       campus: p.campus || '',
       status: p.status || '',
       funding_source_id: p.funding_source_id || '',
@@ -117,13 +129,19 @@ async function fetchData() {
       target_completion_date: p.target_completion_date ? p.target_completion_date.split('T')[0] : '',
       actual_completion_date: p.actual_completion_date ? p.actual_completion_date.split('T')[0] : '',
       project_duration: p.project_duration || '',
+      original_contract_duration: p.original_contract_duration || '',
       project_engineer: p.project_engineer || '',
       project_manager: p.project_manager || '',
       building_type: p.building_type || '',
       floor_area: p.floor_area || null,
       number_of_floors: p.number_of_floors || null,
+      latitude: p.latitude ?? null,
+      longitude: p.longitude ?? null,
       beneficiaries: p.beneficiaries || '',
-      physical_progress: p.physical_progress || null,
+      physical_progress: p.physical_progress ?? null,
+      financial_progress: p.financial_progress ?? null,
+      target_physical_progress: p.target_physical_progress ?? 100,
+      target_financial_progress: p.target_financial_progress ?? 100,
       // Phase AW: Multi-select assignment - extract IDs from assigned_users array
       assigned_user_ids: ((p as any).assigned_users || []).map((u: { id: string }) => u.id),
     }
@@ -149,10 +167,20 @@ async function handleSubmit() {
   submitting.value = true
 
   try {
+    const objectivesArr = form.value.objectives
+      ? form.value.objectives.split('\n').map(s => s.trim()).filter(Boolean)
+      : undefined
+    const keyFeaturesArr = form.value.key_features
+      ? form.value.key_features.split('\n').map(s => s.trim()).filter(Boolean)
+      : undefined
+
     const payload = {
       project_code: form.value.project_code,
       title: form.value.title,
       description: form.value.description || undefined,
+      ideal_infrastructure_image: form.value.ideal_infrastructure_image || undefined,
+      objectives: objectivesArr,
+      key_features: keyFeaturesArr,
       campus: form.value.campus,
       status: form.value.status,
       funding_source_id: form.value.funding_source_id,
@@ -163,13 +191,19 @@ async function handleSubmit() {
       target_completion_date: form.value.target_completion_date || undefined,
       actual_completion_date: form.value.actual_completion_date || undefined,
       project_duration: form.value.project_duration || undefined,
+      original_contract_duration: form.value.original_contract_duration || undefined,
       project_engineer: form.value.project_engineer || undefined,
       project_manager: form.value.project_manager || undefined,
       building_type: form.value.building_type || undefined,
       floor_area: form.value.floor_area || undefined,
       number_of_floors: form.value.number_of_floors || undefined,
+      latitude: form.value.latitude ?? undefined,
+      longitude: form.value.longitude ?? undefined,
       beneficiaries: form.value.beneficiaries || undefined,
-      physical_progress: form.value.physical_progress || undefined,
+      physical_progress: form.value.physical_progress ?? undefined,
+      financial_progress: form.value.financial_progress ?? undefined,
+      target_physical_progress: form.value.target_physical_progress ?? undefined,
+      target_financial_progress: form.value.target_financial_progress ?? undefined,
       // Phase AW: Multi-select assignment
       assigned_user_ids: form.value.assigned_user_ids.length > 0 ? form.value.assigned_user_ids : undefined,
     }
@@ -275,6 +309,41 @@ onMounted(() => {
                     density="comfortable"
                   />
                 </v-col>
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="form.ideal_infrastructure_image"
+                    label="Ideal/Proposed Infrastructure Image URL"
+                    placeholder="https://example.com/image.jpg"
+                    hint="Link to rendering or proposed design image"
+                    persistent-hint
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12">
+                  <v-textarea
+                    v-model="form.objectives"
+                    label="Project Objectives"
+                    placeholder="One objective per line"
+                    hint="Enter each objective on a new line"
+                    persistent-hint
+                    rows="3"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12">
+                  <v-textarea
+                    v-model="form.key_features"
+                    label="Key Features"
+                    placeholder="One feature per line"
+                    hint="Enter each feature on a new line"
+                    persistent-hint
+                    rows="3"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.status"
@@ -287,18 +356,6 @@ onMounted(() => {
                   />
                 </v-col>
                 <v-col cols="12" sm="6">
-                  <v-text-field
-                    v-model.number="form.physical_progress"
-                    label="Physical Progress (%)"
-                    type="number"
-                    placeholder="0"
-                    :rules="[rules.percentage]"
-                    suffix="%"
-                    variant="outlined"
-                    density="comfortable"
-                  />
-                </v-col>
-                <v-col cols="12">
                   <v-text-field
                     v-model="form.beneficiaries"
                     label="Beneficiaries"
@@ -415,6 +472,79 @@ onMounted(() => {
                     density="comfortable"
                   />
                 </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model="form.original_contract_duration"
+                    label="Original Contract Duration"
+                    placeholder="e.g., 365 days"
+                    hint="Original contractual duration"
+                    persistent-hint
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+              </v-row>
+            </v-card-text>
+          </v-card>
+
+          <!-- Progress -->
+          <v-card class="mb-4">
+            <v-card-title>Progress</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <v-row>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model.number="form.physical_progress"
+                    label="Actual Physical Progress"
+                    type="number"
+                    min="0"
+                    max="100"
+                    suffix="%"
+                    :rules="[rules.percentage]"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model.number="form.target_physical_progress"
+                    label="Target Physical Progress"
+                    type="number"
+                    min="0"
+                    max="100"
+                    suffix="%"
+                    :rules="[rules.percentage]"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model.number="form.financial_progress"
+                    label="Actual Financial Progress"
+                    type="number"
+                    min="0"
+                    max="100"
+                    suffix="%"
+                    :rules="[rules.percentage]"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model.number="form.target_financial_progress"
+                    label="Target Financial Progress"
+                    type="number"
+                    min="0"
+                    max="100"
+                    suffix="%"
+                    :rules="[rules.percentage]"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
               </v-row>
             </v-card-text>
           </v-card>
@@ -502,6 +632,30 @@ onMounted(() => {
                 type="number"
                 placeholder="3"
                 :rules="[rules.positiveNumber]"
+                variant="outlined"
+                density="comfortable"
+                class="mb-3"
+              />
+              <v-text-field
+                v-model.number="form.latitude"
+                label="Latitude"
+                type="number"
+                step="any"
+                placeholder="e.g., 9.0820"
+                hint="Decimal degrees (optional)"
+                persistent-hint
+                variant="outlined"
+                density="comfortable"
+                class="mb-3"
+              />
+              <v-text-field
+                v-model.number="form.longitude"
+                label="Longitude"
+                type="number"
+                step="any"
+                placeholder="e.g., 125.5735"
+                hint="Decimal degrees (optional)"
+                persistent-hint
                 variant="outlined"
                 density="comfortable"
               />

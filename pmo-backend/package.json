@@ -16,7 +16,18 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "migration:create": "mikro-orm migration:create",
+    "migration:up": "mikro-orm migration:up",
+    "migration:down": "mikro-orm migration:down",
+    "migration:list": "mikro-orm migration:list",
+    "migration:check": "mikro-orm migration:check"
+  },
+  "mikro-orm": {
+    "configPaths": [
+      "./src/database/mikro-orm.config.ts",
+      "./dist/database/mikro-orm.config.js"
+    ]
   },
   "dependencies": {
     "@mikro-orm/core": "^6.6.13",
@@ -50,6 +61,7 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@mikro-orm/cli": "^6.6.13",
     "@nestjs/cli": "^11.0.14",
     "@nestjs/schematics": "^10.0.0",
     "@nestjs/testing": "^10.4.22",

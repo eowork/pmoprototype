@@ -2,7 +2,8 @@ import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import Strategy = require('passport-ldapauth');
-import { DatabaseService } from '../../database/database.service';
+import { EntityManager } from '@mikro-orm/core';
+import { User } from '../../database/entities';
 
 @Injectable()
 export class LdapStrategy extends PassportStrategy(Strategy, 'ldap') {
@@ -10,7 +11,7 @@ export class LdapStrategy extends PassportStrategy(Strategy, 'ldap') {
 
   constructor(
     private readonly configService: ConfigService,
-    private readonly db: DatabaseService,
+    private readonly em: EntityManager,
   ) {
     super({
       server: {
@@ -34,7 +35,6 @@ export class LdapStrategy extends PassportStrategy(Strategy, 'ldap') {
   }
 
   async validate(ldapUser: any): Promise<any> {
-    // LDAP email attribute (OpenLDAP uses 'mail'; Active Directory uses 'userPrincipalName')
     const email: string | undefined =
       ldapUser.mail || ldapUser.userPrincipalName;
 
@@ -43,16 +43,13 @@ export class LdapStrategy extends PassportStrategy(Strategy, 'ldap') {
       throw new UnauthorizedException('No email attribute in LDAP profile');
     }
 
-    // Lookup by email — no self-registration (matches Directive 202)
-    const result = await this.db.query(
-      `SELECT id, email, is_active
-       FROM users
-       WHERE LOWER(email) = LOWER($1) AND deleted_at IS NULL
-       LIMIT 1`,
-      [email],
+    const user = await this.em.findOne(
+      User,
+      { email: { $ilike: email } },
+      { filters: false },
     );
 
-    if (result.rows.length === 0) {
+    if (!user || user.deletedAt) {
       this.logger.warn(
         `LDAP_LOGIN_FAILURE: email=${email}, reason=NO_LOCAL_ACCOUNT`,
       );
@@ -61,9 +58,7 @@ export class LdapStrategy extends PassportStrategy(Strategy, 'ldap') {
       );
     }
 
-    const user = result.rows[0];
-
-    if (!user.is_active) {
+    if (!user.isActive) {
       this.logger.warn(
         `LDAP_LOGIN_FAILURE: user_id=${user.id}, reason=ACCOUNT_INACTIVE`,
       );
@@ -73,6 +68,6 @@ export class LdapStrategy extends PassportStrategy(Strategy, 'ldap') {
     }
 
     this.logger.log(`LDAP_VALIDATE_SUCCESS: user_id=${user.id}`);
-    return user;
+    return { id: user.id, email: user.email, is_active: user.isActive };
   }
 }

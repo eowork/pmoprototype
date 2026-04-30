@@ -96,6 +96,12 @@ export class ConstructionProject {
   @Property({ columnType: 'decimal(5,2)', default: 0 })
   financialProgress: string = '0.00';
 
+  @Property({ columnType: 'decimal(5,2)', default: 100 })
+  targetPhysicalProgress: string = '100.00';
+
+  @Property({ columnType: 'decimal(5,2)', default: 100 })
+  targetFinancialProgress: string = '100.00';
+
   @Property({ nullable: true, columnType: 'jsonb' })
   timelineData?: any;
 

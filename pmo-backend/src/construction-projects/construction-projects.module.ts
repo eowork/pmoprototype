@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MikroOrmModule } from '@mikro-orm/nestjs';
 import { ConstructionProjectsController } from './construction-projects.controller';
+import { PublicConstructionController } from './public-construction.controller';
 import { ConstructionProjectsService } from './construction-projects.service';
 import { UploadsModule } from '../uploads/uploads.module';
 import {
@@ -24,7 +25,7 @@ import {
     ]),
     UploadsModule,
   ],
-  controllers: [ConstructionProjectsController],
+  controllers: [ConstructionProjectsController, PublicConstructionController],
   providers: [ConstructionProjectsService],
   exports: [ConstructionProjectsService],
 })

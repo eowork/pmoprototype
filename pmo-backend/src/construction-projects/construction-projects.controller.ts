@@ -51,6 +51,20 @@ export class ConstructionProjectsController {
     return this.service.findAll(query, user);
   }
 
+  @Get('analytics/summary')
+  @Roles('Admin', 'Staff', 'Viewer')
+  @ApiOperation({ summary: 'COI analytics summary — counts by status, campus, publication_status' })
+  getAnalyticsSummary() {
+    return this.service.getAnalyticsSummary();
+  }
+
+  @Get('analytics/financial-summary')
+  @Roles('Admin', 'Staff', 'Viewer')
+  @ApiOperation({ summary: 'COI financial analytics — aggregated appropriation, obligation, disbursement' })
+  getFinancialSummary() {
+    return this.service.getFinancialSummary();
+  }
+
   @Get('pending-review')
   @Roles('Admin')
   @ApiOperation({ summary: 'List drafts pending review (Admin only)' })

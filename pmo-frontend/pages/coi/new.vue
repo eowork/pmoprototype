@@ -18,6 +18,9 @@ const form = ref({
   project_code: '',
   title: '',
   description: '',
+  ideal_infrastructure_image: '',
+  objectives: '',
+  key_features: '',
   campus: '',
   status: 'PLANNING',
   funding_source_id: '',
@@ -26,13 +29,19 @@ const form = ref({
   contract_number: '',
   start_date: '',
   target_completion_date: '',
+  actual_completion_date: '',
   project_duration: '',
+  original_contract_duration: '',
   project_engineer: '',
   project_manager: '',
   building_type: '',
   floor_area: null as number | null,
   number_of_floors: null as number | null,
+  latitude: null as number | null,
+  longitude: null as number | null,
   beneficiaries: '',
+  target_physical_progress: 100 as number,
+  target_financial_progress: 100 as number,
   // Phase AW: Multi-select assignment
   assigned_user_ids: [] as string[],
 })
@@ -86,10 +95,20 @@ async function handleSubmit() {
 
   try {
     // Do NOT send project_id - backend will create base projects record and generate ID
+    const objectivesArr = form.value.objectives
+      ? form.value.objectives.split('\n').map(s => s.trim()).filter(Boolean)
+      : undefined
+    const keyFeaturesArr = form.value.key_features
+      ? form.value.key_features.split('\n').map(s => s.trim()).filter(Boolean)
+      : undefined
+
     const payload = {
       project_code: form.value.project_code,
       title: form.value.title,
       description: form.value.description || undefined,
+      ideal_infrastructure_image: form.value.ideal_infrastructure_image || undefined,
+      objectives: objectivesArr,
+      key_features: keyFeaturesArr,
       campus: form.value.campus,
       status: form.value.status,
       funding_source_id: form.value.funding_source_id,
@@ -98,13 +117,19 @@ async function handleSubmit() {
       contract_number: form.value.contract_number || undefined,
       start_date: form.value.start_date || undefined,
       target_completion_date: form.value.target_completion_date || undefined,
+      actual_completion_date: form.value.actual_completion_date || undefined,
       project_duration: form.value.project_duration || undefined,
+      original_contract_duration: form.value.original_contract_duration || undefined,
       project_engineer: form.value.project_engineer || undefined,
       project_manager: form.value.project_manager || undefined,
       building_type: form.value.building_type || undefined,
       floor_area: form.value.floor_area || undefined,
       number_of_floors: form.value.number_of_floors || undefined,
+      latitude: form.value.latitude ?? undefined,
+      longitude: form.value.longitude ?? undefined,
       beneficiaries: form.value.beneficiaries || undefined,
+      target_physical_progress: form.value.target_physical_progress ?? undefined,
+      target_financial_progress: form.value.target_financial_progress ?? undefined,
       // Phase AW: Multi-select assignment
       assigned_user_ids: form.value.assigned_user_ids.length > 0 ? form.value.assigned_user_ids : undefined,
     }
@@ -222,6 +247,41 @@ onMounted(() => {
                     density="comfortable"
                   />
                 </v-col>
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="form.ideal_infrastructure_image"
+                    label="Ideal/Proposed Infrastructure Image URL"
+                    placeholder="https://example.com/image.jpg"
+                    hint="Link to rendering or proposed design image"
+                    persistent-hint
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12">
+                  <v-textarea
+                    v-model="form.objectives"
+                    label="Project Objectives"
+                    placeholder="One objective per line"
+                    hint="Enter each objective on a new line"
+                    persistent-hint
+                    rows="3"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12">
+                  <v-textarea
+                    v-model="form.key_features"
+                    label="Key Features"
+                    placeholder="One feature per line"
+                    hint="Enter each feature on a new line"
+                    persistent-hint
+                    rows="3"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
                 <v-col cols="12" sm="6">
                   <v-select
                     v-model="form.status"
@@ -332,9 +392,69 @@ onMounted(() => {
                 </v-col>
                 <v-col cols="12" sm="6">
                   <v-text-field
+                    v-model="form.actual_completion_date"
+                    label="Actual Completion Date"
+                    type="date"
+                    hint="When project was actually completed"
+                    persistent-hint
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field
                     v-model="form.project_duration"
                     label="Project Duration"
                     placeholder="e.g., 12 months"
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model="form.original_contract_duration"
+                    label="Original Contract Duration"
+                    placeholder="e.g., 365 days"
+                    hint="Original contractual duration"
+                    persistent-hint
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+              </v-row>
+            </v-card-text>
+          </v-card>
+
+          <!-- Progress Targets -->
+          <v-card class="mb-4">
+            <v-card-title>Progress Targets</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <v-row>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model.number="form.target_physical_progress"
+                    label="Target Physical Progress"
+                    type="number"
+                    min="0"
+                    max="100"
+                    suffix="%"
+                    hint="Target physical accomplishment (default 100%)"
+                    persistent-hint
+                    variant="outlined"
+                    density="comfortable"
+                  />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field
+                    v-model.number="form.target_financial_progress"
+                    label="Target Financial Progress"
+                    type="number"
+                    min="0"
+                    max="100"
+                    suffix="%"
+                    hint="Target financial accomplishment (default 100%)"
+                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                   />
@@ -403,6 +523,30 @@ onMounted(() => {
                 type="number"
                 placeholder="3"
                 :rules="[rules.positiveNumber]"
+                variant="outlined"
+                density="comfortable"
+                class="mb-3"
+              />
+              <v-text-field
+                v-model.number="form.latitude"
+                label="Latitude"
+                type="number"
+                step="any"
+                placeholder="e.g., 9.0820"
+                hint="Decimal degrees (optional)"
+                persistent-hint
+                variant="outlined"
+                density="comfortable"
+                class="mb-3"
+              />
+              <v-text-field
+                v-model.number="form.longitude"
+                label="Longitude"
+                type="number"
+                step="any"
+                placeholder="e.g., 125.5735"
+                hint="Decimal degrees (optional)"
+                persistent-hint
                 variant="outlined"
                 density="comfortable"
               />

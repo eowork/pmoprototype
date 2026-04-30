@@ -260,6 +260,86 @@ export class ConstructionProjectsService {
     return { ...project, milestones, financials };
   }
 
+  // --- Analytics ---
+
+  async getAnalyticsSummary(): Promise<any> {
+    const conn = this.em.getConnection();
+    const [statusRows, campusRows, pubRows, aggRow] = await Promise.all([
+      conn.execute(
+        `SELECT status, COUNT(*) as count, COALESCE(SUM(contract_amount),0) as total_contract
+         FROM construction_projects WHERE deleted_at IS NULL GROUP BY status ORDER BY count DESC`,
+      ),
+      conn.execute(
+        `SELECT campus, COUNT(*) as count, COALESCE(SUM(contract_amount),0) as total_contract,
+                COALESCE(AVG(physical_progress),0) as avg_progress
+         FROM construction_projects WHERE deleted_at IS NULL GROUP BY campus ORDER BY count DESC`,
+      ),
+      conn.execute(
+        `SELECT publication_status, COUNT(*) as count
+         FROM construction_projects WHERE deleted_at IS NULL GROUP BY publication_status`,
+      ),
+      conn.execute(
+        `SELECT COUNT(*) as total, COALESCE(SUM(contract_amount),0) as total_contract_value,
+                COALESCE(AVG(physical_progress),0) as avg_progress
+         FROM construction_projects WHERE deleted_at IS NULL`,
+      ),
+    ]);
+    return {
+      total: parseInt(aggRow[0].total, 10),
+      total_contract_value: parseFloat(aggRow[0].total_contract_value),
+      avg_progress: parseFloat(aggRow[0].avg_progress),
+      by_status: statusRows.map((r) => ({
+        status: r.status,
+        count: parseInt(r.count, 10),
+        total_contract: parseFloat(r.total_contract),
+      })),
+      by_campus: campusRows.map((r) => ({
+        campus: r.campus,
+        count: parseInt(r.count, 10),
+        total_contract: parseFloat(r.total_contract),
+        avg_progress: parseFloat(r.avg_progress),
+      })),
+      by_publication_status: pubRows.map((r) => ({
+        publication_status: r.publication_status,
+        count: parseInt(r.count, 10),
+      })),
+    };
+  }
+
+  async getFinancialSummary(): Promise<any> {
+    const conn = this.em.getConnection();
+    const rows = await conn.execute(
+      `SELECT COALESCE(SUM(appropriation::numeric),0) as total_appropriation,
+              COALESCE(SUM(obligation::numeric),0) as total_obligation,
+              COALESCE(SUM(disbursement::numeric),0) as total_disbursement,
+              COUNT(DISTINCT project_id) as projects_with_financials
+       FROM construction_project_financials WHERE deleted_at IS NULL`,
+    );
+    const r = rows[0];
+    const appropriation = parseFloat(r.total_appropriation);
+    const obligation = parseFloat(r.total_obligation);
+    const disbursement = parseFloat(r.total_disbursement);
+    return {
+      total_appropriation: appropriation,
+      total_obligation: obligation,
+      total_disbursement: disbursement,
+      projects_with_financials: parseInt(r.projects_with_financials, 10),
+      utilization_rate: appropriation > 0 ? (obligation / appropriation) * 100 : 0,
+      disbursement_rate: obligation > 0 ? (disbursement / obligation) * 100 : 0,
+    };
+  }
+
+  // Phase JB-7: Public read — only returns PUBLISHED records
+  async findPublicOne(id: string): Promise<any> {
+    const result = await this.findOne(id);
+    if (result.publication_status !== 'PUBLISHED') {
+      throw new NotFoundException(
+        `Construction project with ID ${id} not found`,
+      );
+    }
+    return result;
+  }
+
   async create(
     dto: CreateConstructionProjectDto,
     userId: string,
@@ -316,11 +396,13 @@ export class ConstructionProjectsService {
         `INSERT INTO construction_projects
          (project_id, project_code, title, description, ideal_infrastructure_image, beneficiaries,
           objectives, key_features, original_contract_duration, contract_number, contractor_id,
-          contract_amount, start_date, target_completion_date, project_duration, project_engineer,
+          contract_amount, start_date, target_completion_date, actual_completion_date, project_duration, project_engineer,
           project_manager, building_type, floor_area, number_of_floors, funding_source_id,
-          subcategory_id, campus, status, latitude, longitude, metadata, created_by,
+          subcategory_id, campus, status, latitude, longitude,
+          physical_progress, financial_progress, target_physical_progress, target_financial_progress,
+          metadata, created_by,
           publication_status, submitted_by, submitted_at, assigned_to)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING *`,
         [
           projectId,
@@ -337,6 +419,7 @@ export class ConstructionProjectsService {
           dto.contract_amount,
           dto.start_date,
           dto.target_completion_date,
+          dto.actual_completion_date,
           dto.project_duration,
           dto.project_engineer,
           dto.project_manager,
@@ -349,6 +432,10 @@ export class ConstructionProjectsService {
           dto.status,
           dto.latitude,
           dto.longitude,
+          dto.physical_progress ?? 0,
+          dto.financial_progress ?? 0,
+          dto.target_physical_progress ?? 100,
+          dto.target_financial_progress ?? 100,
           dto.metadata ? JSON.stringify(dto.metadata) : null,
           userId,
           publicationStatus,
