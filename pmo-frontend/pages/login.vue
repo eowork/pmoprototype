@@ -4,6 +4,9 @@ definePageMeta({
   middleware: 'guest',
 })
 
+// PT-C: prevent horizontal scrollbar on blank layout pages
+useHead({ style: [{ innerHTML: 'html, body { overflow-x: hidden; max-width: 100%; }' }] })
+
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
@@ -64,9 +67,16 @@ async function handleLogin() {
     const redirect = route.query.redirect as string
     router.push(redirect || '/dashboard')
   } catch (error: unknown) {
+    // ZF-1: Map backend error codes to user-readable messages
     const err = error as { message?: string; statusCode?: number }
-    if (err.statusCode === 401) {
-      errorMessage.value = 'Invalid credentials'
+    if (err.statusCode === 429) {
+      errorMessage.value = 'Too many login attempts. Please wait a minute and try again.'
+    } else if (err.statusCode === 401) {
+      if (err.message === 'ACCOUNT_INACTIVE') {
+        errorMessage.value = 'Your account is pending activation by an administrator. You will be notified when your account is approved.'
+      } else {
+        errorMessage.value = 'Invalid credentials. Please check your email/username and password.'
+      }
     } else if (err.statusCode === 503) {
       errorMessage.value = 'Backend server not running. Please start the backend first.'
     } else {
@@ -206,6 +216,10 @@ async function handleLogin() {
           Forgot your password?
           <a href="#" @click.prevent="showResetDialog = true" class="text-primary">Request a reset</a>
         </p>
+        <p class="text-caption text-center text-medium-emphasis mt-1">
+          No account yet?
+          <a href="/register" class="text-primary">Register here</a>
+        </p>
 
         <p class="form-footer">
           &copy; {{ new Date().getFullYear() }} Caraga State University &bull; All Rights Reserved
@@ -268,6 +282,10 @@ async function handleLogin() {
   display: flex;
   min-height: 100vh;
   font-family: 'Poppins', sans-serif;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 /* Left Panel - Branding */
@@ -358,11 +376,15 @@ async function handleLogin() {
   justify-content: center;
   padding: 2rem;
   background: #f8f9fa;
+  overflow-x: hidden;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .form-wrapper {
   width: 100%;
   max-width: 400px;
+  overflow-x: hidden;
 }
 
 .mobile-logo {
