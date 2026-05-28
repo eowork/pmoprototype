@@ -48,6 +48,9 @@ export class Document {
   @Property({ length: 50, default: 'ready' })
   status: string = 'ready';
 
+  @Property({ length: 20, default: 'ACTIVE' })
+  lifecycleStatus: string = 'ACTIVE';
+
   @Property({ columnType: 'uuid' })
   uploadedBy!: string;
 
@@ -59,6 +62,9 @@ export class Document {
 
   @Property({ nullable: true, columnType: 'uuid' })
   updatedBy?: string;
+
+  @Property({ nullable: true, columnType: 'uuid' })
+  folderId?: string | null;
 
   @Property({ defaultRaw: 'NOW()', columnType: 'timestamptz' })
   createdAt: Date = new Date();

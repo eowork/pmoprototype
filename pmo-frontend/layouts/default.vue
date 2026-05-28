@@ -3,7 +3,7 @@ import { useDisplay } from 'vuetify'
 
 const router = useRouter()
 const authStore = useAuthStore()
-const { canAccessAdmin, canManageUsers, canAccessModule, currentRole, isSuperAdmin } = usePermissions()
+const { canAccessAdmin, canManageUsers, canAccessModule, currentRole, isSuperAdmin, isContractor } = usePermissions()
 
 // Responsive drawer - closed on mobile, open on desktop
 const { mdAndUp } = useDisplay()
@@ -60,8 +60,8 @@ const mainModules = computed(() => {
   return allModules.filter(m => {
     // Dashboard always visible
     if (m.key === 'dashboard') return true
-    // GAD not yet in permission system, always show
-    if (m.key === 'gad') return true
+    // QA-B: GAD uses canAccessModule (contractors excluded via CONTRACTOR_ALLOWED_MODULES)
+    if (m.key === 'gad') return canAccessModule('gad')
     // Check module access
     return canAccessModule(m.key)
   })
@@ -86,6 +86,7 @@ const administration = computed(() => {
   // Pending Reviews - Admin can review submissions
   if (canAccessAdmin.value) {
     items.push({ title: 'Pending Reviews', icon: 'mdi-clipboard-check-outline', to: '/admin/pending-reviews' })
+    items.push({ title: 'COI Activity Logs', icon: 'mdi-history', to: '/coi/activity-logs' })
   }
   // User Management
   if (canManageUsers.value) {

@@ -1,9 +1,9 @@
-import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { EntityManager } from '@mikro-orm/core';
 import { JwtPayload } from '../common/interfaces';
-import { LoginDto } from './dto';
+import { LoginDto, RegisterDto } from './dto';
 import {
   User,
   UserRole,
@@ -99,7 +99,77 @@ export class AuthService {
     };
   }
 
+  async register(dto: RegisterDto): Promise<{ message: string }> {
+    if (dto.password !== dto.confirm_password) {
+      throw new BadRequestException('Passwords do not match');
+    }
+    // PR-A: raw SQL duplicate check — more reliable than ORM $or with as any cast
+    const conn = this.em.getConnection();
+    const dup = await conn.execute(
+      `SELECT id FROM users WHERE (email = ? OR username = ?) AND deleted_at IS NULL LIMIT 1`,
+      [dto.email, dto.email],
+    );
+    if (dup.length > 0) {
+      throw new ConflictException('An account with this email already exists');
+    }
+    const nameParts = dto.full_name.trim().split(/\s+/);
+    const firstName = nameParts[0];
+    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+    const hash = await bcrypt.hash(dto.password, 10);
+    const user = this.em.create(User, {
+      username: dto.email,
+      email: dto.email,
+      passwordHash: hash,
+      firstName,
+      lastName,
+      status: 'ACTIVE',
+      isActive: true,
+      metadata: {
+        department: dto.department,
+        position: dto.position,
+        phone: dto.phone,
+        userType: dto.user_type || 'CSU_PERSONNEL',
+        userTypeOther: dto.user_type_other,
+        registeredAt: new Date().toISOString(),
+        registrationSource: 'self-registration',
+      },
+    });
+    // PR-A: catch PostgreSQL 23505 unique constraint violation (race condition guard)
+    try {
+      await this.em.persistAndFlush(user);
+    } catch (err: any) {
+      if (err?.code === '23505' || (err?.message && (err.message as string).includes('unique constraint'))) {
+        throw new ConflictException('An account with this email already exists');
+      }
+      throw err;
+    }
+    // ZG-A: Assign default 'Staff' role immediately — no admin approval gate for self-registration.
+    const staffRole = await this.em.findOne(Role, { name: 'Staff' });
+    if (staffRole) {
+      const userRole = this.em.create(UserRole, {
+        userId: user.id,
+        roleId: staffRole.id,
+        isSuperadmin: false,
+        assignedBy: null,
+      });
+      await this.em.persistAndFlush(userRole);
+    }
+    this.logger.log(`SELF_REGISTRATION: email=${dto.email}, status=ACTIVE`);
+    return { message: 'Your account has been created. You can now sign in with your credentials.' };
+  }
+
   async login(dto: LoginDto) {
+    // ZA-1: Pre-check activation status — ACCOUNT_INACTIVE is distinct from INVALID_CREDENTIALS.
+    const account = await this.em.findOne(
+      User,
+      { $or: [{ email: { $ilike: dto.identifier } }, { username: { $ilike: dto.identifier } }] },
+      { filters: false },
+    );
+    if (account && !account.isActive) {
+      this.logger.warn(`LOGIN_FAILURE: user_id=${account.id}, reason=ACCOUNT_INACTIVE`);
+      throw new UnauthorizedException('ACCOUNT_INACTIVE');
+    }
+
     const user = await this.validateUser(dto.identifier, dto.password);
 
     if (!user) {

@@ -1,10 +1,17 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateConstructionProjectDto } from './create-construction-project.dto';
-import { IsOptional, IsNumber, Min, Max, IsUUID } from 'class-validator';
+import { IsOptional, IsNumber, Min, Max, IsUUID, IsString } from 'class-validator';
 
 export class UpdateConstructionProjectDto extends PartialType(
   CreateConstructionProjectDto,
 ) {
+  // KR-D2: Override project_code to remove the inherited @Matches() regex from CreateDto.
+  // Format validation governs at CREATE only; PATCH accepts any string to prevent
+  // validation failures when the frontend re-sends an unchanged stored code.
+  @IsOptional()
+  @IsString()
+  project_code?: string;
+
   @IsOptional()
   @IsNumber()
   @Min(0)

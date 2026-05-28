@@ -1,13 +1,22 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { GlobalExceptionFilter } from './common/filters';
 import { LoggingInterceptor } from './common/interceptors';
+import { join } from 'path';
+import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // KY-A1: Serve uploaded files as static assets at /uploads prefix
+  const configService = app.get(ConfigService);
+  const uploadDir = configService.get<string>('UPLOAD_DIR', './uploads');
+  const absoluteUploadDir = join(process.cwd(), uploadDir);
+  app.useStaticAssets(absoluteUploadDir, { prefix: '/uploads' });
 
   // Enable CORS for frontend integration (future)
   app.enableCors();

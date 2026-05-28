@@ -9,6 +9,9 @@ export class FundingSource {
   @Property({ length: 100 })
   name!: string;
 
+  @Property({ nullable: true, length: 20 })
+  type?: string;
+
   @Property({ nullable: true, columnType: 'text' })
   description?: string;
 

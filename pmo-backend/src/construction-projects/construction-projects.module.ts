@@ -4,13 +4,23 @@ import { ConstructionProjectsController } from './construction-projects.controll
 import { PublicConstructionController } from './public-construction.controller';
 import { ConstructionProjectsService } from './construction-projects.service';
 import { UploadsModule } from '../uploads/uploads.module';
+import { ActivityLogModule } from '../activity-logs/activity-log.module';
 import {
   ConstructionProject,
   ConstructionMilestone,
-  ConstructionProjectFinancial,
+  ConstructionTimelineEntry,
+  ConstructionRevisionOrder,
+  ConstructionProgressReport,
+  ConstructionDocumentType,
+  ConstructionDocumentChecklist,
+  ConstructionDocumentSubmission,
+  ConstructionDocumentFolder,
+  ConstructionDiaryEntry,
   ConstructionGallery,
+  ConstructionMovEntry,
   RecordAssignment,
   Project,
+  Document,
 } from '../database/entities';
 
 @Module({
@@ -18,12 +28,22 @@ import {
     MikroOrmModule.forFeature([
       ConstructionProject,
       ConstructionMilestone,
-      ConstructionProjectFinancial,
+      ConstructionTimelineEntry,
+      ConstructionRevisionOrder,
+      ConstructionProgressReport,
+      ConstructionDocumentType,
+      ConstructionDocumentChecklist,
+      ConstructionDocumentSubmission,
+      ConstructionDocumentFolder,
+      ConstructionDiaryEntry,
       ConstructionGallery,
+      ConstructionMovEntry,
       RecordAssignment,
       Project,
+      Document,
     ]),
     UploadsModule,
+    ActivityLogModule,
   ],
   controllers: [ConstructionProjectsController, PublicConstructionController],
   providers: [ConstructionProjectsService],

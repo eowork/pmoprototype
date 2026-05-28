@@ -19,6 +19,16 @@ export class QueryUserDto extends PaginationDto {
   @IsOptional()
   @IsString()
   campus?: string;
+
+  // PQ-D: filter by registration status (ACTIVE | PENDING | REJECTED)
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  // PJ-G: filter by user type from metadata (CSU_PERSONNEL | CONTRACTOR | CONSULTANT | EXTERNAL_PARTNER)
+  @IsOptional()
+  @IsString()
+  user_type?: string;
 }
 
 export class QueryEligibleUsersDto {

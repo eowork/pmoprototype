@@ -17,8 +17,17 @@ export { Document } from './document.entity';
 export { Project } from './project.entity';
 export { ConstructionProject } from './construction-project.entity';
 export { ConstructionMilestone } from './construction-milestone.entity';
-export { ConstructionProjectFinancial } from './construction-project-financial.entity';
+export { ConstructionTimelineEntry } from './construction-timeline-entry.entity';
+export { ConstructionRevisionOrder } from './construction-revision-order.entity';
+export { ConstructionProgressReport } from './construction-progress-report.entity';
+export { ConstructionDocumentType } from './construction-document-type.entity';
+export { ConstructionDocumentChecklist } from './construction-document-checklist.entity';
+export { ConstructionDocumentSubmission } from './construction-document-submission.entity';
+export { ConstructionDocumentFolder } from './construction-document-folder.entity';
+export { ConstructionDiaryEntry } from './construction-diary-entry.entity';
+// NI (2026-05-21): ConstructionProjectFinancial REMOVED.
 export { ConstructionGallery } from './construction-gallery.entity';
+export { ConstructionMovEntry } from './construction-mov-entry.entity';
 export { RecordAssignment } from './record-assignment.entity';
 export { RepairProject } from './repair-project.entity';
 export { RepairPowItem } from './repair-pow-item.entity';

@@ -12,11 +12,12 @@ const search = ref('')
 const filterStatus = ref('')
 const filterCampus = ref('')
 
+// MG / MF: Updated status taxonomy.
 const statusFilterOptions = [
-  { title: 'All', value: '' },
-  { title: 'Planning', value: 'PLANNING' },
-  { title: 'Ongoing', value: 'ONGOING' },
-  { title: 'Completed', value: 'COMPLETED' },
+  { title: 'All',      value: ''         },
+  { title: 'Proposal', value: 'PROPOSAL' },
+  { title: 'Ongoing',  value: 'ONGOING'  },
+  { title: 'Complete', value: 'COMPLETE' },
 ]
 const campusFilterOptions = [
   { title: 'All Campuses', value: '' },

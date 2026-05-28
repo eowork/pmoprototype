@@ -115,19 +115,20 @@ export class RepairProjectsService {
   private mapRepairStatusToProjectStatus(
     repairStatus: RepairStatus,
   ): ProjectStatus {
+    // MF (2026-05-21): legacy PLANNING / COMPLETED replaced by PROPOSAL / COMPLETE.
     switch (repairStatus) {
       case RepairStatus.REPORTED:
       case RepairStatus.INSPECTED:
       case RepairStatus.APPROVED:
-        return ProjectStatus.PLANNING;
+        return ProjectStatus.PROPOSAL;
       case RepairStatus.IN_PROGRESS:
         return ProjectStatus.ONGOING;
       case RepairStatus.COMPLETED:
-        return ProjectStatus.COMPLETED;
+        return ProjectStatus.COMPLETE;
       case RepairStatus.CANCELLED:
         return ProjectStatus.CANCELLED;
       default:
-        return ProjectStatus.PLANNING;
+        return ProjectStatus.PROPOSAL;
     }
   }
 

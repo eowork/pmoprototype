@@ -35,6 +35,10 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('access_token', response.access_token)
     }
     user.value = adaptUser(response.user)
+    // VG-B: load per-project permission map for stateless render-time access
+    if (import.meta.client) {
+      await useProjectPermissionsStore().fetch()
+    }
   }
 
   async function logout(): Promise<void> {
@@ -47,6 +51,8 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = null
       if (import.meta.client) {
         localStorage.removeItem('access_token')
+        // VG-B: clear cached project permissions on logout
+        useProjectPermissionsStore().clear()
       }
     }
   }
@@ -57,6 +63,10 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const backendUser = await api.get<BackendUser>('/api/auth/me')
       user.value = adaptUser(backendUser)
+      // VG-B: load per-project permission map for stateless render-time access
+      if (import.meta.client) {
+        await useProjectPermissionsStore().fetch()
+      }
     } catch (err: any) {
       if (err?.statusCode === 401) {
         token.value = null

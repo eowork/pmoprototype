@@ -1,11 +1,14 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { Strategy, Profile, VerifyCallback } from 'passport-google-oauth20';
 import { EntityManager } from '@mikro-orm/core';
+import { User, Role, UserRole } from '../../database/entities';
 
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
+  private readonly logger = new Logger(GoogleStrategy.name);
+
   constructor(
     private readonly configService: ConfigService,
     private readonly em: EntityManager,
@@ -32,25 +35,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       );
     }
 
-    // Domain restriction (Directive 201)
-    const allowedDomains = this.configService.get<string>(
-      'GOOGLE_ALLOWED_DOMAINS',
-      '',
-    );
-    if (allowedDomains) {
-      const domains = allowedDomains.split(',').map((d) => d.trim());
-      const emailDomain = email.split('@')[1];
-      if (!domains.includes(emailDomain)) {
-        return done(
-          new UnauthorizedException(
-            'Email domain not permitted for this system',
-          ),
-          false,
-        );
-      }
-    }
-
-    // Look up user by google_id OR email (Directive 202 — no self-registration)
+    // Look up user by google_id OR email
     const result = await this.em.getConnection().execute(
       `SELECT id, email, is_active, google_id
        FROM users
@@ -61,12 +46,55 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     );
 
     if (result.length === 0) {
-      return done(
-        new UnauthorizedException(
-          'No account found. Contact your administrator.',
-        ),
-        false,
-      );
+      // ZC-A: Auto-create account for first-time Google OAuth login.
+      // OAuth-verified accounts activate immediately — no admin approval gate.
+      const displayName = profile.displayName || email.split('@')[0];
+      const nameParts = displayName.split(' ');
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+      const newUser = this.em.create(User, {
+        email,
+        username: email,
+        googleId: profile.id,
+        firstName,
+        lastName,
+        avatarUrl: profile.photos?.[0]?.value ?? undefined,
+        isActive: true,
+        status: 'ACTIVE',
+        passwordHash: '',
+        metadata: { registrationSource: 'google-oauth', registeredAt: new Date().toISOString() },
+      });
+      try {
+        await this.em.persistAndFlush(newUser);
+        // ZH-A: Assign default 'Staff' role — failure is non-blocking.
+        try {
+          const staffRole = await this.em.findOne(Role, { name: 'Staff' });
+          if (staffRole) {
+            const userRole = this.em.create(UserRole, {
+              userId: newUser.id,
+              roleId: staffRole.id,
+              isSuperadmin: false,
+              assignedBy: null,
+            });
+            await this.em.persistAndFlush(userRole);
+            this.logger.log(`GOOGLE_STAFF_ROLE_ASSIGNED: user_id=${newUser.id}`);
+          }
+        } catch (roleErr: any) {
+          this.logger.warn(`GOOGLE_STAFF_ROLE_FAILED: user_id=${newUser.id}, error=${roleErr?.message}`);
+        }
+      } catch (err: any) {
+        if (err?.code === '23505') {
+          // Race condition: email registered between lookup and insert — fetch and continue
+          const existing = await this.em.getConnection().execute(
+            `SELECT id, email, is_active, google_id FROM users WHERE LOWER(email) = LOWER(?) AND deleted_at IS NULL LIMIT 1`,
+            [email],
+          );
+          if (existing.length > 0) return done(null, existing[0]);
+        }
+        return done(err as Error, false);
+      }
+      this.logger.log(`GOOGLE_AUTO_CREATED: user_id=${newUser.id}, email=${email}`);
+      return done(null, { id: newUser.id, email: newUser.email, is_active: true, google_id: newUser.googleId });
     }
 
     const user = result[0];

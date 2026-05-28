@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsBoolean, IsDateString } from 'class-validator';
 import { GalleryCategory } from '../../common/enums';
 
 /**
@@ -23,4 +23,9 @@ export class CreateGalleryDto {
   @IsOptional()
   @IsBoolean()
   is_featured?: boolean;
+
+  // LB-C: User-supplied photo capture date (YYYY-MM-DD)
+  @IsOptional()
+  @IsDateString()
+  image_taken_date?: string;
 }

@@ -19,4 +19,26 @@ export class RecordAssignment {
 
   @Property({ nullable: true, columnType: 'uuid' })
   assignedBy?: string;
+
+  @Property({ nullable: true, length: 100 })
+  role?: string;
+
+  @Property({ nullable: true, length: 150 })
+  department?: string;
+
+  @Property({ nullable: true, length: 30 })
+  phone?: string;
+
+  // KD-D: Governance category of this personnel assignment.
+  // Expected values: IMPLEMENTING / MONITORING / UNIVERSITY_OFFICIAL / OVERSIGHT.
+  @Property({ nullable: true, length: 50 })
+  personnelCategory?: string;
+
+  // PA-A: Human-readable project role (distinct from system role, e.g. "Project Engineer")
+  @Property({ nullable: true, length: 100 })
+  projectRole?: string;
+
+  // PA-A: Per-assignment project-level permission overrides (default: viewer-only for non-Admins)
+  @Property({ columnType: 'jsonb', nullable: true })
+  permissions?: Record<string, any> | null;
 }

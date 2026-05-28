@@ -8,7 +8,31 @@
  * SECURITY: Backend must still enforce permissions. This is UX enhancement only.
  */
 export default defineNuxtRouteMiddleware((to) => {
-  const { canManageUsers, isSuperAdmin, isAdmin, canAdd, canEdit } = usePermissions()
+  const { canManageUsers, isSuperAdmin, isAdmin, canAdd, canEdit, isContractor } = usePermissions()
+
+  // QB: Contractor route isolation — allow only /dashboard, /coi, /login, /contractor paths
+  if (isContractor.value) {
+    // TB: Block project creation routes for contractors before prefix check
+    const contractorCreationBlocked = ['/coi/new']
+    if (contractorCreationBlocked.some(p => to.path === p)) {
+      console.warn(`[Permission] Contractor blocked from creation route: ${to.path}`)
+      return navigateTo('/dashboard')
+    }
+    // XC-A: Redirect contractors from edit routes to the read-only detail page.
+    // Contractors are read-only users; the edit page is an authoring surface.
+    // This guard fires before the allowlist so the early-return below cannot bypass it.
+    const editMatch = to.path.match(/^\/coi\/edit-(.+)/)
+    if (editMatch) {
+      return navigateTo(`/coi/detail-${editMatch[1]}`)
+    }
+    const allowedPrefixes = ['/dashboard', '/coi', '/login', '/contractor']
+    const allowed = allowedPrefixes.some(prefix => to.path === prefix || to.path.startsWith(prefix + '/') || to.path.startsWith(prefix + '?'))
+    if (!allowed) {
+      console.warn(`[Permission] Contractor access denied to ${to.path} — redirecting to /dashboard`)
+      return navigateTo('/dashboard')
+    }
+    return // Skip all other guards for contractors
+  }
 
   // User management routes: SuperAdmin or Admin with canManageUsers permission
   if (to.path.startsWith('/users')) {

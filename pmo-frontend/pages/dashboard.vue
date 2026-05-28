@@ -8,6 +8,7 @@ definePageMeta({
 
 const authStore = useAuthStore()
 const api = useApi()
+const { isContractor } = usePermissions()
 
 const fiscalYearStore = useFiscalYearStore()
 const { selectedFiscalYear, fiscalYearOptions } = storeToRefs(fiscalYearStore)
@@ -55,19 +56,28 @@ watch(selectedFiscalYear, () => loadUoSummary(), { immediate: true })
 
 onMounted(async () => {
   try {
-    // Fetch counts from available endpoints
-    // Phase HV: Removed /api/gad-reports — endpoint does not exist (Directive 218)
-    const [construction, repairs, uniOps] = await Promise.allSettled([
-      api.get<{ data: unknown[] }>('/api/construction-projects'),
-      api.get<{ data: unknown[] }>('/api/repair-projects'),
-      api.get<{ data: unknown[] }>('/api/university-operations'),
-    ])
-
-    stats.value = {
-      constructionProjects: construction.status === 'fulfilled' ? construction.value.data?.length || 0 : 0,
-      repairProjects: repairs.status === 'fulfilled' ? repairs.value.data?.length || 0 : 0,
-      universityOperations: uniOps.status === 'fulfilled' ? uniOps.value.data?.length || 0 : 0,
-      gadReports: 0, // Phase HV: Placeholder until GAD aggregate endpoint exists (Directive 218)
+    if (isContractor.value) {
+      // QC: Contractors only fetch COI — no access to other modules
+      const construction = await api.get<{ data: unknown[] }>('/api/construction-projects').catch(() => ({ data: [] }))
+      stats.value = {
+        constructionProjects: (construction as any).data?.length || 0,
+        repairProjects: 0,
+        universityOperations: 0,
+        gadReports: 0,
+      }
+    } else {
+      // Phase HV: /api/gad-reports does not exist (Directive 218)
+      const [construction, repairs, uniOps] = await Promise.allSettled([
+        api.get<{ data: unknown[] }>('/api/construction-projects'),
+        api.get<{ data: unknown[] }>('/api/repair-projects'),
+        api.get<{ data: unknown[] }>('/api/university-operations'),
+      ])
+      stats.value = {
+        constructionProjects: construction.status === 'fulfilled' ? construction.value.data?.length || 0 : 0,
+        repairProjects: repairs.status === 'fulfilled' ? repairs.value.data?.length || 0 : 0,
+        universityOperations: uniOps.status === 'fulfilled' ? uniOps.value.data?.length || 0 : 0,
+        gadReports: 0,
+      }
     }
   } catch {
     // Silently handle errors - stats will show 0
@@ -76,15 +86,19 @@ onMounted(async () => {
   }
 
   // Ensure fiscal year options loaded for UO summary
-  await fiscalYearStore.fetchFiscalYears()
+  if (!isContractor.value) await fiscalYearStore.fetchFiscalYears()
 })
 
-const statCards = [
-  { title: 'Infrastructure Projects', icon: 'mdi-office-building', color: 'primary', key: 'constructionProjects', to: '/coi' },
-  { title: 'Repair Projects', icon: 'mdi-tools', color: 'warning', key: 'repairProjects', to: '/repairs' },
-  { title: 'University Operations', icon: 'mdi-school', color: 'info', key: 'universityOperations', to: '/university-operations' },
-  { title: 'GAD Reports', icon: 'mdi-gender-male-female', color: 'secondary', key: 'gadReports', to: '/gad' },
-]
+// QC: statCards is computed so contractors see only COI
+const statCards = computed(() => {
+  const all = [
+    { title: 'Infrastructure Projects', icon: 'mdi-office-building', color: 'primary', key: 'constructionProjects', to: '/coi' },
+    { title: 'Repair Projects', icon: 'mdi-tools', color: 'warning', key: 'repairProjects', to: '/repairs' },
+    { title: 'University Operations', icon: 'mdi-school', color: 'info', key: 'universityOperations', to: '/university-operations' },
+    { title: 'GAD Reports', icon: 'mdi-gender-male-female', color: 'secondary', key: 'gadReports', to: '/gad' },
+  ]
+  return isContractor.value ? all.filter(c => c.to === '/coi') : all
+})
 </script>
 
 <template>
@@ -98,6 +112,9 @@ const statCards = [
         CSU CORE System Dashboard
       </p>
     </div>
+
+    <!-- KPI Row (Phase JS-C — Figma DashboardEnhanced alignment) -->
+    <AdminKpiRow v-if="!isContractor" :selected-fiscal-year="selectedFiscalYear" />
 
     <!-- Stats Cards -->
     <v-row>
@@ -154,7 +171,7 @@ const statCards = [
             View Infrastructure Projects
           </v-btn>
         </v-col>
-        <v-col cols="12" md="6">
+        <v-col v-if="!isContractor" cols="12" md="6">
           <v-btn
             to="/repairs"
             color="warning"
@@ -166,7 +183,7 @@ const statCards = [
             View Repair Projects
           </v-btn>
         </v-col>
-        <v-col cols="12" md="6">
+        <v-col v-if="!isContractor" cols="12" md="6">
           <v-btn
             to="/university-operations/physical"
             color="info"
@@ -178,7 +195,7 @@ const statCards = [
             Physical Accomplishments
           </v-btn>
         </v-col>
-        <v-col cols="12" md="6">
+        <v-col v-if="!isContractor" cols="12" md="6">
           <v-btn
             to="/university-operations/financial"
             color="success"
@@ -194,7 +211,7 @@ const statCards = [
     </v-card>
 
     <!-- UO Summary Section (Phase HP-5) -->
-    <v-card class="mt-6 pa-4" v-if="uoPhysicalSummary || uoFinancialSummary || uoAnalyticsLoading">
+    <v-card class="mt-6 pa-4" v-if="!isContractor && (uoPhysicalSummary || uoFinancialSummary || uoAnalyticsLoading)">
       <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-2">
         <h2 class="text-h6 font-weight-bold">University Operations Summary</h2>
         <div class="d-flex align-center ga-2">

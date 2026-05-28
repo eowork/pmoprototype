@@ -27,6 +27,9 @@ function getStatusColor(status: string): string {
     completed: 'success',
     planning: 'warning',
     cancelled: 'error',
+    not_started: 'grey',
+    in_progress: 'info',
+    done: 'success',
   }
   return colors[status?.toLowerCase()] || 'grey'
 }
@@ -40,7 +43,7 @@ function formatCurrency(amount: number): string {
   }).format(amount)
 }
 
-function formatDate(dateStr: string): string {
+function formatDate(dateStr: string | Date | undefined): string {
   if (!dateStr) return '-'
   return new Date(dateStr).toLocaleDateString('en-PH', {
     year: 'numeric',
@@ -162,11 +165,34 @@ onMounted(() => {
                   <p class="text-caption text-grey">Description</p>
                   <p>{{ project.description || '-' }}</p>
                 </v-col>
-                <v-col cols="12">
+                <v-col v-if="project.beneficiaries != null" cols="12">
                   <p class="text-caption text-grey">Beneficiaries</p>
-                  <p>{{ project.beneficiaries || '-' }}</p>
+                  <p>{{ project.beneficiaries.toLocaleString() }}</p>
                 </v-col>
               </v-row>
+            </v-card-text>
+          </v-card>
+
+          <!-- KT-A: Project Narrative (summary, scope, facilities) -->
+          <v-card
+            v-if="project.summary || project.scope || project.facilities"
+            class="mb-4"
+          >
+            <v-card-title>Project Narrative</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <div v-if="project.summary" class="mb-4">
+                <p class="text-caption text-grey mb-1">Summary</p>
+                <p style="white-space: pre-line">{{ project.summary }}</p>
+              </div>
+              <div v-if="project.scope" class="mb-4">
+                <p class="text-caption text-grey mb-1">Scope</p>
+                <p style="white-space: pre-line">{{ project.scope }}</p>
+              </div>
+              <div v-if="project.facilities">
+                <p class="text-caption text-grey mb-1">Facilities</p>
+                <p style="white-space: pre-line">{{ project.facilities }}</p>
+              </div>
             </v-card-text>
           </v-card>
 
@@ -197,6 +223,8 @@ onMounted(() => {
             </v-data-table>
           </v-card>
 
+          <!-- ME: POW section removed -->
+
           <!-- Gallery -->
           <v-card class="mb-4">
             <v-card-title>Gallery</v-card-title>
@@ -221,6 +249,45 @@ onMounted(() => {
         </v-col>
 
         <v-col cols="12" md="4">
+          <!-- KT-B: Strategic Profile -->
+          <v-card
+            v-if="project.strategicAlignment || project.objectives?.length || project.keyFeatures?.length || project.outputIndicators?.length || project.outcomeIndicators?.length"
+            class="mb-4"
+          >
+            <v-card-title>Strategic Profile</v-card-title>
+            <v-divider />
+            <v-card-text>
+              <div v-if="project.strategicAlignment" class="mb-4">
+                <p class="text-caption text-grey mb-1">Strategic Alignment</p>
+                <p>{{ project.strategicAlignment }}</p>
+              </div>
+              <div v-if="project.objectives?.length" class="mb-4">
+                <p class="text-caption text-grey mb-1">Objectives</p>
+                <div class="d-flex flex-wrap ga-1">
+                  <v-chip v-for="obj in project.objectives" :key="obj" size="small" variant="tonal">{{ obj }}</v-chip>
+                </div>
+              </div>
+              <div v-if="project.keyFeatures?.length" class="mb-4">
+                <p class="text-caption text-grey mb-1">Key Features</p>
+                <div class="d-flex flex-wrap ga-1">
+                  <v-chip v-for="feat in project.keyFeatures" :key="feat" size="small" variant="tonal" color="secondary">{{ feat }}</v-chip>
+                </div>
+              </div>
+              <div v-if="project.outputIndicators?.length" class="mb-4">
+                <p class="text-caption text-grey mb-1">Output Indicators</p>
+                <div class="d-flex flex-wrap ga-1">
+                  <v-chip v-for="ind in project.outputIndicators" :key="ind" size="small" variant="tonal" color="info">{{ ind }}</v-chip>
+                </div>
+              </div>
+              <div v-if="project.outcomeIndicators?.length">
+                <p class="text-caption text-grey mb-1">Outcome Indicators</p>
+                <div class="d-flex flex-wrap ga-1">
+                  <v-chip v-for="ind in project.outcomeIndicators" :key="ind" size="small" variant="tonal" color="success">{{ ind }}</v-chip>
+                </div>
+              </div>
+            </v-card-text>
+          </v-card>
+
           <!-- Building Details -->
           <v-card class="mb-4">
             <v-card-title>Building Details</v-card-title>
@@ -254,6 +321,21 @@ onMounted(() => {
                 <v-list-item-title>Fund Source</v-list-item-title>
                 <v-list-item-subtitle>{{ project.fundSource || '-' }}</v-list-item-subtitle>
               </v-list-item>
+            </v-list>
+          </v-card>
+
+          <!-- KT-C: Project Team -->
+          <v-card v-if="project.assignedUsers?.length" class="mb-4">
+            <v-card-title>Project Team</v-card-title>
+            <v-divider />
+            <v-list lines="two">
+              <v-list-item
+                v-for="member in project.assignedUsers"
+                :key="member.id"
+                :title="member.name"
+                :subtitle="[member.role, member.department].filter(Boolean).join(' · ')"
+                prepend-icon="mdi-account"
+              />
             </v-list>
           </v-card>
 

@@ -20,7 +20,7 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
 import { AuthService } from './auth.service';
-import { LoginDto } from './dto';
+import { LoginDto, RegisterDto } from './dto';
 import { Public, CurrentUser } from './decorators';
 import { JwtAuthGuard } from './guards';
 import { JwtPayload } from '../common/interfaces';
@@ -53,6 +53,18 @@ export class AuthController {
   @ApiResponse({ status: 429, description: 'Too many login attempts' })
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  @Public()
+  @Post('register')
+  @HttpCode(HttpStatus.CREATED)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @ApiOperation({ summary: 'Self-registration (CSU institutional users)', description: 'Creates a PENDING account for admin review and activation. Does NOT grant immediate access.' })
+  @ApiResponse({ status: 201, description: 'Registration submitted — pending admin activation' })
+  @ApiResponse({ status: 400, description: 'Validation error or passwords do not match' })
+  @ApiResponse({ status: 409, description: 'Email already registered' })
+  async register(@Body() dto: RegisterDto) {
+    return this.authService.register(dto);
   }
 
   @Public()

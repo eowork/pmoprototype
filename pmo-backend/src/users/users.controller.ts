@@ -67,6 +67,13 @@ export class UsersController {
     return this.service.findEligibleForAssignment();
   }
 
+  @Get('eligible-contractors')
+  @Roles('Admin', 'Staff')
+  @ApiOperation({ summary: 'List users with Contractor role — for Quick Assign Existing Contractor feature' })
+  findEligibleContractors() {
+    return this.service.findEligibleContractors();
+  }
+
   // Phase HQ: Password reset requests (must be before :id to avoid UUID parse)
   @Get('password-reset-requests')
   @Roles('Admin')
@@ -167,6 +174,32 @@ export class UsersController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.service.removeRole(id, roleId, user.sub);
+  }
+
+  // --- PQ-D: Registration Approval ---
+
+  @Post(':id/activate')
+  @Roles('SuperAdmin', 'Admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Activate a pending self-registered user (Admin only)' })
+  async activateUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    await this.service.activateUser(id, user.sub);
+    return { message: 'User activated successfully' };
+  }
+
+  @Post(':id/reject-registration')
+  @Roles('SuperAdmin', 'Admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reject a pending self-registered user (Admin only)' })
+  async rejectRegistration(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    await this.service.rejectRegistration(id, user.sub);
+    return { message: 'Registration rejected' };
   }
 
   // --- Account Management: SuperAdmin only ---

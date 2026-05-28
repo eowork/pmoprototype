@@ -43,4 +43,6 @@ export class PublicConstructionController {
     await this.service.findPublicOne(id);
     return this.service.findGallery(id, query);
   }
+
+  // POW public route REMOVED (Phase ME, 2026-05-21)
 }

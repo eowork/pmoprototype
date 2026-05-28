@@ -7,6 +7,7 @@ export * from './operation-type.enum';
 export * from './media-type.enum';
 export * from './document-type.enum';
 export * from './gallery-category.enum';
+export * from './document-lifecycle-status.enum';
 export * from './contractor-status.enum';
 export * from './department-status.enum';
 export * from './setting-data-type.enum';

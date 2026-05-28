@@ -26,6 +26,8 @@ import { RepairTypesModule } from './repair-types/repair-types.module';
 import { ConstructionSubcategoriesModule } from './construction-subcategories/construction-subcategories.module';
 import { SettingsModule } from './settings/settings.module';
 import { CommonModule } from './common/common.module';
+import { ActivityLogModule } from './activity-logs/activity-log.module';
+import { ContractorAuthModule } from './contractor-auth/contractor-auth.module';
 import { JwtAuthGuard } from './auth/guards';
 
 @Module({
@@ -94,6 +96,10 @@ import { JwtAuthGuard } from './auth/guards';
     ConstructionSubcategoriesModule,
     // System settings
     SettingsModule,
+    // Activity logging (Phase JT-D)
+    ActivityLogModule,
+    // Contractor auth + invite system (Phase PB)
+    ContractorAuthModule,
   ],
   controllers: [AppController],
   providers: [

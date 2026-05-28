@@ -69,6 +69,7 @@ export class FundingSourcesService {
     const entity = this.fundingSourceRepo.create({
       name: dto.name,
       description: dto.description,
+      type: dto.type,
       createdBy: userId,
     });
 

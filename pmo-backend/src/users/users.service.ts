@@ -133,6 +133,18 @@ export class UsersService {
       params.push(query.campus);
     }
 
+    // PQ-D: filter by registration status
+    if (query.status) {
+      conditions.push('u.status = ?');
+      params.push(query.status);
+    }
+
+    // PJ-G: filter by userType from metadata JSONB
+    if (query.user_type) {
+      conditions.push(`u.metadata->>'userType' = ?`);
+      params.push(query.user_type);
+    }
+
     const whereClause = conditions.join(' AND ');
 
     const countResult = await conn.execute(
@@ -155,6 +167,9 @@ export class UsersService {
     const dataResult = await conn.execute(
       `SELECT u.id, u.email, u.first_name, u.last_name, u.phone, u.avatar_url,
               u.is_active, u.last_login_at, u.rank_level, u.campus, u.created_at, u.updated_at,
+              u.status, u.metadata,
+              (SELECT COUNT(*)::int FROM project_contractor_assignments pca
+               WHERE pca.user_id = u.id AND pca.removed_at IS NULL) AS project_assignment_count,
               COALESCE(
                 (SELECT json_agg(json_build_object('id', r.id, 'name', r.name, 'is_superadmin', ur.is_superadmin))
                  FROM user_roles ur JOIN roles r ON ur.role_id = r.id
@@ -181,22 +196,36 @@ export class UsersService {
   }
 
   async findEligibleForAssignment(): Promise<any[]> {
+    // ZB-1: Return all active users regardless of role — external personnel
+    // (Contractor, Consultant, etc.) must appear alongside institutional staff.
     const conn = this.em.getConnection();
     const result = await conn.execute(
-      `SELECT u.id, u.first_name, u.last_name, u.campus
+      `SELECT u.id, u.first_name, u.last_name, u.email, u.campus
        FROM users u
        WHERE u.deleted_at IS NULL
          AND u.is_active = true
-         AND EXISTS (
-           SELECT 1 FROM user_roles ur
-           JOIN roles r ON ur.role_id = r.id
-           WHERE ur.user_id = u.id
-             AND r.name IN ('Staff', 'Admin', 'SuperAdmin')
-         )
        ORDER BY u.last_name, u.first_name`,
       [],
     );
     return result;
+  }
+
+  // QE-A: Returns users with Contractor role — used by CiPersonnelAccessCard Quick Assign feature
+  async findEligibleContractors(): Promise<any[]> {
+    const conn = this.em.getConnection();
+    return conn.execute(
+      `SELECT u.id, u.first_name, u.last_name, u.email,
+              u.campus, u.metadata->>'companyName' as company_name,
+              u.metadata->>'position' as position,
+              (SELECT COUNT(*)::int FROM record_assignments ra
+               WHERE ra.user_id = u.id AND ra.module = 'CONSTRUCTION') as assignment_count
+       FROM users u
+       WHERE u.deleted_at IS NULL AND u.is_active = true
+         AND EXISTS (SELECT 1 FROM user_roles ur JOIN roles r ON ur.role_id = r.id
+                     WHERE ur.user_id = u.id AND r.name = 'Contractor')
+       ORDER BY u.last_name, u.first_name`,
+      [],
+    );
   }
 
   async findOne(id: string): Promise<any> {
@@ -1025,6 +1054,53 @@ export class UsersService {
   }
 
   // --- Password Reset Requests ---
+
+  // PQ-D: Admin activates a self-registered PENDING user
+  async activateUser(id: string, adminId: string): Promise<void> {
+    const conn = this.em.getConnection();
+    const result = await conn.execute(
+      `UPDATE users SET status = 'ACTIVE', is_active = true, updated_by = ?, updated_at = NOW()
+       WHERE id = ? AND status = 'PENDING' AND deleted_at IS NULL`,
+      [adminId, id],
+    );
+    if (!result || (result as any).rowCount === 0) {
+      throw new Error('User not found or not in PENDING status');
+    }
+    this.logger.log(`USER_ACTIVATED: id=${id}, by=${adminId}`);
+
+    // ZJ-1: Assign default 'Staff' role if user has no roles after activation.
+    // user_roles has composite PK (user_id, role_id) — no id or updated_at column.
+    const existingRoles = await conn.execute(
+      `SELECT user_id FROM user_roles WHERE user_id = ? LIMIT 1`,
+      [id],
+    );
+    if (existingRoles.length === 0) {
+      const staffRole = await conn.execute(
+        `SELECT id FROM roles WHERE name = 'Staff' AND deleted_at IS NULL LIMIT 1`,
+        [],
+      );
+      if (staffRole.length > 0) {
+        await conn.execute(
+          `INSERT INTO user_roles (user_id, role_id, is_superadmin, assigned_by, created_at)
+           VALUES (?, ?, false, ?, NOW())
+           ON CONFLICT (user_id, role_id) DO NOTHING`,
+          [id, staffRole[0].id, adminId],
+        );
+        this.logger.log(`USER_DEFAULT_ROLE_ASSIGNED: user=${id}, role=Staff, by=${adminId}`);
+      }
+    }
+  }
+
+  // PQ-D: Admin rejects a self-registered PENDING user
+  async rejectRegistration(id: string, adminId: string): Promise<void> {
+    const conn = this.em.getConnection();
+    await conn.execute(
+      `UPDATE users SET status = 'REJECTED', is_active = false, updated_by = ?, updated_at = NOW()
+       WHERE id = ? AND status = 'PENDING' AND deleted_at IS NULL`,
+      [adminId, id],
+    );
+    this.logger.log(`REGISTRATION_REJECTED: id=${id}, by=${adminId}`);
+  }
 
   async getPasswordResetRequests(): Promise<any[]> {
     const conn = this.em.getConnection();

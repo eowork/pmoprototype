@@ -14,12 +14,16 @@ export class ConstructionGallery {
   @Property({ nullable: true, length: 255 })
   caption?: string;
 
-  @Property({ length: 50, default: 'PROGRESS' })
-  category: string = 'PROGRESS';
+  @Property({ length: 50, default: 'IN_PROGRESS' })
+  category: string = 'IN_PROGRESS';
 
   @Property({ type: 'boolean', default: false })
   isFeatured: boolean = false;
 
   @Property({ defaultRaw: 'NOW()', columnType: 'timestamptz' })
   uploadedAt: Date = new Date();
+
+  // LB-C: User-supplied date when the photo was captured (distinct from server-side uploadedAt)
+  @Property({ nullable: true, columnType: 'date' })
+  imageTakenDate?: Date;
 }

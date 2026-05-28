@@ -9,6 +9,21 @@
 // Publication status type for draft governance
 export type PublicationStatus = 'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'REJECTED'
 
+// HHH-E: Recursive folder tree node (backed by construction_document_folders table)
+// nodeType values must match backend DTO: CONTAINER | FORM | TEMPLATE | SUBMISSIONS
+export interface FolderNode {
+  id: string
+  projectId: string
+  parentId: string | null
+  folderName: string
+  groupCode: string | null
+  nodeType: 'CONTAINER' | 'FORM' | 'TEMPLATE' | 'SUBMISSIONS' | string
+  sortOrder: number
+  children: FolderNode[]
+  createdAt: string
+  updatedAt: string
+}
+
 // Approval metadata interface for draft governance workflow
 export interface ApprovalMetadata {
   createdBy: string | null
@@ -54,7 +69,18 @@ export interface BackendProject {
   assigned_to?: string
   assigned_to_name?: string
   // Phase AW: Multi-select assignment
-  assigned_users?: { id: string; name: string }[]
+  assigned_users?: {
+    id: string
+    name: string
+    email?: string | null
+    role?: string | null
+    department?: string | null
+    phone?: string | null
+    personnel_category?: string | null
+    project_role?: string | null
+    permissions?: Record<string, any> | null
+    user_role?: string | null
+  }[]
 }
 
 export interface BackendUser {
@@ -93,7 +119,18 @@ export interface UIProject {
   delegatedTo: string
   delegatedToName: string
   // Phase AW: Multi-select assignment
-  assignedUsers: { id: string; name: string }[]
+  assignedUsers: {
+    id: string
+    name: string
+    email?: string | null
+    role?: string | null
+    department?: string | null
+    phone?: string | null
+    personnelCategory?: string | null
+    personnel_category?: string | null
+    projectRole?: string | null
+    permissions?: Record<string, any> | null
+  }[]
 }
 
 export interface UIUser {
@@ -121,8 +158,8 @@ export function adaptProject(backend: BackendProject): UIProject {
     projectName: backend.title,
     campus: backend.campus || '',
     status: backend.status,
-    totalContractAmount: backend.contract_amount || 0,
-    physicalAccomplishment: backend.physical_progress || 0,
+    totalContractAmount: Number(backend.contract_amount) || 0,
+    physicalAccomplishment: Number(backend.physical_progress) || 0,
     fundSource: backend.funding_source_name || '',
     contractor: backend.contractor_name || '',
     startDate: backend.start_date || '',
@@ -202,7 +239,10 @@ export function reverseAdaptProject(ui: Partial<UIProject>): Partial<BackendProj
 export interface BackendProjectDetail extends BackendProject {
   project_code: string
   description?: string
-  beneficiaries?: string
+  beneficiaries?: number | string | null
+  summary?: string | null
+  scope?: string | null
+  facilities?: string | null
   objectives?: string[]
   key_features?: string[]
   contract_number?: string
@@ -216,10 +256,28 @@ export interface BackendProjectDetail extends BackendProject {
   number_of_floors?: number
   latitude?: number
   longitude?: number
-  ideal_infrastructure_image?: string
   original_contract_duration?: string
-  objectives?: string[]
-  key_features?: string[]
+  // MG: Location
+  spatial_coverage?: string
+  municipality?: string
+  province?: string
+  // MG: Implementation agencies (additional)
+  co_implementing_agency?: string
+  attached_agency?: string
+  // MG: Funding + beneficiaries
+  additional_funding_sources?: { type: string; name: string; notes?: string }[]
+  beneficiary_list?: string[]
+  // MH: Revision orders
+  original_start_date?: string
+  revised_start_date?: string
+  original_completion_date?: string
+  revised_completion_date?: string
+  revised_project_duration?: string
+  // MI: Progress snapshot
+  as_of_date?: string
+  cost_incurred_to_date?: number | null
+  date_completed?: string
+  remarks_log?: { text: string; author?: string; created_at?: string }[]
   physical_progress?: number
   financial_progress?: number
   target_physical_progress?: number
@@ -227,6 +285,30 @@ export interface BackendProjectDetail extends BackendProject {
   subcategory?: { id: string; name: string }
   milestones?: BackendMilestone[]
   financials?: BackendFinancial[]
+  // KC-C: Project Profile fields
+  strategic_alignment?: string
+  output_indicators?: string[]
+  outcome_indicators?: string[]
+  implementing_agency?: string
+  project_status_category?: string
+  status_updates?: Record<string, any>[]
+  readiness_documents?: Record<string, any>[]
+  signatories?: Record<string, any>[]
+  // LA-A: monitoring fields added to BackendProjectDetail (were missing, causing TypeScript errors)
+  document_checklist_remarks?: Record<string, string>
+  custom_key_sections?: { id: string; label: string; typeCode: string }[]
+  incident_log?: Record<string, any>[]
+  risk_register?: Record<string, any>[]
+  escalation_records?: Record<string, any>[]
+  // OU-A: strategic planning arrays
+  rdp_alignment?: any[]
+  socioeconomic_agenda?: any[]
+  csu_likha_goals?: any[]
+  personnel_groups?: {
+    csu?: { name: string; position: string; role: string }[]
+    contractor?: { name: string; position: string; company: string }[]
+    others?: { name: string; position: string; affiliation: string }[]
+  } | null
 }
 
 export interface BackendMilestone {
@@ -238,6 +320,10 @@ export interface BackendMilestone {
   status: string
   remarks?: string
   createdAt?: string
+  startDate?: string
+  actualStartDate?: string
+  progress?: string | number
+  category?: string
 }
 
 export interface BackendFinancial {
@@ -259,12 +345,18 @@ export interface BackendGalleryItem {
   category: string
   isFeatured: boolean
   uploadedAt: string
+  // LB-C: user-supplied photo capture date (may come as snake_case or camelCase)
+  image_taken_date?: string
+  imageTakenDate?: string
 }
 
 export interface UIProjectDetail extends UIProject {
   projectCode: string
   description: string
-  beneficiaries: string
+  beneficiaries: number | null
+  summary: string
+  scope: string
+  facilities: string
   objectives: string[]
   keyFeatures: string[]
   contractNumber: string
@@ -272,12 +364,32 @@ export interface UIProjectDetail extends UIProject {
   actualCompletionDate: string
   projectDuration: string
   originalContractDuration: string
+  // MG: Location
+  spatialCoverage: string
+  municipality: string
+  province: string
+  // MG: Implementation agencies (additional)
+  coImplementingAgency: string
+  attachedAgency: string
+  // MG: Funding + beneficiaries
+  additionalFundingSources: { type: string; name: string; notes?: string }[]
+  beneficiaryList: string[]
+  // MH: Revision orders
+  originalStartDate: string
+  revisedStartDate: string
+  originalCompletionDate: string
+  revisedCompletionDate: string
+  revisedProjectDuration: string
+  // MI: Progress snapshot
+  asOfDate: string
+  costIncurredToDate: number | null
+  dateCompleted: string
+  remarksLog: { text: string; author?: string; createdAt?: string }[]
   projectEngineer: string
   projectManager: string
   buildingType: string
   floorArea: number
   numberOfFloors: number
-  idealInfrastructureImage: string
   latitude: number | null
   longitude: number | null
   physicalProgress: number
@@ -288,6 +400,28 @@ export interface UIProjectDetail extends UIProject {
   milestones: UIMilestone[]
   financials: UIFinancial[]
   gallery: UIGalleryItem[]
+  // KC-C: Project Profile fields
+  strategicAlignment: string
+  outputIndicators: string[]
+  outcomeIndicators: string[]
+  rdpAlignment: any[]
+  socioeconomicAgenda: any[]
+  csuLikhaGoals: any[]
+  implementingAgency: string
+  projectStatusCategory: string
+  statusUpdates: Record<string, any>[]
+  readinessDocuments: Record<string, any>[]
+  signatories: Record<string, any>[]
+  documentChecklistRemarks: Record<string, string>
+  customKeySections: { id: string; label: string; typeCode: string }[]
+  incidentLog: Record<string, any>[]
+  riskRegister: Record<string, any>[]
+  escalationRecords: Record<string, any>[]
+  personnelGroups: {
+    csu: { name: string; position: string; role: string }[]
+    contractor: { name: string; position: string; company: string }[]
+    others: { name: string; position: string; affiliation: string }[]
+  }
 }
 
 export interface UIMilestone {
@@ -298,6 +432,10 @@ export interface UIMilestone {
   actualDate: string
   status: string
   remarks: string
+  startDate: string
+  actualStartDate: string
+  progress: number
+  category: string
 }
 
 export interface UIFinancial {
@@ -317,6 +455,8 @@ export interface UIGalleryItem {
   category: string
   isFeatured: boolean
   uploadedAt: string
+  // LB-C: user-supplied photo capture date
+  imageTakenDate?: string
 }
 
 export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDetail {
@@ -324,7 +464,12 @@ export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDeta
     ...adaptProject(backend),
     projectCode: backend.project_code || '',
     description: backend.description || '',
-    beneficiaries: backend.beneficiaries || '',
+    beneficiaries: backend.beneficiaries == null || backend.beneficiaries === ''
+      ? null
+      : Number(backend.beneficiaries),
+    summary: backend.summary || '',
+    scope: backend.scope || '',
+    facilities: backend.facilities || '',
     objectives: backend.objectives || [],
     keyFeatures: backend.key_features || [],
     contractNumber: backend.contract_number || '',
@@ -332,12 +477,31 @@ export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDeta
     actualCompletionDate: backend.actual_completion_date || '',
     projectDuration: backend.project_duration || '',
     originalContractDuration: backend.original_contract_duration || '',
+    spatialCoverage: backend.spatial_coverage || '',
+    municipality: backend.municipality || '',
+    province: backend.province || '',
+    coImplementingAgency: backend.co_implementing_agency || '',
+    attachedAgency: backend.attached_agency || '',
+    additionalFundingSources: backend.additional_funding_sources || [],
+    beneficiaryList: backend.beneficiary_list || [],
+    originalStartDate: backend.original_start_date || '',
+    revisedStartDate: backend.revised_start_date || '',
+    originalCompletionDate: backend.original_completion_date || '',
+    revisedCompletionDate: backend.revised_completion_date || '',
+    revisedProjectDuration: backend.revised_project_duration || '',
+    asOfDate: backend.as_of_date || '',
+    costIncurredToDate: backend.cost_incurred_to_date ?? null,
+    dateCompleted: backend.date_completed || '',
+    remarksLog: (backend.remarks_log || []).map((r: any) => ({
+      text: r.text || '',
+      author: r.author || r.updated_by || '',
+      createdAt: r.created_at || r.createdAt || '',
+    })),
     projectEngineer: backend.project_engineer || '',
     projectManager: backend.project_manager || '',
     buildingType: backend.building_type || '',
     floorArea: backend.floor_area || 0,
     numberOfFloors: backend.number_of_floors || 0,
-    idealInfrastructureImage: backend.ideal_infrastructure_image || '',
     latitude: typeof backend.latitude === 'number' ? backend.latitude : (backend.latitude ? Number(backend.latitude) : null),
     longitude: typeof backend.longitude === 'number' ? backend.longitude : (backend.longitude ? Number(backend.longitude) : null),
     physicalProgress: typeof backend.physical_progress === 'number' ? backend.physical_progress : Number(backend.physical_progress || 0),
@@ -348,6 +512,28 @@ export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDeta
     milestones: (backend.milestones || []).map(adaptMilestone),
     financials: (backend.financials || []).map(adaptFinancial),
     gallery: [],
+    strategicAlignment: backend.strategic_alignment || '',
+    outputIndicators: backend.output_indicators || [],
+    outcomeIndicators: backend.outcome_indicators || [],
+    rdpAlignment: backend.rdp_alignment || [],
+    socioeconomicAgenda: backend.socioeconomic_agenda || [],
+    csuLikhaGoals: backend.csu_likha_goals || [],
+    implementingAgency: backend.implementing_agency || '',
+    projectStatusCategory: backend.project_status_category || '',
+    statusUpdates: (backend.status_updates || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    readinessDocuments: (backend.readiness_documents || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    signatories: (backend.signatories || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    documentChecklistRemarks: backend.document_checklist_remarks || {},
+    customKeySections: backend.custom_key_sections || [],
+    // KY-B2: filter out non-object items (guards against [[]] double-wrap corruption)
+    incidentLog: (backend.incident_log || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    riskRegister: (backend.risk_register || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    escalationRecords: (backend.escalation_records || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    personnelGroups: {
+      csu: (backend.personnel_groups?.csu || []) as { name: string; position: string; role: string }[],
+      contractor: (backend.personnel_groups?.contractor || []) as { name: string; position: string; company: string }[],
+      others: (backend.personnel_groups?.others || []) as { name: string; position: string; affiliation: string }[],
+    },
   }
 }
 
@@ -360,6 +546,10 @@ export function adaptMilestone(backend: BackendMilestone): UIMilestone {
     actualDate: backend.actualDate || '',
     status: backend.status || 'PENDING',
     remarks: backend.remarks || '',
+    startDate: backend.startDate || '',
+    actualStartDate: backend.actualStartDate || '',
+    progress: backend.progress != null ? Number(backend.progress) : 0,
+    category: backend.category || '',
   }
 }
 
@@ -383,9 +573,11 @@ export function adaptGalleryItem(backend: BackendGalleryItem): UIGalleryItem {
     id: backend.id,
     imageUrl: backend.imageUrl,
     caption: backend.caption || '',
-    category: backend.category || 'PROGRESS',
+    category: backend.category || 'IN_PROGRESS',
     isFeatured: backend.isFeatured || false,
     uploadedAt: backend.uploadedAt || '',
+    // LB-C: accept either snake_case (raw SQL result) or camelCase (ORM result)
+    imageTakenDate: backend.imageTakenDate ?? backend.image_taken_date ?? undefined,
   }
 }
 
@@ -426,7 +618,7 @@ export interface BackendUniversityOperation {
   assigned_to?: string
   assigned_to_name?: string
   // Phase AW: Multi-select assignment
-  assigned_users?: { id: string; name: string }[]
+  assigned_users?: { id: string; name: string; role?: string | null; department?: string | null; phone?: string | null }[]
 }
 
 export interface UIUniversityOperation {
@@ -454,7 +646,7 @@ export interface UIUniversityOperation {
   delegatedTo: string
   delegatedToName: string
   // Phase AW: Multi-select assignment
-  assignedUsers: { id: string; name: string }[]
+  assignedUsers: { id: string; name: string; role?: string | null; department?: string | null; phone?: string | null }[]
 }
 
 export function adaptUniversityOperation(backend: BackendUniversityOperation): UIUniversityOperation {
@@ -543,7 +735,7 @@ export interface BackendRepairProject {
   assigned_to?: string
   assigned_to_name?: string
   // Phase AW: Multi-select assignment
-  assigned_users?: { id: string; name: string }[]
+  assigned_users?: { id: string; name: string; role?: string | null; department?: string | null; phone?: string | null }[]
 }
 
 export interface UIRepairProject {
@@ -575,7 +767,7 @@ export interface UIRepairProject {
   delegatedTo: string
   delegatedToName: string
   // Phase AW: Multi-select assignment
-  assignedUsers: { id: string; name: string }[]
+  assignedUsers: { id: string; name: string; role?: string | null; department?: string | null; phone?: string | null }[]
 }
 
 export function adaptRepairProject(backend: BackendRepairProject): UIRepairProject {
@@ -597,8 +789,8 @@ export function adaptRepairProject(backend: BackendRepairProject): UIRepairProje
     actualCost: backend.actual_cost || 0,
     reportedBy: backend.reported_by || '',
     assignedTo: backend.assigned_technician || '',
-    physicalProgress: backend.physical_progress || 0,
-    financialProgress: backend.financial_progress || 0,
+    physicalProgress: Number(backend.physical_progress) || 0,
+    financialProgress: Number(backend.financial_progress) || 0,
     publicationStatus: backend.publication_status || 'PUBLISHED',
     createdBy: backend.created_by || '',
     createdAt: backend.created_at,
@@ -671,7 +863,7 @@ export interface UIRepairDetail {
   delegatedTo: string
   delegatedToName: string
   // Phase AW: Multi-select assignment
-  assignedUsers: { id: string; name: string }[]
+  assignedUsers: { id: string; name: string; role?: string | null; department?: string | null; phone?: string | null }[]
   assignedUserIds: string[]
 }
 

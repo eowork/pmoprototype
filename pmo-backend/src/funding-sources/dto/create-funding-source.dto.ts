@@ -9,6 +9,11 @@ export class CreateFundingSourceDto {
   @IsOptional()
   description?: string;
 
+  // MD: classification — 'INTERNAL' | 'EXTERNAL' | 'CUSTOM'
+  @IsString()
+  @IsOptional()
+  type?: string;
+
   @IsOptional()
   metadata?: Record<string, any>;
 }

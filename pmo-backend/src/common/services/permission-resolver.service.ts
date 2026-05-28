@@ -44,6 +44,14 @@ export class PermissionResolverService {
   }
 
   /**
+   * QD-A: Check if user has Contractor role (from JWT)
+   * Contractors have scoped project access — only assigned COI records.
+   */
+  isContractor(user: JwtPayload): boolean {
+    return !user.is_superadmin && user.roles.includes('Contractor');
+  }
+
+  /**
    * Check if user has Admin role (from database - for mutation operations)
    * This prevents JWT token manipulation attacks for critical operations
    */

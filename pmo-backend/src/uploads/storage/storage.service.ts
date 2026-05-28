@@ -68,18 +68,25 @@ export class StorageService {
 
     this.logger.log(`FILE_SAVED: id=${id}, path=${filePath}`);
 
+    // KY-A2: prefix with /uploads so the path is server-root-relative and
+    // resolvable by the static asset middleware without conflicting with frontend routes.
+    const relativePath = path.relative(this.uploadDir, filePath).replace(/\\/g, '/');
     return {
       id,
       originalName: file.originalname,
       fileName,
-      filePath: path.relative(this.uploadDir, filePath),
+      filePath: `/uploads/${relativePath}`,
       fileSize: file.size,
       mimeType: file.mimetype,
     };
   }
 
   async deleteFile(filePath: string): Promise<boolean> {
-    const fullPath = path.join(this.uploadDir, filePath);
+    // KY-A2: strip /uploads/ prefix if present before resolving full disk path
+    const relativePath = filePath.startsWith('/uploads/')
+      ? filePath.slice('/uploads/'.length)
+      : filePath;
+    const fullPath = path.join(this.uploadDir, relativePath);
     try {
       if (fs.existsSync(fullPath)) {
         fs.unlinkSync(fullPath);
@@ -96,10 +103,12 @@ export class StorageService {
   }
 
   getFilePath(relativePath: string): string {
-    return path.join(this.uploadDir, relativePath);
+    const rel = relativePath.startsWith('/uploads/') ? relativePath.slice('/uploads/'.length) : relativePath;
+    return path.join(this.uploadDir, rel);
   }
 
   fileExists(relativePath: string): boolean {
-    return fs.existsSync(path.join(this.uploadDir, relativePath));
+    const rel = relativePath.startsWith('/uploads/') ? relativePath.slice('/uploads/'.length) : relativePath;
+    return fs.existsSync(path.join(this.uploadDir, rel));
   }
 }
