@@ -18,6 +18,13 @@ async function bootstrap() {
   const absoluteUploadDir = join(process.cwd(), uploadDir);
   app.useStaticAssets(absoluteUploadDir, { prefix: '/uploads' });
 
+  // LLL-E3: Serve seeded document templates (public, no auth) at /templates prefix.
+  // Files live in pmo-backend/public/templates/{type_code}.docx — see
+  // Migration20260601010000_SeedDocumentTypeTemplateUrls which seeds template_url.
+  app.useStaticAssets(join(process.cwd(), 'public', 'templates'), {
+    prefix: '/templates',
+  });
+
   // Enable CORS for frontend integration (future)
   app.enableCors();
 

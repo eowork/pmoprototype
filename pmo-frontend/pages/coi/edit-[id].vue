@@ -109,6 +109,7 @@ const form = ref({
   rdp_alignment: [] as string[],
   socioeconomic_agenda: [] as string[],
   csu_likha_goals: [] as string[],
+  sdg_goals: [] as string[],
   strategic_alignment: '',
   // NC: Migrated from textareas to bullet lists
   output_indicators_list: [] as string[],
@@ -370,6 +371,7 @@ async function fetchData() {
       rdp_alignment: Array.isArray(pAny.rdp_alignment) ? pAny.rdp_alignment : [],
       socioeconomic_agenda: Array.isArray(pAny.socioeconomic_agenda) ? pAny.socioeconomic_agenda : [],
       csu_likha_goals: Array.isArray(pAny.csu_likha_goals) ? pAny.csu_likha_goals : [],
+      sdg_goals: Array.isArray(pAny.sdg_goals ?? pAny.sdgGoals) ? (pAny.sdg_goals ?? pAny.sdgGoals) : [],
       strategic_alignment: p.strategic_alignment || '',
       // NC: hydrate both array (canonical) and legacy textarea fields
       output_indicators_list: Array.isArray(p.output_indicators) ? p.output_indicators.map(String) : [],
@@ -638,6 +640,7 @@ async function handleSubmit() {
       rdp_alignment: form.value.rdp_alignment?.length ? form.value.rdp_alignment : undefined,
       socioeconomic_agenda: form.value.socioeconomic_agenda?.length ? form.value.socioeconomic_agenda : undefined,
       csu_likha_goals: form.value.csu_likha_goals?.length ? form.value.csu_likha_goals : undefined,
+      sdg_goals: form.value.sdg_goals?.length ? form.value.sdg_goals : undefined,
       // Other attributes
       project_engineer: form.value.project_engineer || undefined,
       project_manager: form.value.project_manager || undefined,
@@ -724,6 +727,7 @@ async function handleSubmit() {
     }
 
     await api.patch(`/api/construction-projects/${projectId}`, payload)
+    clearDraft(); hasUnsavedChanges.value = false
     toast.success('Project updated successfully')
     router.push(`/coi/detail-${projectId}`)
   } catch (err: unknown) {
@@ -1919,6 +1923,44 @@ async function submitEditLink() {
   }
 }
 
+// WWW-D: Autosave — localStorage draft + beforeunload warning (edit page)
+const hasUnsavedChanges = ref(false)
+const draftRestoreSnackbar = ref(false)
+const DRAFT_KEY = computed(() => `coi-draft-${projectId}`)
+
+function saveDraft() {
+  try {
+    localStorage.setItem(DRAFT_KEY.value, JSON.stringify({ ts: Date.now(), form: JSON.parse(JSON.stringify(form.value)) }))
+  } catch { /* quota exceeded — silently skip */ }
+}
+
+function clearDraft() {
+  localStorage.removeItem(DRAFT_KEY.value)
+}
+
+let draftDebounce: ReturnType<typeof setTimeout> | null = null
+watch(form, () => {
+  hasUnsavedChanges.value = true
+  if (draftDebounce) clearTimeout(draftDebounce)
+  draftDebounce = setTimeout(saveDraft, 2000)
+}, { deep: true })
+
+function handleBeforeUnload(e: BeforeUnloadEvent) {
+  if (hasUnsavedChanges.value) { e.preventDefault(); e.returnValue = '' }
+}
+
+function restoreDraft() {
+  try {
+    const saved = localStorage.getItem(DRAFT_KEY.value)
+    if (saved) {
+      const { form: savedForm } = JSON.parse(saved)
+      Object.assign(form.value, savedForm)
+      toast.success('Draft restored')
+    }
+  } catch { toast.error('Could not restore draft') }
+  draftRestoreSnackbar.value = false
+}
+
 onMounted(() => {
   fetchData()
   fetchDocs()
@@ -1928,11 +1970,37 @@ onMounted(() => {
   fetchDiaryEntries()  // JW-G
   fetchDocumentTypes()  // KO-F: load KB-E taxonomy for upload form
   fetchMovEntries()  // KW-G: MOV evidence aggregation
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  // Check for saved draft
+  const saved = localStorage.getItem(DRAFT_KEY.value)
+  if (saved) {
+    try {
+      const { ts } = JSON.parse(saved)
+      if (Date.now() - ts < 24 * 60 * 60 * 1000) draftRestoreSnackbar.value = true
+      else clearDraft()
+    } catch { clearDraft() }
+  }
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  if (draftDebounce) clearTimeout(draftDebounce)
 })
 </script>
 
 <template>
   <div>
+    <!-- WWW-D: Draft restore notification -->
+    <v-snackbar v-model="draftRestoreSnackbar" :timeout="-1" color="info" location="bottom left">
+      <div class="d-flex align-center ga-2">
+        <v-icon icon="mdi-content-save-outline" />
+        <span>Unsaved draft found. Restore your work?</span>
+      </div>
+      <template #actions>
+        <v-btn variant="text" @click="restoreDraft">Restore</v-btn>
+        <v-btn variant="text" @click="draftRestoreSnackbar = false; clearDraft()">Dismiss</v-btn>
+      </template>
+    </v-snackbar>
+
     <!-- Header -->
     <div class="d-flex align-center ga-3 mb-4">
       <v-btn icon="mdi-arrow-left" variant="text" @click="goBack" />
@@ -2453,6 +2521,7 @@ onMounted(() => {
             :can-delete="canDeleteResources"
             :can-edit-remarks="canEditCurrentProject"
             :custom-key-sections="rawProject?.customKeySections ?? []"
+            :custom-supporting-sections="rawProject?.customSupportingSections ?? []"
           />
         </v-window-item>
 

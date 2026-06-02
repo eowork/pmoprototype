@@ -206,6 +206,10 @@ export class ConstructionProject {
   @Property({ columnType: 'jsonb', default: '[]' })
   customKeySections: Array<{ id: string; label: string; typeCode: string }> = [];
 
+  // SSS-B: per-project custom Supporting Document repository folders (cards)
+  @Property({ columnType: 'jsonb', default: '[]' })
+  customSupportingSections: Array<{ id: string; label: string; typeCode: string }> = [];
+
   // KW-F2: project monitoring logs
   @Property({ columnType: 'jsonb', default: '[]' })
   incidentLog: any[] = [];
@@ -265,6 +269,10 @@ export class ConstructionProject {
 
   @Property({ nullable: true, columnType: 'jsonb' })
   csuLikhaGoals?: any;
+
+  // QQQ: UN Sustainable Development Goals
+  @Property({ nullable: true, columnType: 'jsonb' })
+  sdgGoals?: any;
 
   // MC: Beneficiaries dynamic list
   @Property({ nullable: true, columnType: 'jsonb' })

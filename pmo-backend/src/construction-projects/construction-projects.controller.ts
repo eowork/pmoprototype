@@ -466,6 +466,17 @@ export class ConstructionProjectsController {
     return this.service.updateCustomKeySections(id, body.sections ?? [], user);
   }
 
+  @Patch(':id/custom-supporting-sections')
+  @Roles('Admin', 'Staff')
+  @ApiOperation({ summary: 'Replace per-project custom Supporting Document folders (SSS-B)' })
+  updateCustomSupportingSections(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { sections: Array<{ id: string; label: string; typeCode: string }> },
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.updateCustomSupportingSections(id, body.sections ?? [], user);
+  }
+
   // --- KD-E: Project Diary ---
 
   @Get(':id/diary-entries')

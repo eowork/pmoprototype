@@ -258,6 +258,18 @@ const sortKey        = ref<'projectName'|'startDate'|'endDate'|'physicalAccompli
 const sortDir        = ref<'asc'|'desc'>('asc')
 const viewMode       = ref<'table'|'list'|'card'>('table')
 
+// LLL-C1: Advanced filters (collapsible) — project code + original/revised date ranges
+const showAdvancedFilters = ref(false)
+const filterProjectCode   = ref('')
+const filterOrigStartFrom = ref('')
+const filterOrigStartTo   = ref('')
+const filterOrigEndFrom   = ref('')
+const filterOrigEndTo     = ref('')
+const filterRevStartFrom  = ref('')
+const filterRevStartTo    = ref('')
+const filterRevEndFrom    = ref('')
+const filterRevEndTo      = ref('')
+
 const sortOptions = [
   { title: 'Project Name', value: 'projectName' },
   { title: 'Start Date',   value: 'startDate' },
@@ -272,10 +284,25 @@ function clearFilters() {
   filterDateFrom.value = ''
   filterDateTo.value   = ''
   search.value         = ''
+  // LLL-C2: advanced filters
+  filterProjectCode.value   = ''
+  filterOrigStartFrom.value = ''
+  filterOrigStartTo.value   = ''
+  filterOrigEndFrom.value   = ''
+  filterOrigEndTo.value     = ''
+  filterRevStartFrom.value  = ''
+  filterRevStartTo.value    = ''
+  filterRevEndFrom.value    = ''
+  filterRevEndTo.value      = ''
 }
 
 const hasActiveFilters = computed(() =>
-  !!(filterStatus.value || filterCampus.value || filterDateFrom.value || filterDateTo.value || search.value)
+  !!(filterStatus.value || filterCampus.value || filterDateFrom.value || filterDateTo.value ||
+     search.value || filterProjectCode.value ||
+     filterOrigStartFrom.value || filterOrigStartTo.value ||
+     filterOrigEndFrom.value || filterOrigEndTo.value ||
+     filterRevStartFrom.value || filterRevStartTo.value ||
+     filterRevEndFrom.value || filterRevEndTo.value)
 )
 
 // MG / MF: Updated status taxonomy.
@@ -302,7 +329,11 @@ const stats = ref({
   avgProgress: 0,
 })
 
+// LLL-D3: Client-side fallback. Authoritative values come from the backend
+// analytics/summary endpoint (DB aggregates) via syncStatsFromAnalytics(); this
+// runs only until analytics arrives, and as a fallback if the endpoint fails.
 function computeStats(projectList: UIProject[]) {
+  if (analyticsSummary.value) return // backend values are authoritative once loaded
   stats.value.total = projectList.length
   stats.value.ongoing = projectList.filter(p => p.status === 'ONGOING' || p.status?.toLowerCase() === 'ongoing').length
   // MG / MF: Count COMPLETE (new) + COMPLETED (legacy, not yet migrated edge cases).
@@ -317,13 +348,35 @@ function computeStats(projectList: UIProject[]) {
     : 0
 }
 
-// DDD-C: dashboard enrichment — derived client-side from loaded projects (no new endpoints).
-const DELAY_THRESHOLD = 50 // % physical progress; ONGOING projects below this are flagged behind-schedule
-const delayedCount = computed(() =>
-  projects.value.filter(
+// LLL-D3: Sync KPI stat cards from backend DB-aggregated analytics (authoritative).
+function syncStatsFromAnalytics() {
+  const a = analyticsSummary.value
+  if (!a) return
+  const byStatus = (a.by_status || []) as Array<{ status: string; count: number }>
+  const findCount = (...names: string[]) =>
+    byStatus.filter(s => names.includes((s.status || '').toUpperCase()))
+      .reduce((sum, s) => sum + (Number(s.count) || 0), 0)
+  stats.value.total = a.total ?? projects.value.length
+  stats.value.ongoing = findCount('ONGOING')
+  stats.value.completed = findCount('COMPLETE', 'COMPLETED')
+  stats.value.totalContractValue = a.total_contract_value ?? 0
+  stats.value.avgProgress = a.avg_progress ?? 0
+  // pendingReview stays client-derived (publication_status, not in summary status dist)
+  stats.value.pendingReview = projects.value.filter(p => p.publicationStatus === 'PENDING_REVIEW').length
+}
+
+// DDD-C: dashboard enrichment. LLL-D3: delayed count is now a DB aggregate
+// (ONGOING AND physical_progress < target_physical_progress) from the backend,
+// with a client-side fallback (50% threshold) only when analytics is unavailable.
+const DELAY_THRESHOLD = 50 // % physical progress; fallback threshold when backend analytics absent
+const delayedCount = computed(() => {
+  if (analyticsSummary.value && analyticsSummary.value.delayed_count != null) {
+    return Number(analyticsSummary.value.delayed_count) || 0
+  }
+  return projects.value.filter(
     (p) => (p.status?.toUpperCase() === 'ONGOING') && (Number(p.physicalAccomplishment) || 0) < DELAY_THRESHOLD,
-  ).length,
-)
+  ).length
+})
 // Role-gated recent activity (DDD-D5: admin endpoint — hidden for Staff/Viewer).
 const canViewActivity = computed(() => isAdmin.value || isSuperAdmin.value)
 const recentActivity = ref<Array<{ id: string; userName: string; action: string; entityType: string; createdAt: string }>>([])
@@ -363,6 +416,19 @@ const filteredProjects = computed(() => {
   }
   if (filterDateFrom.value) result = result.filter(p => (p.startDate || '') >= filterDateFrom.value)
   if (filterDateTo.value)   result = result.filter(p => (p.startDate || '') <= filterDateTo.value)
+  // LLL-C4: advanced filters — project code + original/revised date ranges
+  if (filterProjectCode.value) {
+    const code = filterProjectCode.value.toLowerCase()
+    result = result.filter(p => (p.projectCode || '').toLowerCase().includes(code))
+  }
+  if (filterOrigStartFrom.value) result = result.filter(p => (p.originalStartDate || '') >= filterOrigStartFrom.value)
+  if (filterOrigStartTo.value)   result = result.filter(p => (p.originalStartDate || '') <= filterOrigStartTo.value)
+  if (filterOrigEndFrom.value)   result = result.filter(p => (p.originalCompletionDate || '') >= filterOrigEndFrom.value)
+  if (filterOrigEndTo.value)     result = result.filter(p => (p.originalCompletionDate || '') <= filterOrigEndTo.value)
+  if (filterRevStartFrom.value)  result = result.filter(p => (p.revisedStartDate || '') >= filterRevStartFrom.value)
+  if (filterRevStartTo.value)    result = result.filter(p => (p.revisedStartDate || '') <= filterRevStartTo.value)
+  if (filterRevEndFrom.value)    result = result.filter(p => (p.revisedCompletionDate || '') >= filterRevEndFrom.value)
+  if (filterRevEndTo.value)      result = result.filter(p => (p.revisedCompletionDate || '') <= filterRevEndTo.value)
   // Sort for list/card modes (table view uses its own column sorting)
   if (viewMode.value !== 'table') {
     result = [...result].sort((a, b) => {
@@ -407,6 +473,7 @@ async function fetchAnalytics() {
     ])
     analyticsSummary.value = summary
     financialSummary.value = financial
+    syncStatsFromAnalytics() // LLL-D3: backend DB aggregates are authoritative for KPI cards
   } catch (err: any) {
     console.error('[COI Analytics] Failed to fetch:', err)
     analyticsError.value = err?.message || 'Failed to load analytics data'
@@ -677,11 +744,12 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
 
     <!-- Filter Bar (III-B/C: extended with view modes, date filters, sort) -->
     <v-card variant="outlined" rounded="lg" class="mb-3 pa-3">
+      <!-- LLL-B: Primary filter bar — single compact row -->
       <v-row dense align="center">
-        <v-col cols="12" sm="4" md="3">
+        <v-col cols="12" sm="5" md="4">
           <v-text-field
             v-model="search"
-            placeholder="Search name, campus, status, ID…"
+            placeholder="Search project name, code, campus…"
             prepend-inner-icon="mdi-magnify"
             variant="outlined"
             density="compact"
@@ -690,7 +758,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
             single-line
           />
         </v-col>
-        <v-col cols="6" sm="2" md="2">
+        <v-col cols="6" sm="3" md="2">
           <v-select
             v-model="filterStatus"
             :items="statusFilterOptions"
@@ -700,7 +768,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
             hide-details
           />
         </v-col>
-        <v-col cols="6" sm="2" md="2">
+        <v-col cols="6" sm="4" md="2">
           <v-select
             v-model="filterCampus"
             :items="campusFilterOptions"
@@ -710,46 +778,33 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
             hide-details
           />
         </v-col>
-        <v-col cols="6" sm="2" md="2">
-          <v-text-field
-            v-model="filterDateFrom"
-            type="date"
-            label="Start From"
-            variant="outlined"
-            density="compact"
-            hide-details
-            clearable
-          />
-        </v-col>
-        <v-col cols="6" sm="2" md="2">
-          <v-text-field
-            v-model="filterDateTo"
-            type="date"
-            label="Start To"
-            variant="outlined"
-            density="compact"
-            hide-details
-            clearable
-          />
-        </v-col>
-        <v-col cols="12" sm="12" md="1" class="d-flex justify-end align-center ga-2">
-          <v-btn v-if="hasActiveFilters" variant="text" size="small" prepend-icon="mdi-filter-off" color="grey-darken-1" @click="clearFilters">
-            Clear
+        <v-col cols="12" sm="12" md="4" class="d-flex align-center justify-end flex-wrap ga-1">
+          <v-btn
+            :color="showAdvancedFilters ? 'primary' : 'grey-darken-1'"
+            :variant="showAdvancedFilters ? 'tonal' : 'text'"
+            size="small"
+            prepend-icon="mdi-filter-variant"
+            @click="showAdvancedFilters = !showAdvancedFilters"
+          >
+            Advanced
           </v-btn>
-        </v-col>
-      </v-row>
-
-      <!-- Sort + View mode row (for list/card) -->
-      <v-row dense align="center" class="mt-2">
-        <v-col cols="12" sm="4" md="3" class="d-flex align-center ga-2">
+          <v-btn
+            v-if="hasActiveFilters"
+            variant="text"
+            size="small"
+            icon="mdi-filter-off"
+            color="grey-darken-1"
+            title="Clear all filters"
+            @click="clearFilters"
+          />
+          <v-divider vertical class="mx-1" />
           <v-select
             v-model="sortKey"
             :items="sortOptions"
-            label="Sort by"
-            variant="outlined"
             density="compact"
+            variant="outlined"
             hide-details
-            style="max-width: 200px"
+            style="max-width: 150px"
           />
           <v-btn
             :icon="sortDir === 'asc' ? 'mdi-sort-ascending' : 'mdi-sort-descending'"
@@ -759,9 +814,6 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
             :title="sortDir === 'asc' ? 'Ascending' : 'Descending'"
             @click="sortDir = sortDir === 'asc' ? 'desc' : 'asc'"
           />
-        </v-col>
-        <v-col cols="12" sm="8" md="9" class="d-flex justify-end align-center ga-2">
-          <span class="text-body-2 text-grey-darken-1">{{ filteredProjects.length }} project{{ filteredProjects.length !== 1 ? 's' : '' }}</span>
           <v-btn-toggle
             v-model="viewMode"
             density="compact"
@@ -776,6 +828,65 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
           </v-btn-toggle>
         </v-col>
       </v-row>
+
+      <!-- Project count line -->
+      <div class="text-body-2 text-grey-darken-1 mt-1">
+        {{ filteredProjects.length }} project{{ filteredProjects.length !== 1 ? 's' : '' }}
+        <span v-if="hasActiveFilters" class="text-medium-emphasis">(filtered)</span>
+      </div>
+
+      <!-- LLL-B/C: Advanced filters — collapsible panel -->
+      <v-expand-transition>
+        <div v-if="showAdvancedFilters">
+          <v-divider class="my-3" />
+          <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">
+            <v-icon icon="mdi-filter-cog-outline" size="small" class="mr-1" />Advanced Filters
+          </div>
+          <v-row dense>
+            <v-col cols="12" sm="6" md="3">
+              <v-text-field
+                v-model="filterProjectCode"
+                label="Project Code / ID"
+                variant="outlined"
+                density="compact"
+                hide-details
+                clearable
+                prepend-inner-icon="mdi-identifier"
+              />
+            </v-col>
+            <v-col cols="6" sm="3" md="2">
+              <v-text-field v-model="filterOrigStartFrom" type="date" label="Orig. Start From" variant="outlined" density="compact" hide-details clearable />
+            </v-col>
+            <v-col cols="6" sm="3" md="2">
+              <v-text-field v-model="filterOrigStartTo" type="date" label="Orig. Start To" variant="outlined" density="compact" hide-details clearable />
+            </v-col>
+            <v-col cols="6" sm="3" md="2">
+              <v-text-field v-model="filterOrigEndFrom" type="date" label="Orig. End From" variant="outlined" density="compact" hide-details clearable />
+            </v-col>
+            <v-col cols="6" sm="3" md="2">
+              <v-text-field v-model="filterOrigEndTo" type="date" label="Orig. End To" variant="outlined" density="compact" hide-details clearable />
+            </v-col>
+            <v-col cols="6" sm="3" md="2">
+              <v-text-field v-model="filterRevStartFrom" type="date" label="Rev. Start From" variant="outlined" density="compact" hide-details clearable />
+            </v-col>
+            <v-col cols="6" sm="3" md="2">
+              <v-text-field v-model="filterRevStartTo" type="date" label="Rev. Start To" variant="outlined" density="compact" hide-details clearable />
+            </v-col>
+            <v-col cols="6" sm="3" md="2">
+              <v-text-field v-model="filterRevEndFrom" type="date" label="Rev. End From" variant="outlined" density="compact" hide-details clearable />
+            </v-col>
+            <v-col cols="6" sm="3" md="2">
+              <v-text-field v-model="filterRevEndTo" type="date" label="Rev. End To" variant="outlined" density="compact" hide-details clearable />
+            </v-col>
+            <v-col cols="6" sm="3" md="2">
+              <v-text-field v-model="filterDateFrom" type="date" label="Start From" variant="outlined" density="compact" hide-details clearable />
+            </v-col>
+            <v-col cols="6" sm="3" md="2">
+              <v-text-field v-model="filterDateTo" type="date" label="Start To" variant="outlined" density="compact" hide-details clearable />
+            </v-col>
+          </v-row>
+        </div>
+      </v-expand-transition>
     </v-card>
 
     <!-- ── LIST VIEW ── -->

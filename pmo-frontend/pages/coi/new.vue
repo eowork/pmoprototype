@@ -54,6 +54,7 @@ const form = ref({
   rdp_alignment: [] as string[],
   socioeconomic_agenda: [] as string[],
   csu_likha_goals: [] as string[],
+  sdg_goals: [] as string[],
   strategic_alignment: '',
   // NC: Migrated from textareas to bullet lists
   output_indicators_list: [] as string[],
@@ -436,6 +437,7 @@ async function handleSubmit() {
       rdp_alignment: form.value.rdp_alignment?.length ? form.value.rdp_alignment : undefined,
       socioeconomic_agenda: form.value.socioeconomic_agenda?.length ? form.value.socioeconomic_agenda : undefined,
       csu_likha_goals: form.value.csu_likha_goals?.length ? form.value.csu_likha_goals : undefined,
+      sdg_goals: form.value.sdg_goals?.length ? form.value.sdg_goals : undefined,
       strategic_alignment: form.value.strategic_alignment || undefined,
       // NC: Indicators now sourced from bullet-list arrays
       output_indicators: form.value.output_indicators_list?.length
@@ -493,8 +495,12 @@ async function handleSubmit() {
     }
 
     console.log('[COI Create] Submitting:', payload)
-    const created = await api.post<{ id?: string }>('/api/construction-projects', payload)
-    if (!created?.id) {
+    const created = await api.post<{ id?: string; project_id?: string }>('/api/construction-projects', payload)
+    // NNN-B: resolve the new project id with a fallback; warn (don't silently succeed) if absent
+    const projectId = created?.id ?? created?.project_id
+    if (!projectId) {
+      console.warn('[COI Create] Project created but no id returned — staged uploads skipped.', created)
+      clearDraft(); hasUnsavedChanges.value = false
       toast.success('Project created successfully')
       router.push('/coi')
       return
@@ -504,8 +510,9 @@ async function handleSubmit() {
     const totalAttachments =
       pendingDocs.value.length + pendingImages.value.length + pendingLinks.value.length
     if (totalAttachments === 0) {
+      clearDraft(); hasUnsavedChanges.value = false
       toast.success('Project created successfully')
-      router.push(`/coi/detail-${created.id}`)
+      router.push(`/coi/detail-${projectId}`)
       return
     }
 
@@ -517,7 +524,7 @@ async function handleSubmit() {
         fd.append('file', d.file)
         fd.append('documentType', d.documentType)
         if (d.description) fd.append('description', d.description)
-        await api.upload(`/api/construction-projects/${created.id}/documents`, fd)
+        await api.upload(`/api/construction-projects/${projectId}/documents`, fd)
         successCount++
       } catch (e: unknown) {
         failures.push(`${d.file.name}: ${(e as { message?: string })?.message || 'failed'}`)
@@ -529,7 +536,7 @@ async function handleSubmit() {
         fd.append('file', im.file)
         if (im.caption) fd.append('caption', im.caption)
         fd.append('category', im.category)
-        await api.upload(`/api/construction-projects/${created.id}/gallery`, fd)
+        await api.upload(`/api/construction-projects/${projectId}/gallery`, fd)
         successCount++
       } catch (e: unknown) {
         failures.push(`${im.file.name}: ${(e as { message?: string })?.message || 'failed'}`)
@@ -537,7 +544,7 @@ async function handleSubmit() {
     }
     for (const lk of pendingLinks.value) {
       try {
-        await api.post(`/api/construction-projects/${created.id}/documents`, {
+        await api.post(`/api/construction-projects/${projectId}/documents`, {
           documentType: 'link',
           externalLink: lk.url,
           title: lk.title || undefined,
@@ -557,7 +564,8 @@ async function handleSubmit() {
       )
       console.warn('[COI Create] Upload failures:', failures)
     }
-    router.push(`/coi/detail-${created.id}`)
+    clearDraft(); hasUnsavedChanges.value = false
+    router.push(`/coi/detail-${projectId}`)
   } catch (err: unknown) {
     toast.error(mapApiError(err))
     console.error('[COI Create] Failed:', err)
@@ -584,14 +592,78 @@ async function fetchEligibleStaff() {
   }
 }
 
+// WWW-D: Autosave — localStorage draft + beforeunload warning
+const hasUnsavedChanges = ref(false)
+const draftRestoreSnackbar = ref(false)
+const DRAFT_KEY = 'coi-draft-new'
+
+function saveDraft() {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ ts: Date.now(), form: JSON.parse(JSON.stringify(form.value)) }))
+  } catch { /* quota exceeded — silently skip */ }
+}
+
+function clearDraft() {
+  localStorage.removeItem(DRAFT_KEY)
+}
+
+let draftDebounce: ReturnType<typeof setTimeout> | null = null
+watch(form, () => {
+  hasUnsavedChanges.value = true
+  if (draftDebounce) clearTimeout(draftDebounce)
+  draftDebounce = setTimeout(saveDraft, 2000)
+}, { deep: true })
+
+function handleBeforeUnload(e: BeforeUnloadEvent) {
+  if (hasUnsavedChanges.value) { e.preventDefault(); e.returnValue = '' }
+}
+
+function restoreDraft() {
+  try {
+    const saved = localStorage.getItem(DRAFT_KEY)
+    if (saved) {
+      const { form: savedForm } = JSON.parse(saved)
+      Object.assign(form.value, savedForm)
+      toast.success('Draft restored')
+    }
+  } catch { toast.error('Could not restore draft') }
+  draftRestoreSnackbar.value = false
+}
+
 onMounted(() => {
   fetchLookups()
   fetchEligibleStaff()
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  // Check for saved draft
+  const saved = localStorage.getItem(DRAFT_KEY)
+  if (saved) {
+    try {
+      const { ts } = JSON.parse(saved)
+      if (Date.now() - ts < 24 * 60 * 60 * 1000) draftRestoreSnackbar.value = true
+      else clearDraft()
+    } catch { clearDraft() }
+  }
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  if (draftDebounce) clearTimeout(draftDebounce)
 })
 </script>
 
 <template>
   <div>
+    <!-- WWW-D: Draft restore notification -->
+    <v-snackbar v-model="draftRestoreSnackbar" :timeout="-1" color="info" location="bottom left">
+      <div class="d-flex align-center ga-2">
+        <v-icon icon="mdi-content-save-outline" />
+        <span>Unsaved draft found. Restore your work?</span>
+      </div>
+      <template #actions>
+        <v-btn variant="text" @click="restoreDraft">Restore</v-btn>
+        <v-btn variant="text" @click="draftRestoreSnackbar = false; clearDraft()">Dismiss</v-btn>
+      </template>
+    </v-snackbar>
+
     <!-- Header -->
     <div class="d-flex align-center ga-3 mb-4">
       <v-btn icon="mdi-arrow-left" variant="text" @click="goBack" />

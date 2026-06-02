@@ -52,6 +52,12 @@ export interface BackendProject {
   contractor_name?: string
   start_date?: string
   end_date?: string
+  // LLL-C: list endpoint now also returns these for advanced index filtering
+  project_code?: string
+  original_start_date?: string
+  revised_start_date?: string
+  original_completion_date?: string
+  revised_completion_date?: string
   publication_status?: PublicationStatus
   created_by?: string
   created_by_name?: string
@@ -110,6 +116,12 @@ export interface UIProject {
   contractor: string
   startDate: string
   endDate: string
+  // LLL-C: surfaced on the list type for advanced index filtering
+  projectCode: string
+  originalStartDate: string
+  revisedStartDate: string
+  originalCompletionDate: string
+  revisedCompletionDate: string
   publicationStatus: PublicationStatus
   createdBy: string
   createdAt: string
@@ -164,6 +176,12 @@ export function adaptProject(backend: BackendProject): UIProject {
     contractor: backend.contractor_name || '',
     startDate: backend.start_date || '',
     endDate: backend.end_date || '',
+    // LLL-C: list-level fields for advanced index filtering
+    projectCode: backend.project_code || '',
+    originalStartDate: backend.original_start_date || '',
+    revisedStartDate: backend.revised_start_date || '',
+    originalCompletionDate: backend.original_completion_date || '',
+    revisedCompletionDate: backend.revised_completion_date || '',
     publicationStatus: backend.publication_status || 'PUBLISHED',
     createdBy: backend.created_by || '',
     createdAt: backend.created_at,
@@ -297,6 +315,7 @@ export interface BackendProjectDetail extends BackendProject {
   // LA-A: monitoring fields added to BackendProjectDetail (were missing, causing TypeScript errors)
   document_checklist_remarks?: Record<string, string>
   custom_key_sections?: { id: string; label: string; typeCode: string }[]
+  custom_supporting_sections?: { id: string; label: string; typeCode: string }[]
   incident_log?: Record<string, any>[]
   risk_register?: Record<string, any>[]
   escalation_records?: Record<string, any>[]
@@ -414,6 +433,7 @@ export interface UIProjectDetail extends UIProject {
   signatories: Record<string, any>[]
   documentChecklistRemarks: Record<string, string>
   customKeySections: { id: string; label: string; typeCode: string }[]
+  customSupportingSections: { id: string; label: string; typeCode: string }[]
   incidentLog: Record<string, any>[]
   riskRegister: Record<string, any>[]
   escalationRecords: Record<string, any>[]
@@ -525,6 +545,7 @@ export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDeta
     signatories: (backend.signatories || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
     documentChecklistRemarks: backend.document_checklist_remarks || {},
     customKeySections: backend.custom_key_sections || [],
+    customSupportingSections: backend.custom_supporting_sections || [],
     // KY-B2: filter out non-object items (guards against [[]] double-wrap corruption)
     incidentLog: (backend.incident_log || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
     riskRegister: (backend.risk_register || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),

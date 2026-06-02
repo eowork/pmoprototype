@@ -221,7 +221,7 @@ defineExpose({ refresh: fetchChecklist })
     <v-card variant="tonal" color="deep-purple" class="mb-4">
       <v-card-text class="d-flex align-center ga-3 flex-wrap py-2">
         <v-icon icon="mdi-certificate-outline" />
-        <span class="text-body-2 font-weight-medium">Compliance Repository — CPES Documentary Requirements</span>
+        <span class="text-body-2 font-weight-bold">Compliance Repository — CPES Documentary Requirements</span>
         <v-spacer />
         <v-chip size="small" variant="elevated" color="success">{{ approvedCount }} approved</v-chip>
         <v-chip size="small" variant="tonal">{{ submittedCount }} / {{ cpesItems.length }} submitted</v-chip>

@@ -16,6 +16,8 @@ interface FolderDoc {
   folderId?: string | null
   uploadedByName?: string | null
   createdAt?: string
+  updatedAt?: string
+  version?: number
   mimeType?: string
   fileSize?: number
 }
@@ -28,12 +30,17 @@ const props = withDefaults(defineProps<{
   canEdit?: boolean
   canDelete?: boolean
   seededTemplateUrl?: string | null
+  // LLL-F: official seeded templates for this group (typeCode → label + url).
+  // Surfaced as a reference panel; folder TEMPLATE nodes carry no type code,
+  // so per-group listing is the reliable way to expose seeded templates.
+  seededTemplates?: Array<{ code: string; label: string; url: string }>
 }>(), {
   docTypeCodes: () => [],
   documents: () => [],
   canEdit: false,
   canDelete: false,
   seededTemplateUrl: null,
+  seededTemplates: () => [],
 })
 
 const emit = defineEmits<{ uploaded: []; deleted: [] }>()
@@ -47,14 +54,17 @@ const loading = ref(false)
 const expanded = ref(new Set<string>())
 const uploading = reactive<Record<string, boolean>>({})
 const deletingDoc = reactive<Record<string, boolean>>({})
+// OOO-B: per-SUBMISSIONS-node search text (filters the data-table client-side)
+const subSearch = reactive<Record<string, string>>({})
 
 // ── Fetch ────────────────────────────────────────────────────────────────────
 async function fetchFolders() {
   if (!props.projectId) return
   loading.value = true
   try {
-    const res = await api.get<FolderNode[]>(`/api/construction-projects/${props.projectId}/document-folders`)
-    const roots = Array.isArray(res) ? res : []
+    // PPP-A: API returns { data: FolderNode[] } — unwrap before filtering
+    const res = await api.get<{ data: FolderNode[] }>(`/api/construction-projects/${props.projectId}/document-folders`)
+    const roots = res.data ?? []
     folders.value = roots.filter(n => n.groupCode === props.groupCode)
   } catch (e) {
     console.error('[CiFolderRepository] fetch failed', e)
@@ -88,6 +98,20 @@ function toggle(id: string) {
 function docsFor(folderId: string): FolderDoc[] {
   return props.documents.filter(d => d.folderId === folderId)
 }
+// OOO-B: highest version number in a folder (marks the current/latest submission)
+function maxVersionFor(folderId: string): number {
+  return docsFor(folderId).reduce((m, d) => Math.max(m, d.version ?? 1), 0)
+}
+
+// LLL-G: Submission table headers (File Name / Uploaded By / Date / Version / Actions)
+const submissionHeaders = [
+  { title: 'File Name', key: 'fileName', sortable: true },
+  { title: 'Uploaded By', key: 'uploadedByName', sortable: false },
+  { title: 'Date Uploaded', key: 'createdAt', sortable: true },
+  { title: 'Last Modified', key: 'updatedAt', sortable: true },
+  { title: 'Version', key: 'version', sortable: false, align: 'center' as const },
+  { title: 'Actions', key: 'actions', sortable: false, align: 'center' as const },
+]
 
 // ── Node icons / colors ──────────────────────────────────────────────────────
 function nodeIcon(t: string) {
@@ -262,6 +286,37 @@ watch(() => props.projectId, fetchFolders)
 
 <template>
   <div>
+    <!-- LLL-F: Official Templates reference panel (seeded blank forms) -->
+    <v-card
+      v-if="seededTemplates.length"
+      variant="tonal"
+      color="indigo-lighten-5"
+      rounded="lg"
+      class="mb-3 pa-2"
+    >
+      <div class="d-flex align-center ga-2 mb-1 px-1">
+        <v-icon size="16" color="indigo">mdi-file-download-outline</v-icon>
+        <span class="text-body-2 font-weight-medium text-indigo-darken-2">Official Templates</span>
+        <v-chip size="x-small" variant="tonal" color="indigo">{{ seededTemplates.length }}</v-chip>
+      </div>
+      <div class="d-flex flex-wrap ga-1">
+        <v-btn
+          v-for="t in seededTemplates"
+          :key="t.code"
+          :href="t.url"
+          target="_blank"
+          rel="noopener"
+          size="x-small"
+          variant="text"
+          color="indigo"
+          prepend-icon="mdi-download"
+          class="text-none"
+        >
+          {{ t.label }}
+        </v-btn>
+      </div>
+    </v-card>
+
     <!-- Loading -->
     <div v-if="loading" class="d-flex justify-center py-6">
       <v-progress-circular indeterminate color="warning" size="24" />
@@ -424,25 +479,65 @@ watch(() => props.projectId, fetchFolders)
               <template v-if="node.nodeType === 'SUBMISSIONS' && expanded.has(node.id)">
                 <v-divider />
                 <div class="pa-3">
-                  <!-- Uploaded files -->
-                  <div v-if="docsFor(node.id).length" class="d-flex flex-column ga-1 mb-3">
-                    <div
-                      v-for="doc in docsFor(node.id)"
-                      :key="doc.id"
-                      class="d-flex align-center ga-2 pa-2 bg-grey-lighten-5 rounded"
-                    >
-                      <v-icon size="16" color="success">mdi-file-check-outline</v-icon>
-                      <div class="flex-grow-1" style="min-width:0">
-                        <div class="text-body-2 font-weight-medium text-truncate">{{ doc.fileName }}</div>
-                        <div class="text-caption text-grey">{{ formatDate(doc.createdAt) }}<span v-if="doc.uploadedByName"> · {{ doc.uploadedByName }}</span></div>
+                  <!-- OOO-B: search within submissions -->
+                  <v-text-field
+                    v-if="docsFor(node.id).length"
+                    v-model="subSearch[node.id]"
+                    placeholder="Search submissions…"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                    single-line
+                    clearable
+                    prepend-inner-icon="mdi-magnify"
+                    class="mb-2"
+                    style="max-width: 280px"
+                  />
+                  <!-- LLL-G: Submission table (File Name / Uploaded By / Date / Last Modified / Version / Actions) -->
+                  <v-data-table
+                    v-if="docsFor(node.id).length"
+                    :items="docsFor(node.id)"
+                    :headers="submissionHeaders"
+                    :search="subSearch[node.id] || ''"
+                    density="compact"
+                    hover
+                    :items-per-page="5"
+                    :items-per-page-options="[5, 10, 25]"
+                    class="text-body-2 mb-3 bg-transparent"
+                  >
+                    <template #item.fileName="{ item }">
+                      <div class="d-flex align-center ga-1" style="min-width:0">
+                        <v-icon size="16" color="success">mdi-file-check-outline</v-icon>
+                        <span class="text-truncate">{{ item.fileName }}</span>
                       </div>
+                    </template>
+                    <template #item.uploadedByName="{ item }">
+                      <span class="text-medium-emphasis">{{ item.uploadedByName || '—' }}</span>
+                    </template>
+                    <template #item.createdAt="{ item }">
+                      <span class="text-medium-emphasis">{{ formatDate(item.createdAt) }}</span>
+                    </template>
+                    <template #item.updatedAt="{ item }">
+                      <span class="text-medium-emphasis">{{ formatDate(item.updatedAt || item.createdAt) }}</span>
+                    </template>
+                    <template #item.version="{ item }">
+                      <div class="d-flex align-center justify-center ga-1">
+                        <v-chip size="x-small" variant="tonal" color="info">v{{ item.version || 1 }}</v-chip>
+                        <v-chip
+                          v-if="maxVersionFor(node.id) > 1 && (item.version || 1) === maxVersionFor(node.id)"
+                          size="x-small" variant="tonal" color="success"
+                        >Latest</v-chip>
+                      </div>
+                    </template>
+                    <template #item.actions="{ item }">
                       <v-btn
-                        :href="`/api/construction-projects/${projectId}/documents/${doc.id}/download`"
+                        :href="`/api/construction-projects/${projectId}/documents/${item.id}/download`"
                         target="_blank"
                         icon="mdi-download"
                         size="x-small"
                         variant="text"
                         color="primary"
+                        title="Download"
                       />
                       <v-btn
                         v-if="canDelete"
@@ -450,17 +545,18 @@ watch(() => props.projectId, fetchFolders)
                         size="x-small"
                         variant="text"
                         color="error"
-                        :loading="deletingDoc[doc.id]"
-                        @click="deleteDoc(doc.id)"
+                        :loading="deletingDoc[item.id]"
+                        title="Delete"
+                        @click="deleteDoc(item.id)"
                       />
-                    </div>
-                  </div>
+                    </template>
+                  </v-data-table>
                   <div v-else class="text-body-2 text-grey mb-2">No submissions yet.</div>
 
-                  <!-- Upload zone -->
+                  <!-- Upload zone (OOO-B: uploads auto-version on the server) -->
                   <v-file-input
                     v-if="canEdit"
-                    label="Upload Accomplished Form"
+                    :label="docsFor(node.id).length ? 'Upload New Version' : 'Upload Accomplished Form'"
                     prepend-icon=""
                     prepend-inner-icon="mdi-tray-arrow-up"
                     density="compact"

@@ -293,6 +293,11 @@ export class CreateConstructionProjectDto {
   @IsArray()
   csu_likha_goals?: string[];
 
+  // QQQ: UN Sustainable Development Goals
+  @IsOptional()
+  @IsArray()
+  sdg_goals?: string[];
+
   // MC: Beneficiaries dynamic list
   @IsOptional()
   @IsArray()

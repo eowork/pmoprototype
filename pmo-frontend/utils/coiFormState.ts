@@ -52,6 +52,7 @@ export interface BasicInfoFormState {
   rdp_alignment: string[]
   socioeconomic_agenda: string[]
   csu_likha_goals: string[]
+  sdg_goals: string[]            // QQQ: UN Sustainable Development Goals
   strategic_alignment: string // legacy free-text narrative
 
   // ── Indicators (NC: migrated from textareas to dynamic bullet arrays) ──

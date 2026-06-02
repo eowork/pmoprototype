@@ -1,9 +1,1682 @@
 ﻿# PMO Dashboard: Active Research
 
 **Governance:** ACE v2.4 Phase 1 (Research Complete)
-**Last Updated:** 2026-05-28
-**Status:** ✅ Section 2.260 — Phase III COI Enterprise Refactor: backend fix, COI index view modes, nested folder system, checklist upgrade, repository refactor — ALL PHASES COMPLETE | Archive: `docs/research_Artifact_April_2026.md`
+**Last Updated:** 2026-06-02
+**Status:** ✅ Section 2.272 — Phase WWW: VVV verify pass (CLEAN), repository card refactor (progress bar removal), CPES→card architecture, Misc→card architecture, autosave guard, audit log gap analysis, gallery evaluation — Phase 1 complete | Archive: `docs/research_Artifact_April_2026.md`
 **Context:** `CLAUDE.md` (project root) | Archive: `docs/archive/`
+
+---
+
+## §2.272 — Phase WWW: Attachment Module UX + Architecture Audit (Phase 1)
+
+> Date: 2026-06-02
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.272-A: VVV Verify Pass
+
+| Check | Result |
+|---|---|
+| VVV-A: `= ANY(?)` SQL gone | ✅ `grep ANY(?) backend/src` → CLEAN (only explanatory comments remain) |
+| VVV-B: `docsError` + Retry alert in hub | ✅ ref, fetchDocuments catch, template alert all present |
+
+### 2.272-B: CiRepositoryCard — Progress Bar is Misleading (Confirmed)
+
+**Current implementation:**
+- "Type coverage" progress bar: `completedCount / totalTypes` where `completedCount` = distinct documentTypes present and `totalTypes` = configured typeCodes for the repo.
+- For single-typeCode repos (most repos after SSS rework): always `0/1` or `1/1` — a binary indicator masquerading as a progress bar.
+- For multi-typeCode repos ("Other Key Documents"): shows coverage but number of expected types is arbitrary.
+- The progress bar communicates a completion percentage that has no defined meaning for a document repository.
+
+**Prompt requirement:** Replace with meaningful factual metadata — Total Files, Latest Submission, Last Updated.
+
+**Decision (D-WWW-1):** Remove the `v-progress-linear` + "Type coverage" block from `CiRepositoryCard.vue`. Replace with:
+- `Total files: N` (docCount chip, already shown in title)
+- `Latest submission: {date}` (latestLabel already computed)
+- Optional: `{uploaderName} — {date}` (already computed via uploaderName prop)
+
+No prop changes needed — `docCount` + `latestUpload` + `uploaderName` already flow through. The `completedCount`/`totalTypes`/`completionPct` computed becomes unused → remove.
+
+### 2.272-C: CPES Repository — Architecture Mismatch
+
+**Current state:** `CiAttachmentHub` renders `CiComplianceRepository` for `v-window-item value="cpes"` — a separate component with checklist-accordion structure (NOT the `CiRepositoryCard` pattern).
+
+**Comparison with Key Documents:** Key Docs = N `CiRepositoryCard` per typeCode, each opening shared `CiRepositoryModal` via `openRepo([typeCode])`. All uploads routed through `persistDoc` → documented under the typeCode → appear in the modal's filtered view.
+
+**CPES data:** `cpesTypes` = seeded `CPES_DOCS` group types. Each type (`cpesType.typeCode`) maps 1:1 to a checklist-tracked document type. These types ARE in `managedCodes`, so docs uploaded under them appear in `allDocs` and ARE correctly filtered.
+
+**Decision (D-WWW-2):** Replace `CiComplianceRepository` in the CPES window-item with a `CiRepositoryCard` grid — identical to Key Documents. One card per `cpesType`. Each card:
+- `title = cpesType.typeLabel`
+- `doc-count = repoStats([cpesType.typeCode]).docCount`
+- `@open → openRepo(label, icon, color, [cpesType.typeCode])`
+- `@upload → openRepo(..., true)` (expand upload)
+- `template-url = cpesType.templateUrl` (if any)
+
+The backend auto-link (updates checklist item when a doc with matching `documentType` is uploaded) already exists — preserved automatically. `CiComplianceRepository` component file kept (archive-never-delete) but no longer rendered here. Add "Add Section" dashed card (reuse `addSectionOpen`) if needed — defer to future phase.
+
+**cpesStats computed:** Mirror `keyCardStats` / `supportingCardStats` pattern.
+
+### 2.272-D: Miscellaneous — Architecture Mismatch
+
+**Current state:** Miscellaneous shows a flat `v-list` of `otherDocs` + inline upload form + optional `CiFolderRepository` for group MISC. Does NOT use `CiRepositoryCard` pattern.
+
+**`otherDocs`** = all documents whose `documentType` is NOT in `managedCodes` (not Key, not Supporting, not CPES, not ECO_FORMS). These are truly unclassified documents.
+
+**Decision (D-WWW-3):** Convert Miscellaneous to a single `CiRepositoryCard` (label "Miscellaneous & Uncategorized", icon `mdi-paperclip`, color `blue-grey`) that opens the shared `CiRepositoryModal` with all `otherDocs`. The modal already supports generic lists with search/filter/sort/pagination. Below the card: keep the optional `CiFolderRepository` for MISC group (folder workspace for structured org within Misc). Inline upload form replaced by the modal's upload workflow.
+
+The `otherKeyCodes` (custom typecodes for items that bypass the main taxonomy) are included via the openRepo call: `openRepo('Miscellaneous & Uncategorized', icon, color, [...otherDocsTypeCodes])` where `otherDocsTypeCodes` = all typecodes NOT in managedCodes that actually have documents, OR use `otherDocs` directly via a special "all non-managed" filter. **Simplest approach:** use a dedicated synthetic typeCode `'MISC_ALL'` that the hub's `persistDoc` maps to `'attachment'` (existing default for misc uploads) and `activeRepoDocs` returns `otherDocs` when the active repo has `typeCodes=['MISC_ALL']`.
+
+Actually, simpler: keep `otherDocType` selection for uploads (the user picks the type), and open the modal with `typeCodes = []` (empty = no filter) — need a special flag. **Better approach:** Since `otherDocs` is already computed as `allDocs.filter(not managed)`, create a dedicated `openMiscRepo()` function that sets `activeRepo` with a sentinel and returns `otherDocs` (not filtered by typecodes). This avoids hacking the existing typeCode filter.
+
+**Implementation:** Add `isMiscRepo = computed(...)` flag; modify `activeRepoDocs` to return `otherDocs` when `activeRepo.typeCodes[0] === '__MISC__'`. `openMiscRepo()` sets `activeRepo.typeCodes = ['__MISC__']`.
+
+### 2.272-E: Autosave — Gap Analysis
+
+**Current state:** Zero autosave implementation. `new.vue` and `edit-[id].vue` lose all unsaved work on accidental navigation.
+
+**Minimum viable autosave for this phase:**
+1. `beforeunload` browser warning (standard Web API, 1 line) — already the baseline most apps use
+2. `localStorage` draft — serialize form to localStorage on debounced change; restore on mount with a notification snackbar. Risk: large JSONB payloads (objectives_list, remarks_log, etc.) could exceed 5MB localStorage limit. Mitigation: store only changed fields delta, or store as-is with try/catch.
+
+**Decision (D-WWW-4):** Implement in `new.vue` and `edit-[id].vue`:
+- `window.addEventListener('beforeunload', ...)` warning (unload guard)
+- Debounced `localStorage.setItem('coi-draft-{projectId|new}', JSON.stringify(form.value))` on form watch
+- On mount: `localStorage.getItem` → if found, show a `v-snackbar` "Unsaved draft found — Restore?" with Restore/Dismiss buttons
+- Clear on successful save
+
+**Scope**: form state only (not pendingDocs staging queue, not gallery images — those are File objects which can't be serialized).
+
+### 2.272-F: Repository Modal UX — Gap Analysis
+
+**Current state:** Modal has search/filter/sort/pagination and drag-drop zone. Missing: contextual help text telling users what they can do.
+
+**Decision (D-WWW-5):** Add a collapsed instruction `v-alert type="info" variant="tonal"` at the top of the modal that shows on first open and can be dismissed. Content: "Download the official template, upload your accomplished form, view previous submissions, and track version history." Dismissal stored in `localStorage` per user (avoid repeated display).
+
+### 2.272-G: Audit Log Gap Analysis
+
+**Already covered (confirmed present):**
+- UPLOAD (document upload, gallery upload)
+- DOWNLOAD (authenticated file download)
+- REMOVE_ATTACHMENT (document delete, gallery delete)
+- FOLDER_CREATE, FOLDER_RENAME, FOLDER_DELETE (document-folder CRUD)
+- CREATE (project create, milestone, progress report, etc.)
+- UPDATE (project update, milestone, etc.)
+- DELETE (project delete, etc.)
+
+**Missing from prompt's required list vs what's in the enum:**
+- `View` — would require a backend endpoint for viewing (currently documents are downloaded, not "viewed" as a separate action). Not feasible without a new download-tracking mechanism. **Defer.**
+- `Create Repository` / `Rename Repository` / `Delete Repository` — repository is not a separate entity; it's a category (typeCode). No backend CRUD for repositories. **N/A — no new backend needed.**
+- `Replace File` — tracked as `UPLOAD` (new version, OOO-A version auto-increment). Already audited. **Already covered.**
+- `Update Metadata` — no endpoint for metadata-only update. **Defer.**
+- `Create Remark` / `Update Remark` — `REMARKS_UPDATE` ActionType already in enum; not all remark save paths fire it. Check if `addItemRemark` fires fireLog. **Partial — may need to add.**
+
+**Decision (D-WWW-6):** Remarks audit: add `REMARKS_UPDATE` fireLog call in the backend `PATCH /document-checklist/:itemId` route (currently only updates DB, no audit). This is the primary missing audit action for this scope.
+
+### 2.272-H: Gallery Research/Evaluation (Phase 1 Findings)
+
+**Current role:** Gallery is image-only storage (JPEG/PNG/GIF up to 10MB, categorized as IN_PROGRESS/COMPLETED/etc., has `imageTakenDate`, caption). Used as a visual record of site conditions. The `CiGalleryModal` shows images in a grid with download.
+
+**Enhanced role (prompt recommendations):**
+- Construction Documentation, Site Progress Monitoring, Before/After records, Inspection Evidence
+- Timeline visualization (chronological/milestone view)
+- Metadata: uploadedBy, dateTaken, uploadDate, project phase/category
+- Gallery Analytics: monthly count, missing documentation alerts
+
+**Assessment:** Gallery backend already stores `imageTakenDate`, `caption`, `category`, `isFeatured`. Frontend already shows thumbnails. Enhancement needed:
+- Group by date/category in the modal
+- Add "Progress Timeline" view (chronological strip)
+- "Recent Uploads" and "Missing Documentation" analytics
+
+**Decision (D-WWW-7):** Gallery Phase 1 finding documented. Phase 2 plan: enhance `CiGalleryModal` with:
+1. Group-by-month timeline view (toggle)
+2. Category filter chips (IN_PROGRESS/COMPLETED/INSPECTION/etc.)
+3. Analytics header: image count this month, last upload date
+
+**Defer to a separate phase** — gallery is standalone and lower risk. Not in Phase WWW scope.
+
+### 2.272-I: Compliance Checklist as Master Tracker
+
+**Current state:** `CiDocumentChecklist` shows only CPES_DOCS checklist items (auto-linked when a doc with matching documentType is uploaded). Other sections (Key Docs, Supporting Docs, Gallery, Misc) are NOT represented.
+
+**Prompt requirement:** "Checklist must automatically synchronize with Key Documents, Supporting Documents, Gallery, CPES Compliance Repository, Miscellaneous & Uncategorized."
+
+**Assessment of feasibility:**
+- The existing checklist entity tracks CPES_DOCS document types. Adding Key Docs and Supporting Docs to the checklist would require:
+  1. New checklist rows for each Key/Supporting type (backend `document-checklist` entries), OR
+  2. A purely frontend-derived summary (no new DB rows — derive from existing `allDocs`)
+
+Option 2 is far less risky and faster: show a "master tracker" view that summarizes allDocs by section:
+- Key Docs section: each keyDocCardDef → "has file: yes/no, count, latest"
+- Supporting Docs section: each seeded template typeCode → "has file: yes/no"
+- Gallery: image count
+- CPES: existing checklist items (already tracked)
+- Misc: count of otherDocs
+
+**Decision (D-WWW-8):** Add a "Summary" section at the TOP of the existing `CiDocumentChecklist` component showing a cross-section summary derived from the hub's `allDocs` (passed as a new prop). The existing CPES-detailed checklist accordion remains below. This is additive — no backend change, no new entity rows, no risk of breaking existing checklist sync.
+
+---
+
+## §2.271 — Phase VVV: GET /documents HTTP 500 Root Cause (Document Retrieval Pipeline) (Phase 1)
+
+> Date: 2026-06-02
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.271-A: The Actual Failure Point — DEFINITIVE (CRITICAL)
+
+**Hard evidence (browser network inspector):**
+```
+GET /api/construction-projects/1d3656e1-65f5-4e42-9223-e1f02389b5eb/documents → 500 Internal Server Error
+```
+
+This endpoint backs the hub's `fetchDocuments()`. When it 500s, `documents.value` stays `[]` → ALL repository cards show 0, ALL repository modals render empty, for BOTH Key Documents and Supporting Documents. The upload (POST) works and rows exist in the DB — the failure is purely in **retrieval**, exactly as the prompt deduced.
+
+**Full retrieval trace:**
+```
+CiAttachmentHub.fetchDocuments()
+  → api.get(/api/construction-projects/:id/documents)
+Controller listDocuments(@Param id) → service.listProjectDocuments(id) → { data }
+Service listProjectDocuments:
+  1. documentRepo.find({ documentableType:'CONSTRUCTION_PROJECT', documentableId: projectId })  ← OK (ORM)
+  2. uploaderIds = unique non-null uploadedBy values
+  3. conn.execute(`... WHERE id = ANY(?) ...`, [uploaderIds])   ← ★ 500 HERE
+  4. map uploadedByName onto docs
+```
+
+**Root cause — `construction-projects.service.ts` line 2116:**
+```ts
+const userRows = await this.em.getConnection().execute(
+  `SELECT id, COALESCE(display_name, first_name || ' ' || last_name, email) AS display_name
+   FROM users WHERE id = ANY(?) AND deleted_at IS NULL`,
+  [uploaderIds],   // uploaderIds is a string[]
+);
+```
+
+MikroORM's `conn.execute` uses **Knex positional `?` placeholders** (confirmed by `university-operations.service.ts:51` — *"All raw queries use '?' (Knex positional) placeholders."*). Knex **flattens an array binding** into a comma-separated list. So `WHERE id = ANY(?)` with a single array binding expands to:
+```
+WHERE id = ANY($1, $2, $3 ...)   ← invalid: ANY() takes ONE array argument
+```
+→ PostgreSQL syntax/type error → the endpoint throws → 500.
+
+**This is the ONLY `= ANY(?)` in the entire backend** (grep-confirmed). Every other array-bound raw query in the codebase uses the correct pattern (see 2.271-B). It only manifests once a project has documents (uploaderIds non-empty) — which is why it surfaced after upload testing accumulated rows on this project, and why "DB records exist but UI is empty."
+
+### 2.271-B: The Codebase-Standard Pattern (the correct fix)
+
+Working precedent — `university-operations.service.ts`:
+```ts
+// line 2635 / 3766
+WHERE uo.fiscal_year IN (${years.map(() => '?').join(', ')})   // → IN ($1, $2, $3)
+```
+Explicit placeholders, one per element, params passed FLAT. This is Knex-correct for arrays.
+
+**Fix (D-VVV-1):** Replace the anomalous `= ANY(?)` with the standard `IN (...)` placeholder expansion and pass `uploaderIds` flat:
+```ts
+const placeholders = uploaderIds.map(() => '?').join(', ');
+const userRows = await this.em.getConnection().execute(
+  `SELECT id, COALESCE(display_name, first_name || ' ' || last_name, email) AS display_name
+   FROM users WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
+  uploaderIds,   // flat: N params for N placeholders
+);
+```
+- `documentableType`/`documentableId` consistency already verified (save & query both `'CONSTRUCTION_PROJECT'` + projectId).
+- No DTO/entity/migration changes — the Document entity matches its table; `documentRepo.find` (step 1) is fine.
+- This single line resolves the 500 for BOTH tabs (one shared endpoint).
+
+### 2.271-C: Why prior phases didn't catch it
+
+PPP-B (upload-zone collapse), SSS (folder→card), TTT-A (uploadType reset) all addressed genuine but DIFFERENT bugs in the write/render path. None exercised the retrieval raw-SQL with a populated `uploaderIds`. The 500 only appears when `listProjectDocuments` reaches step 3 with ≥1 uploader — i.e., on projects that already have documents. The III-A fix touched the SELECT columns of this same query (`full_name`→`display_name`) but left the `= ANY(?)` clause untouched, so the latent binding bug persisted.
+
+### 2.271-D: Frontend Error-Handling Gap (prompt requirement)
+
+`CiAttachmentHub.fetchDocuments()` swallows errors:
+```ts
+catch (err) { console.error('[CiAttachmentHub] fetch documents failed:', err) }
+```
+On a 500 it leaves `documents.value` unchanged (empty) and shows a normal "empty repository" — indistinguishable from a project with no documents. The prompt requires an explicit **error state + retry** so an API failure never masquerades as "no files."
+
+**Fix (D-VVV-2):** Add `docsError` ref; set it in the catch; surface a non-blocking error alert with a Retry button in the Key Documents and Supporting Documents sections (and pass an error indicator into the modal). Keeps the fix small and additive.
+
+### 2.271-E: Acceptance Coverage
+
+| Criterion | Resolved by |
+|---|---|
+| GET /documents returns 200, no exceptions | VVV-A (IN placeholders) |
+| Repository query returns records, DTO maps | VVV-A |
+| Files visible immediately + after refresh in both tabs | VVV-A (endpoint now succeeds → documents.value populated) |
+| Repository cards show correct counts | VVV-A (stats derive from documents.value) |
+| Download/search/filter work | inherited (modal already implements; now receives data) |
+| API failure shows error state + retry, not empty repo | VVV-B |
+
+---
+
+## §2.270 — Phase UUU: Upload Persistence Re-Analysis, Template 404, CiFolderRepository Empty, Dynamic Discovery (Phase 1)
+
+> Date: 2026-06-02
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.270-A: Template 404 — Root Cause (Confirmed)
+
+**Bug:** Clicking "Download Template" for Supporting Document templates returns HTTP 404.
+
+**Stack trace:**
+1. CiFolderRepository renders "Official Templates" panel with `href="/templates/SD_ECO_001.docx"`
+2. Browser navigates to `http://localhost:3001/templates/SD_ECO_001.docx` (frontend dev server)
+3. Nuxt server has no `/templates` route → 404
+
+**Root cause:** `nuxt.config.ts` devProxy only routes `/api` and `/uploads` to the NestJS backend. `/templates` is not proxied.
+
+```ts
+nitro: {
+  devProxy: {
+    '/api': { target: 'http://localhost:3000/api', changeOrigin: true },
+    '/uploads': { target: 'http://localhost:3000/uploads', changeOrigin: true },
+    // '/templates' MISSING → goes to Nuxt → 404
+  },
+},
+```
+
+**NestJS backend state:** `main.ts` has `app.useStaticAssets(join(process.cwd(), 'public', 'templates'), { prefix: '/templates' })` which serves files from `pmo-backend/public/templates/`. The 15 flat type-code named files (`SD_ECO_001.docx` etc.) physically exist. The static serving is configured. But the frontend never reaches it.
+
+**Fix (D-UUU-1):** Add `/templates` to `nitro.devProxy` in `nuxt.config.ts`:
+```ts
+'/templates': { target: 'http://localhost:3000/templates', changeOrigin: true },
+```
+
+**Production note:** In production, the reverse proxy (nginx/etc.) must also route `/templates/*` to the NestJS backend alongside `/api/*` and `/uploads/*`. This is an ops documentation item.
+
+### 2.270-B: CiFolderRepository Always Empty — Root Cause (Confirmed)
+
+**Bug:** Supporting Documents folder repositories show "No folders yet" even after `seedPresetFolders()` seeds CONTAINER folders. Uploads via folder SUBMISSIONS nodes are impossible because no folders display.
+
+**Stack trace:**
+```
+CiFolderRepository.fetchFolders()
+  → api.get<FolderNode[]>('/api/construction-projects/:id/document-folders')
+  → res = { data: FolderNode[] }   ← actual response (object, not array)
+  → roots = Array.isArray(res) ? res : []
+  → Array.isArray({ data: [...] }) = false
+  → roots = []  ← ALWAYS EMPTY
+  → folders.value = [].filter(...) = []
+```
+
+**Controller response:** `return { data }` (always wraps in `{ data }` envelope).
+
+**Fix:** Unwrap the response. Change:
+```ts
+const roots = Array.isArray(res) ? res : []
+```
+To:
+```ts
+const rawList = (res as any)?.data ?? (Array.isArray(res) ? res : [])
+const roots = Array.isArray(rawList) ? rawList : []
+```
+Or type correctly:
+```ts
+const res = await api.get<{ data: FolderNode[] } | FolderNode[]>(...)
+const roots: FolderNode[] = (res as any)?.data ?? (Array.isArray(res) ? res as FolderNode[] : [])
+```
+
+**Impact:** Once fixed, all preset CONTAINER folders (SD_ORDERS, SD_REPORTS, SD_CERTS, ECO_FORMS) will appear, and users can create FORM nodes, upload via SUBMISSIONS, and download templates. All Supporting Documents folder functionality becomes operational.
+
+### 2.270-C: Upload Persistence — Current Status
+
+**Key Documents (CiRepositoryModal path):**
+- `uploadType` reset fix: ✅ TTT-A already applied in current CiRepositoryModal
+- Upload endpoint: `POST /api/construction-projects/:id/documents` (requires Admin/Staff role)
+- `fetchDocuments()` after upload: correctly accesses `res.data` ✅
+- `activeRepoDocs` filter: uses `documentType` matching ✅
+- **Status: Functional** — uploads should persist and appear immediately
+
+**Supporting Documents (CiFolderRepository path):**
+- `uploadToFolder()` calls `api.upload(...)` with `documentType = docTypeCodes[0] || 'OTHER'`
+- Upload endpoint: same `POST /api/construction-projects/:id/documents` ✅
+- `onFolderUploaded()` calls `fetchDocuments()` in hub → `documents.value` updates ✅
+- BUT: folders are never shown (§2.270-B bug) → users cannot navigate to SUBMISSIONS nodes → cannot upload via CiFolderRepository at all
+- **Status: Blocked by §2.270-B** — fix folder retrieval first
+
+**New project staging (new.vue):**
+- `emitStaged()` immutable pattern: ✅ MMM-C already applied
+- Upload loop runs after project creation with `pendingDocs.value` files ✅
+- `File` objects are preserved through Vue's reactive spread ✅
+- **Status: Functional** — staged docs upload correctly after project creation
+
+### 2.270-D: Dynamic Template Discovery — Implementation Design
+
+**Requirement (from prompt):** System should scan the template directory, discover folders, discover files, register files automatically, generate download URLs dynamically.
+
+**Current state:** Migration `Migration20260601010000_SeedDocumentTypeTemplateUrls` seeds `template_url` for 15 type codes in the DB. Files are at `public/templates/SD_ECO_001.docx` through `SD_ECO_018.docx`. Templates are static/hardcoded via DB seed.
+
+**Proposed dynamic discovery endpoint:**
+
+New endpoint: `GET /api/public/construction-templates/manifest`
+
+Behavior:
+1. Scans `pmo-backend/public/templates/` for `.docx` files
+2. Also scans `pmo-backend/public/templates/SHAREABLE SUPPORT DOCUMENTS/` subdirectory tree
+3. Returns a manifest:
+```json
+{
+  "flatTemplates": [
+    { "typeCode": "SD_ECO_001", "url": "/templates/SD_ECO_001.docx", "available": true },
+    ...
+  ],
+  "sourceDirectory": {
+    "ORDERS": [{ "fileName": "[SHAREABLE] SD-ECO-ECO-001_Variation Order.docx", "url": "/templates/SHAREABLE SUPPORT DOCUMENTS/ORDERS/..." }],
+    "REPORTS AND MONITORING": [...],
+    "CERTIFICATIONS AND OTHER DOCUMENTS": [...]
+  }
+}
+```
+
+**Frontend integration:** `CiAttachmentHub` calls this endpoint on mount (alongside `fetchDocTypes()`). The result overwrites `templateUrl` values from the taxonomy when URLs are available. This replaces DB-seeded template_url with filesystem-driven discovery.
+
+**Constraint:** The discovery endpoint MUST be on the public controller (no auth required — users accessing the public portal also need templates). Consistent with `@Public()` pattern.
+
+**Simpler alternative (recommended for Phase UUU):** Keep the DB-seeded approach but fix the proxy so URLs work. The "dynamic" aspect is satisfied by the proxy fix + the existing files. A full scan endpoint can be a future enhancement. For now: fixing the proxy is the critical path.
+
+### 2.270-E: Confirmed Fix Inventory
+
+| Fix | File | Change | Severity |
+|---|---|---|---|
+| Add `/templates` to devProxy | `pmo-frontend/nuxt.config.ts` | 3 lines | **CRITICAL** |
+| Fix `fetchFolders` response unwrap | `pmo-frontend/components/coi/CiFolderRepository.vue` | 2 lines | **CRITICAL** |
+| (Optional) Dynamic template discovery endpoint | `pmo-backend/src/construction-projects/public-construction.controller.ts` + service | New endpoint | MEDIUM |
+| (Optional) Frontend uses discovery manifest | `pmo-frontend/components/coi/CiAttachmentHub.vue` | +1 fetch call | MEDIUM |
+| Update plan header PPP-TTT statuses | `docs/plan.md` | Metadata only | LOW |
+
+---
+
+## §2.269 — Phase TTT: Upload Persistence Root Cause (Definitive) + Overview Executive Summary + Progress Tab Hierarchy (Phase 1)
+
+> Date: 2026-06-01
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.269-A: Upload "Persistence" Failure — DEFINITIVE ROOT CAUSE (CRITICAL)
+
+**This symptom was reported 3×; prior phases addressed adjacent issues (PPP-B upload-zone collapse, SSS folder→card rework) but NOT this root cause. Found now via full lifecycle trace.**
+
+**Symptom:** Upload succeeds (toast + audit log), but file never appears in the Repository Modal, can't be viewed/downloaded, "disappears" after refresh — listing stays empty. Affects BOTH Key Documents and Supporting Documents.
+
+**Full lifecycle trace:**
+
+```
+Upload UI (CiRepositoryModal.submitUpload)
+  → emit('upload', { file, documentType: uploadType.value, ... })   ← BUG SOURCE
+CiAttachmentHub.onRepoUpload → persistDoc (non-staging)
+  → api.upload(/documents, FormData{ documentType })
+Backend addDocumentToProject
+  → documentRepo.create({ documentableType:'CONSTRUCTION_PROJECT', documentableId: projectId, documentType, ... })
+  → em.persistAndFlush(doc)   PERSISTS CORRECTLY
+  → fireLog(UPLOAD)           (explains "audit log success")
+Retrieval: listProjectDocuments
+  → documentRepo.find({ documentableType:'CONSTRUCTION_PROJECT', documentableId: projectId })  returns the doc
+Render: hub documents.value → allDocs → activeRepoDocs
+  → activeRepoDocs = allDocs.filter(d => activeRepo.typeCodes.includes(d.documentType))   ← MISMATCH HERE
+```
+
+**Root cause — `CiRepositoryModal.vue` line 182:**
+```ts
+const uploadType = ref<string>(props.typeCodes[0] ?? '')   // set once at creation
+watch(() => props.modelValue, (v) => {
+  if (v) {
+    ...
+    if (!uploadType.value) uploadType.value = props.typeCodes[0] ?? ''   // ONLY resets when empty
+    ...
+  }
+})
+```
+
+`CiRepositoryModal` is a **single shared instance** in CiAttachmentHub:
+```vue
+<CiRepositoryModal v-model="repoModalOpen" :type-codes="activeRepo.typeCodes" :documents="activeRepoDocs" ... />
+```
+`openRepo(label, icon, color, [typeCode])` swaps `activeRepo.typeCodes` per card. But `uploadType` is reset **only when falsy**. After the first repository is opened, `uploadType` holds that first typeCode forever. Every subsequent repository uploads under the **wrong documentType**:
+
+| Action | activeRepo.typeCodes | uploadType (sticky) | Saved documentType | Appears in filter? |
+|---|---|---|---|---|
+| Open "Project Profile", upload | [PROJECT_PROFILE] | PROJECT_PROFILE | PROJECT_PROFILE | yes (first repo matches) |
+| Open "Feasibility Study", upload | [FEASIBILITY_STUDY] | PROJECT_PROFILE (stale) | PROJECT_PROFILE | NO — filtered out → "empty" |
+| Open SD "Variation Order", upload | [SD_ECO_001] | PROJECT_PROFILE (stale) | PROJECT_PROFILE | NO — filtered out → "empty" |
+
+**The file IS persisted** — but under the first-opened repository's typeCode. It is invisible everywhere except that first repository. After refresh the document still has the wrong documentType, so the listing stays empty for the intended repo. This matches every reported symptom and the "both Key + Supporting Documents" scope.
+
+**Why prior fixes missed it:** PPP-B (collapse upload zone) and SSS (card rework) improved surrounding UX/architecture, but the stale-`uploadType` line was never touched. The bug only manifests on the SECOND+ repository opened per page session — easy to misread as a generic persistence fault.
+
+**Also affects batch drag-drop:** `handleModalFileBatch` uses `uploadType.value || props.typeCodes[0] || 'other'` — same stale value first.
+
+**Fix (D-TTT-1):** Reset `uploadType` to `props.typeCodes[0]` every time the modal OPENS (unconditional), AND watch `props.typeCodes` to resync when the active repo changes. Single-typeCode repos (all template cards) then always upload under the correct type. Multi-typeCode repos (Other Key Documents, custom folders) still allow the user to pick via the dropdown within that session; the per-open reset just provides the correct default.
+
+### 2.269-B: Overview Tab "Progress & Reports" — Executive Summary Gap
+
+**Current state (post QQQ-G / PPP-F):** physical% card, financial% card, milestone completion count, progress snapshot, remarks-log preview, latest WAR/MPR card (QQQ-G), last-progress-entry line (PPP-F).
+
+**Prompt requires a structured executive summary with 3 sub-sections:**
+
+| Section | Required fields | Data source (already loaded) |
+|---|---|---|
+| Progress Report Summary | Latest report, physical %, latest financial, latest date, current status | `latestReport` (useCoiProgressReports, QQQ-G); `project.physicalProgress`; `project.publicationStatus`/`projectStatusCategory` |
+| Milestone Summary | Total, Completed, Ongoing, Delayed, Next Upcoming | `project.milestones` (status + targetDate) |
+| Recent Activity | Latest submitted report, latest milestone update, latest timelog entry | `latestReport`; milestones by updatedAt; timelogs (deferred — not loaded in detail page) |
+
+**Decision (D-TTT-2):** Build computed summaries from already-loaded data: `milestoneSummary` (counts by status + next upcoming by soonest future targetDate) and reuse `latestReport`. Render as 3 compact stat-block sub-sections inside the existing panel. Timelog "latest entry" — detail page does not load timelog data reactively (CiTimelogsContainer self-fetches); per "summarize, don't duplicate," show milestone + report summaries (zero new fetches); timelog-latest deferred to avoid an extra overview API call.
+
+### 2.269-C: Progress Report Tab — Visual Hierarchy
+
+**Current state:** Flat vertical stack — Revision Orders → CiProgressReportTab → Milestones (PPP-E search) → Timelogs. Four heavy sections rendered equally; high cognitive load.
+
+**Prompt requires HCI hierarchy:** analytics header + summary cards on top; priority Progress Reports → Milestones → Timelogs → Historical (Revision Orders); clearer dividers/typography; collapsible detail; pagination preserved.
+
+**Decision (D-TTT-3):** Add a compact **analytics header strip** at the top of the progress tab (physical%, financial%, milestone completion, latest report date — reusing D-TTT-2 computeds). Reorder sections with clear headers + dividers to the priority order: Progress Reports (1) → Milestones (2) → Timelogs (3) → Revision Orders (4, historical/amendments). Keep all existing components + internal pagination/search intact — presentation reorder + header addition, NOT a rewrite. Preserve FFF-C read-only enforcement (all sub-components already `:read-only="true"`).
+
+---
+
+### §2.268-G: Activity-Log Transaction Race (Phase 3 hotfix, 2026-06-01)
+
+**Symptom:** `PATCH /api/construction-projects/:id` → 500 `DriverException: Transaction query already complete`. The activity_logs INSERT succeeded, then `findOne`'s `milestoneRepo.find` failed.
+
+**Root cause:** `ActivityLogService.logAction()` called `this.em.persistAndFlush(log)` on the **shared request-scoped EntityManager**. `ConstructionProjectsService.fireLog()` invokes it **fire-and-forget** (`void logAction(...).catch()`), so the log's implicit flush transaction ran concurrently with the immediately-following `return this.findOne(id)` on the SAME EM/connection. When the log transaction committed, the in-flight `findOne` queries hit a completed transaction.
+
+**Fix:** `logAction` now uses `const em = this.em.fork()` for an isolated UoW + connection, so the fire-and-forget write never shares a transaction with the caller's queries. Fire-and-forget semantics preserved; no caller changes needed. Applies to ALL fireLog call-sites (create/update/delete/upload/download/folder/etc.) — not just update. Backend tsc exit 0.
+
+---
+
+## §2.268 — Phase SSS: Strategic Alignment Container Revert + Supporting Docs Repository-Card Rework (Phase 1)
+
+> Date: 2026-06-01
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.268-A: Strategic Alignment Layout — Revert to Balanced Containers
+
+**Current state (post-RRR-B):** 2-column layout — narrative card (md=5) LEFT, single tall "Alignment Frameworks" card (md=7) RIGHT stacking all 4 selectors. The narrative card is now visually oversized/mismatched relative to the rest of the Project Profile cards (which are uniform `elevation=2` md=6 cards).
+
+**Required (this prompt):** Revert to per-framework containers:
+```
+Row 1: Strategic Alignment Narrative (full width OR balanced)
+Row 2: [SDG container md=6] [RDP container md=6]
+Row 3: [Socio-Economic Agenda md=6] [LIKHA md=6]
+```
+
+**Decision (D-SSS-1):** Each framework gets its own `v-card elevation="2" rounded="lg" class="h-100"` inside `v-col md="6"`, matching the Project Objectives / Output Indicators card pattern exactly (lines 467–520). Narrative is Row 1 (full-width card, `rows="3"` auto-grow — not oversized). This restores visual parity. This is effectively the pre-RRR-B layout but with SDG added as a first-class container (RDP/SEA/LIKHA were 3-across before; now 4 frameworks in 2×2 grid for equal sizing).
+
+### 2.268-B: Supporting Documents — Architecture Mismatch (CRITICAL)
+
+**Current state:** Supporting Documents (`v-window-item value="supporting"`) renders 4 `CiFolderRepository` components (Orders, Reports & Monitoring, Certifications, Other Forms). `CiFolderRepository` is a **flat-tree/accordion** renderer (CONTAINER → FORM → TEMPLATE/SUBMISSIONS nodes with expand/collapse). This is explicitly the REJECTED design per this prompt.
+
+**Key Documents architecture (the required standard):**
+```
+v-row dense
+  v-col (md=6 lg=3) × N → <CiRepositoryCard
+                            :title :icon :color :doc-count :completed-count
+                            :total-types :latest-upload :can-upload
+                            @open="openRepo(label, icon, color, [typeCode])"
+                            @upload="openRepo(..., true)" />
+  + "Add Section" dashed card → addSectionOpen dialog
+openRepo() → sets activeRepo { title, icon, color, typeCodes } → repoModalOpen = true
+<CiRepositoryModal> (shared, single instance) renders:
+  - template/blank-form download area (from docTypes.templateUrl)
+  - upload zone (collapses after upload — PPP-B)
+  - submission list with search / type filter / sort / pagination (AAA-H)
+  - per-doc metadata: fileName, type, uploadedByName, date, version, size
+  - recent activity panel (audit logs via /api/activity-logs)
+  - download (authenticated blob), delete
+```
+
+**Decision (D-SSS-2):** Replace the 4 `CiFolderRepository` blocks with a `CiRepositoryCard` grid — ONE card per seeded template typeCode, grouped by category with section headers. Each card:
+- `title` = template typeLabel (e.g., "Contract Time Extension Order")
+- `templateUrl` = seeded URL (card shows "Download Template" — III-E prop)
+- `@open` / `@upload` → `openRepo(label, icon, color, [typeCode], expand?)`
+
+This makes Supporting Documents **structurally identical** to Key Documents: same card, same shared `CiRepositoryModal`, same upload/persistence/search/pagination/audit flow. The number of cards = number of seeded templates per group (15 SHAREABLE templates total).
+
+**Data already available in the hub:**
+- `sdOrdersTemplates`, `sdReportsTemplates`, `sdCertsTemplates`, `ecoFormsTemplates` — each returns `{ code, label, url }[]` (via `seededTemplatesForGroup`)
+- `sdOrdersCodes`, `sdReportsCodes`, `sdCertsCodes`, `ecoFormCodes` — typeCode arrays
+- `repoStats([typeCode])` — per-card stats (docCount, completedCount, totalTypes, latestUpload)
+
+So no new data plumbing is required — the cards consume existing computeds.
+
+**Removed:** All 4 `CiFolderRepository` instances + the `folderSeedKey` mechanism (RRR-A) + `seedPresetFolders`/`seedTemplateFormFolders` become obsolete for Supporting Docs (folders no longer the display model). `CiFolderRepository.vue` itself remains in the repo (not deleted — archive-never-delete), just no longer imported by the supporting section.
+
+### 2.268-C: Upload Persistence — Root Cause Across the Two Paths
+
+**Two upload paths existed:**
+
+1. **Key Documents path (WORKS):** `CiRepositoryCard @upload → openRepo([typeCode]) → CiRepositoryModal → submitUpload → emit('upload') → onRepoUpload → persistDoc (non-staging) → api.upload(/documents, {documentType}) → fetchDocuments() → documents.value updated → activeRepoDocs filters by typeCode → modal list updates`. Filtered by `documentType`. Robust.
+
+2. **Supporting Docs path (FRAGILE):** `CiFolderRepository → uploadToFolder(folderId, file) → api.upload(/documents, {documentType: docTypeCodes[0], folder_id}) → emit('uploaded') → onFolderUploaded → fetchDocuments()`. The folder's submission list is `docsFor(folderId) = props.documents.filter(d => d.folderId === folderId)`. **Fragility:** (a) depends on `folder_id` round-tripping correctly; (b) RRR remount race could reset the node the user uploaded into; (c) if `docTypeCodes` is empty for a group, `documentType='OTHER'` — the doc saves but may not surface where expected.
+
+**Decision (D-SSS-3):** Eliminating path #2 (D-SSS-2 removes CiFolderRepository from Supporting Docs) inherently fixes persistence. After the rework, ALL attachment uploads use path #1 (typeCode-filtered, proven). No folder_id dependency for the standard template repositories.
+
+**Backend confirmation:** `addDocumentToProject` persists correctly (documentableType='CONSTRUCTION_PROJECT', documentableId=projectId, documentType, version auto-increment OOO-A). `listProjectDocuments` returns all with `uploadedByName`. Audit `fireLog(UPLOAD/DOWNLOAD/REMOVE_ATTACHMENT)` already fires. The persistence layer is sound; the issue was the folder-scoped rendering path, now removed.
+
+### 2.268-D: Folder / Subfolder Functionality — Card-Based Model
+
+**Prompt requirement:** Folder create/rename/delete must remain, but folders render as repository cards (not accordion); subfolders live inside the repository modal.
+
+**Decision (D-SSS-4):** Mirror the proven `customKeySections` mechanism for Supporting Documents.
+
+**`customKeySections` reference (existing, working):**
+- Entity field `customKeySections` (jsonb) on ConstructionProject
+- PATCH `/api/construction-projects/:id/custom-key-sections` → service sets `entity.customKeySections`, fires audit log
+- Frontend: `customSections` ref, `saveCustomSection()` (adds `{id, label, typeCode: 'CKS_'+id}`), `removeCustomSection()`, rendered as `CiRepositoryCard` with a close button + "Add Section" dashed card
+
+**Mirror for Supporting Docs (`customSupportingSections`):**
+- Backend: new jsonb column `custom_supporting_sections` (migration), entity property `customSupportingSections`, DTO field, service setter, controller PATCH `/custom-supporting-sections` — exact mirror of custom-key-sections
+- Frontend: `customSupportingSections` ref + `saveSupportingSection()` (typeCode `CSS_'+id`) + `removeSupportingSection()` + "Add Folder" dashed card in the supporting section
+- Each created folder = a repository card scoped to its `CSS_` typeCode → opens the same CiRepositoryModal
+
+This satisfies "folders render as repository cards", "Add Folder", "create/rename/delete", with persistence + audit, using the identical Key-Documents mechanism.
+
+**Subfolders inside the modal:** Deferred as a modal-internal enhancement — out of scope for the primary card-parity deliverable. The prompt says subfolders "may exist inside the repository modal" (permissive, not mandatory for acceptance). Documented as a future enhancement.
+
+### 2.268-E: Admin-Only Template Management
+
+**Current gating:** `canUpload` / `canDelete` props passed to the hub derive from `usePermissions`/project-level permission. The repository-card `@upload` and modal upload/delete already respect `canUpload`/`canDelete`.
+
+**Decision (D-SSS-5):** Template management (replace seeded template, add/remove folder cards) is gated by `canUpload` (Admin/Staff with project edit rights). Standard viewers get `canUpload=false` → see download-template + view-only. This matches existing Key Documents behavior — no new permission system needed. The seeded templates are READONLY taxonomy (never mutated); "replace template" = uploading a project-specific version under the same typeCode, which the modal already supports.
+
+### 2.268-F: Acceptance Criteria Coverage Map
+
+| Criterion | Resolved By |
+|---|---|
+| Strategic Alignment container-based, balanced | SSS-A |
+| SDG/RDP/SEA/LIKHA dedicated containers | SSS-A |
+| Narrative no longer dominates | SSS-A (Row 1, rows=3) |
+| Supporting Docs uses repository-card UI identical to Key Docs | SSS-B |
+| No collapsible/accordion in Supporting Docs | SSS-B (CiFolderRepository removed) |
+| Repository cards open modal | SSS-B (openRepo) |
+| Repository cards generated from template files | SSS-B (one per seeded typeCode) |
+| Upload persistence resolved | SSS-B/D-SSS-3 (typeCode path) |
+| Files visible immediately + after refresh + downloadable | SSS-B (proven Key Docs modal) |
+| Metadata + audit logs | SSS-B (modal already shows; fireLog already fires) |
+| Folder create/rename/delete | SSS-C (customSupportingSections) |
+| Admin-only template management | SSS-D-5 (canUpload gating) |
+
+---
+
+## §2.267 — Phase RRR: Folder Seeding Race Condition + Strategic Alignment Layout (Phase 1)
+
+> Date: 2026-06-01
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.267-A: Complete Status Audit of Previously Implemented Fixes
+
+| Concern | Status | Phase Resolved | Remaining? |
+|---|---|---|---|
+| Folder never displays after creation | ✅ FIXED | PPP-A (`fetchFolders` res.data unwrap) | Race condition (§2.267-B) |
+| Upload file not visible after upload | ✅ FIXED | PPP-B (upload zone collapses) | None — files ARE saved and DO appear |
+| Original/revised dates not visible | ✅ FIXED | PPP-D (Profile card additions) | None |
+| Milestone no search/filter | ✅ FIXED | PPP-E (filteredMilestones computed) | None |
+| Auto-FORM seeding per template | ✅ IMPLEMENTED | PPP-C (seedTemplateFormFolders) | Race condition (§2.267-B) |
+| Upload version auto-increment | ✅ FIXED | OOO-A | None |
+| Submission search within folder | ✅ FIXED | OOO-B | None |
+| Checklist auto-sync after upload | ✅ FIXED | OOO-C | None |
+| SDG Goals field (full stack) | ✅ IMPLEMENTED | QQQ | None |
+| Overview latest WAR/MPR summary | ✅ IMPLEMENTED | QQQ-G | None |
+| Description textarea auto-grow | ✅ ALREADY EXISTS | Pre-existing | None |
+| Strategic alignment textarea auto-grow | ✅ ALREADY EXISTS | Pre-existing | None |
+| Audit logs for document events | ✅ ALREADY EXISTS | Pre-existing (UPLOAD/DOWNLOAD/REMOVE_ATTACHMENT) | None |
+
+### 2.267-B: Folder Display Root Cause — Seeding Race Condition (CRITICAL)
+
+**Symptom:** Supporting Documents section opens, folders appear empty. After manually refreshing the page, the correct folder tree renders. Sometimes folders appear "eventually" without refresh.
+
+**Root cause:** Timing race between `CiFolderRepository.onMounted(fetchFolders)` and `CiAttachmentHub.seedPresetFolders()`.
+
+**Sequence (current broken flow):**
+
+```
+1. User clicks "Supporting Documents" tab → activeSection = 'supporting'
+2a. [async] CiAttachmentHub's watch fires → seedPresetFolders() starts
+2b. [async] CiFolderRepository components mount → fetchFolders() fires for each
+3. fetchFolders() completes first (no DB writes needed, just reads)
+   → folders.value = [] (nothing seeded yet, DB has no folders for new project)
+4. seedPresetFolders() completes (creates CONTAINERs + FORMs)
+   → No notification sent to CiFolderRepository instances
+5. CiFolderRepository shows empty forever — seeded folders are in DB but
+   fetchFolders() was already called and returned before they existed
+```
+
+**Confirmed:** `CiFolderRepository` has no `defineExpose({ refresh })`. CiAttachmentHub has no template ref on the CiFolderRepository instances. After `seedPresetFolders()` completes, there is **no mechanism to trigger a re-fetch** in the mounted folder components.
+
+**Fix strategy (D-RRR-1):** Add a reactive `folderSeedKey` ref to CiAttachmentHub. After `seedPresetFolders()` completes, increment it. Pass `:key="folderSeedKey"` to each `CiFolderRepository` instance in the supporting section. A Vue `:key` change forces component remount → `onMounted(fetchFolders)` fires again → fetches the newly seeded folders.
+
+**Why `:key` over `defineExpose({ refresh })`:** The `:key` approach is simpler and works for ALL 4 folder instances simultaneously with one increment. `defineExpose + template refs` would require 4 separate refs and 4 explicit refresh calls.
+
+**Idempotency:** `seedPresetFolders` is already guarded by `seededFolders = true` (runs only once per hub lifecycle). The `:key` change fires exactly once per seeding cycle. No redundant re-fetches.
+
+### 2.267-C: Strategic Alignment 2-Column Layout — Current vs Required
+
+**Current layout in CiBasicInfoForm (post-QQQ):**
+
+```
+Row E: [RDP card col-4] [SEA card col-4] [LIKHA card col-4]
+QQQ row: [SDG card col-6]
+Row F: [Strategic Alignment Narrative card — full width]
+```
+
+**Required layout (prompt):**
+
+```
+LEFT col: Strategic Alignment Narrative (expandable textarea, full height)
+RIGHT col: SDG + RDP + SEA + LIKHA selectors (stacked, compact, scrollable)
+```
+
+**Implementation analysis:**
+
+The RIGHT column needs to stack 4 selectors. Using `CiHierarchicalSelectorTrigger` inline for each (compact, chip display) in a single card or scrollable panel. This is a template restructuring only — no data model changes.
+
+**Approach (D-RRR-2):**
+
+Replace the current 3-row selector layout (Row E + QQQ row + Row F) with a single `v-row` containing:
+- `v-col cols=12 md=5`: Narrative card (auto-grow textarea, full height via `class="h-100"`)
+- `v-col cols=12 md=7`: Selectors card (SDG, RDP, SEA, LIKHA stacked vertically inside one `v-card`)
+
+The selectors card uses a scrollable `v-card-text` to prevent excessive height on projects with many selections.
+
+### 2.267-D: Text Field Standardization — Current State
+
+**Fields with auto-grow:** `form.description` (line 176), `form.strategic_alignment` (line 673) — ALREADY present.
+
+**Assessment:** The existing textarea fields already have `auto-grow`. The prompt's text-field standardization concern was already addressed in the existing implementation. **No additional auto-grow changes required.**
+
+---
+
+## §2.266 — Phase QQQ: SDG Goals Field + Overview Progress Sync + Template Authority (Phase 1)
+
+> Date: 2026-06-01
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.266-A: Template File Authority — Already Correct
+
+**Authoritative source:** `pmo-backend/public/templates/SHAREABLE SUPPORT DOCUMENTS-20260526T231911Z-3-001/`
+
+**Mapping (SHAREABLE files → seeded type codes → flat URL targets):**
+
+| Category | File | Type Code | Seeded URL | Flat File Present |
+|---|---|---|---|---|
+| ORDERS | `[SHAREABLE] SD-ECO-ECO-001_Variation Order.docx` | SD_ECO_001 | `/templates/SD_ECO_001.docx` | ✅ (MMM-A) |
+| ORDERS | `[SHAREABLE] SD-ECO-ECO-002_Work Suspension Order.docx` | SD_ECO_002 | `/templates/SD_ECO_002.docx` | ✅ |
+| ORDERS | `[SHAREABLE] SD-ECO-ECO-003_Work Resumption Order.docx` | SD_ECO_003 | `/templates/SD_ECO_003.docx` | ✅ |
+| ORDERS | `[SHAREABLE] SD-ECO-ECO-004_Contract Time Extension Order.docx` | SD_ECO_004 | `/templates/SD_ECO_004.docx` | ✅ |
+| REPORTS | `[SHAREABLE] SD-ECO-ECO-008_Construction Logbook.docx` | SD_ECO_008 | `/templates/SD_ECO_008.docx` | ✅ |
+| REPORTS | `[SHAREABLE] SD-ECO-ECO-009_Weekly Accomplishment Report.docx` | SD_ECO_009 | `/templates/SD_ECO_009.docx` | ✅ |
+| REPORTS | `[SHAREABLE] SD-ECO-ECO-010_Monthly Progress Report.docx` | SD_ECO_010 | `/templates/SD_ECO_010.docx` | ✅ |
+| REPORTS | `[SHAREABLE] SD-ECO-ECO-011_Site Instruction.docx` | SD_ECO_011 | `/templates/SD_ECO_011.docx` | ✅ |
+| REPORTS | `[SHAREABLE] SD-ECO-ECO-012_Site Inspection Report.docx` | SD_ECO_012 | `/templates/SD_ECO_012.docx` | ✅ |
+| REPORTS | `[SHAREABLE] SD-ECO-ECO-013_Project Inspection Report.docx` | SD_ECO_013 | `/templates/SD_ECO_013.docx` | ✅ |
+| REPORTS | `[SHAREABLE] SD-ECO-ECO-014_Quality Assessment Report.docx` | SD_ECO_014 | `/templates/SD_ECO_014.docx` | ✅ |
+| REPORTS | `[SHAREABLE] SD-ECO-ECO-015_Safety Compliance Report.docx` | SD_ECO_015 | `/templates/SD_ECO_015.docx` | ✅ |
+| CERTS | `[SHAREABLE] SD-ECO-ECO-016_Certificate of Site Inspection.docx` | SD_ECO_016 | `/templates/SD_ECO_016.docx` | ✅ |
+| CERTS | `[SHAREABLE] SD-ECO-ECO-017_Certificate of Completion.docx` | SD_ECO_017 | `/templates/SD_ECO_017.docx` | ✅ |
+| CERTS | `[SHAREABLE] SD-ECO-ECO-018_Certificate of Final Acceptance.docx` | SD_ECO_018 | `/templates/SD_ECO_018.docx` | ✅ |
+
+**DRAFT files** (SD_ECO_005 Notice of Non-Compliance, 006 Show Cause Order, 007 Notice of Termination): prefixed `[DRAFT]`, NOT seeded with templateUrls, NOT copied to flat files — correct. These are draft documents not ready for distribution.
+
+**Non-standard files** (GYM/IEB Site Inspection Certificates, Mandatory Certification-LUDIP, Site Inspection No. 1): project-specific files, NOT part of the standard taxonomy, NOT seeded — correct.
+
+**Conclusion:** The template file architecture is fully correct and complete. 15 SHAREABLE files → 15 seeded type codes → 15 flat URL-accessible files. The backend serves them via `useStaticAssets` at `/templates/{code}.docx`. **No additional template configuration needed.**
+
+**Remaining operational requirement:** Backend must be restarted once for `useStaticAssets` to activate (NestJS static middleware registered at bootstrap). After restart, all 15 `/templates/SD_ECO_*.docx` URLs return 200.
+
+### 2.266-B: Upload Persistence — Status Post-PPP
+
+**Previous investigation (§2.265-B):** Files ARE saved (audit logs confirm). The observed "no visible file" was a UX issue — upload zone stays open and file list is below the fold.
+
+**PPP-B fix applied:** `submitUpload()` now collapses `showUpload = false`. After upload, the document list is immediately visible.
+
+**Remaining diagnostic note:** If the user still observes missing files after PPP-B, check:
+1. Is `activeRepo.value.typeCodes` set correctly? (opened via `openRepo(label, icon, color, [typeCode])`)
+2. Does the uploaded file have the correct `documentType` matching those typeCodes?
+3. Is `fetchDocuments()` completing before the user checks the list? (network latency)
+
+**No further backend fix required.** The upload persistence is functionally correct.
+
+### 2.266-C: SDG Goals Field — Complete Gap Analysis
+
+**Current state:** SDG (Sustainable Development Goals) field is ABSENT from the entire stack.
+
+| Layer | Current State | Gap |
+|---|---|---|
+| PostgreSQL schema | No `sdg_goals` column in `construction_projects` | Need migration |
+| MikroORM entity | No `sdgGoals` property | Need entity update |
+| CreateConstructionProjectDto | No `sdg_goals` field | Need DTO update |
+| UpdateConstructionProjectDto | No `sdg_goals` field | Need DTO update |
+| Service `create()` INSERT | No `sdg_goals` in column/value list | Need service update |
+| Service `update()` SET | No `sdg_goals` in jsonFields list | Need service update |
+| `coiHierarchies.ts` | No `SDG_OPTIONS` export | Need to add all 17 SDGs |
+| `CiBasicInfoForm.vue` | No SDG card | Need to add, same pattern as LIKHA |
+| `new.vue` form state | No `sdg_goals` field | Need to add |
+| `edit-[id].vue` form state | No `sdg_goals` field | Need to add + hydration |
+| `detail-[id].vue` | No SDG rendering | Need chip display in strategic alignment panel |
+
+**Pattern reference (proven working):** RDP/LIKHA/SOCIOECONOMIC pattern:
+- `coiHierarchies.ts`: flat or hierarchical `HierarchyOption[]` array
+- `CiBasicInfoForm.vue`: `CiHierarchicalSelectorTrigger` inside a `v-card` per field
+- `new.vue`/`edit-[id].vue`: `sdg_goals: [] as string[]` in form state
+- Payload: `sdg_goals: form.value.sdg_goals?.length ? form.value.sdg_goals : undefined`
+- `detail-[id].vue`: `<v-chip v-for="item in project.sdgGoals">` in strategic alignment panel
+
+**SDG data (UN 17 Sustainable Development Goals):**
+
+```
+SDG_1:  No Poverty
+SDG_2:  Zero Hunger
+SDG_3:  Good Health and Well-being
+SDG_4:  Quality Education
+SDG_5:  Gender Equality
+SDG_6:  Clean Water and Sanitation
+SDG_7:  Affordable and Clean Energy
+SDG_8:  Decent Work and Economic Growth
+SDG_9:  Industry, Innovation and Infrastructure
+SDG_10: Reduced Inequalities
+SDG_11: Sustainable Cities and Communities
+SDG_12: Responsible Consumption and Production
+SDG_13: Climate Action
+SDG_14: Life Below Water
+SDG_15: Life on Land
+SDG_16: Peace, Justice and Strong Institutions
+SDG_17: Partnerships for the Goals
+```
+
+**Architecture decision (D-QQQ-1):** Store as `JSONB` column `sdg_goals` (array of string keys, e.g., `["SDG_1", "SDG_9"]`). Same pattern as `rdp_alignment` and `csu_likha_goals`. No child hierarchy (SDGs are flat, not nested). Use `CiHierarchicalSelectorTrigger` with flat `HierarchyOption[]` for consistent UI.
+
+**Architecture decision (D-QQQ-2):** Entity property: `sdgGoals?: any` with `@Property({ nullable: true, columnType: 'jsonb' })`. ORM automatically serializes/deserializes JSONB.
+
+**Architecture decision (D-QQQ-3):** Migration timestamp: `Migration20260602000000_AddSdgGoalsToConstructionProjects` — next in sequence after `Migration20260601010000_SeedDocumentTypeTemplateUrls`.
+
+### 2.266-D: Overview Tab — Progress Report Data Availability
+
+**Current overview progress panel (detail-[id].vue ~line 1295):**
+- Physical progress stat card (from `project.physicalProgress`) ✅
+- Financial progress stat card (from `project.financialProgress`) ✅  
+- Milestone completion count (from `project.milestones`) ✅
+- Progress snapshot: `asOfDate`, `costIncurredToDate`, `dateCompleted` ✅
+- Remarks log preview (last 3 entries) ✅
+- "Last progress entry: {date}" link (PPP-F) ✅
+
+**Gap:** Latest WAR/MPR `percentageCompletion` and `reportDate` from the progress-reports endpoint are not surfaced in the overview. The "physical progress" shown is a stored field (`project.physicalProgress`), not derived from the latest report.
+
+**Available data:** `useCoiProgressReports(projectId)` composable fetches `/api/construction-projects/:id/progress-reports`. Returns sorted list; latest item = `items.value[0]`.
+
+**Decision (D-QQQ-4):** In detail-[id].vue, instantiate `useCoiProgressReports` composable and derive `latestReport = computed(() => items.value[0] ?? null)`. Surface in overview: latest report type, date, and percentage completion. This is the correct "monitoring dashboard" enhancement.
+
+**Constraint:** `useCoiProgressReports` triggers an API call on mount. In detail-[id].vue this is acceptable (the page already makes multiple API calls). Add `eager: false` option and only load when overview panel is expanded, OR load eagerly since it's a monitoring dashboard and the data is core.
+
+---
+
+## §2.265 — Phase PPP: COI Repository Synchronization, Profile Enhancement, Progress UX (Phase 1)
+
+> Date: 2026-06-01
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.265-A: Folder Display Bug — Root Cause (CRITICAL, CONFIRMED)
+
+**Symptom:** User creates a folder → success toast → folder never appears on screen. Folder IS persisted (database confirmed) but never renders.
+
+**Root cause — CiFolderRepository.vue `fetchFolders()`:**
+
+```typescript
+// CURRENT (broken):
+const res = await api.get<FolderNode[]>(`/api/construction-projects/${props.projectId}/document-folders`)
+const roots = Array.isArray(res) ? res : []
+folders.value = roots.filter(n => n.groupCode === props.groupCode)
+```
+
+The controller returns `{ data: FolderNode[] }` (consistent with all other endpoints). `api.get()` returns raw JSON — the shape is `{ data: [...] }`, NOT an array. `Array.isArray({ data: [...] })` evaluates to `false`. Therefore `roots = []` on every call. `folders.value` is ALWAYS empty regardless of database state.
+
+**Fix:** Unwrap the `{ data }` wrapper:
+```typescript
+const res = await api.get<{ data: FolderNode[] }>(`/api/construction-projects/${props.projectId}/document-folders`)
+const roots = res.data ?? []
+folders.value = roots.filter(n => n.groupCode === props.groupCode)
+```
+
+**Impact:** ALL folder operations (create, rename, delete) appear to fail from the user's perspective, even though they succeed on the backend. This was introduced when the document-folders controller was standardized to return `{ data }`.
+
+### 2.265-B: Key Documents Upload Not Visible — Root Cause (UX + Confirmed)
+
+**Symptom:** User uploads file in CiRepositoryModal → success toast + audit log record → file does NOT appear visually in the modal. Cannot be viewed or downloaded.
+
+**Lifecycle trace (verified):**
+
+```
+1. CiRepositoryCard @upload → CiAttachmentHub.openRepo(..., expand=true)
+2. repoExpandUpload = true → CiRepositoryModal opens with showUpload=true
+3. Upload zone is FULLY EXPANDED at top of modal (takes ~50% of scrollable area)
+4. User selects file + clicks "Stage File" → submitUpload() emits 'upload' event
+5. CiAttachmentHub.onRepoUpload() → void persistDoc(payload) [fire-and-forget async]
+6. persistDoc() uploads to backend → success → fetchDocuments() → documents.value updated
+7. allDocs (computed from documents.value) recomputes ✅
+8. activeRepoDocs (computed, filtered by typeCodes) recomputes ✅
+9. Modal :documents="activeRepoDocs" prop updates ✅
+10. filteredModalDocs recomputes → pagedModalDocs includes new file ✅
+```
+
+**The file IS in the rendered list.** However:
+- `showUpload` remains `true` after submitUpload() — the upload form stays open
+- The upload zone occupies the upper portion of the modal viewport
+- The document list is BELOW the upload zone, below the fold
+- Users never scroll to see it → conclude file "didn't upload"
+- "Cannot download" follows from "cannot see" — the download button IS there in the list
+
+**Root cause:** `submitUpload()` clears the file input but does NOT collapse the upload zone (`showUpload.value = false`).
+
+**Fix:** In `CiRepositoryModal.submitUpload()`, after emitting, collapse: `showUpload.value = false`.
+
+**Secondary UX improvement:** After `persistDoc()` completes (hub side), emit a signal back to the modal to scroll to top of document list. OR: the collapse alone is sufficient since collapsing reveals the list.
+
+### 2.265-C: Supporting Documents — No Auto-FORM Seeding Per Template
+
+**Symptom:** Opening Supporting Documents section shows empty folder groups (once folder display bug is fixed). User has to manually create FORM nodes for each form they want to track. Expected behavior: if 15 SD templates are seeded, 15 FORM containers should be pre-populated automatically.
+
+**Current seeding state (`seedPresetFolders` in CiAttachmentHub):**
+
+```typescript
+const PRESET_FOLDERS = [
+  { groupCode: 'SD_ORDERS', label: 'Orders', sortOrder: 0 },
+  { groupCode: 'SD_REPORTS', label: 'Reports & Monitoring', sortOrder: 1 },
+  { groupCode: 'SD_CERTS', label: 'Certifications & Other Documents', sortOrder: 2 },
+  { groupCode: 'ECO_FORMS', label: 'Other Forms', sortOrder: 3 },
+]
+```
+
+Seeding only creates 4 CONTAINER nodes. No FORM nodes per template.
+
+**Available data:** `allDocTypes` (fetched from `/api/construction-projects/document-types/grouped`) contains all seeded types with `groupCode`, `typeCode`, `typeLabel`, `templateUrl`. The hub already has:
+- `sdOrdersTemplates`: types for SD_ORDERS group
+- `sdReportsCodes`: types for SD_REPORTS
+- etc.
+
+**Architecture for auto-FORM seeding:**
+
+After `seedPresetFolders()` creates the 4 CONTAINERs, a second pass creates FORM nodes for each template in each group:
+
+```
+For each template in SD_ORDERS (SD_ECO_001 through SD_ECO_004):
+  POST /api/construction-projects/:id/document-folders
+  { folder_name: template.typeLabel, group_code: 'SD_ORDERS', parent_id: <container_id>, node_type: 'FORM' }
+  → auto-creates TEMPLATE + SUBMISSIONS children (existing logic in submitCreate)
+```
+
+**Constraint:** The auto-FORM creation must be idempotent — if FORMs already exist for a template, don't create duplicates. Check by name match within the CONTAINER's children before creating.
+
+**Backend support needed:** The existing FORM creation endpoint auto-creates TEMPLATE + SUBMISSIONS children. No backend changes required.
+
+**Seeding trigger:** On `activeSection === 'supporting'` watch (already the trigger for CONTAINER seeding). Extend to also seed FORMs per template.
+
+### 2.265-D: Project Profile Card — Date Visibility Gap
+
+**Symptom:** Original/revised dates are available in the data model but NOT visible in the carousel-row Profile card. They exist in "Panel 1: Dates & Duration" (collapsible expansion panel), which requires user interaction to see.
+
+**Current Profile card contents (lines 960–1025):**
+- Status chips
+- Timeline: Start, Target Completion, Duration (primary dates only)
+- Budget: Contract amount, obligation %, disbursement %
+- Implementation: Agency, Contractor  
+- Quick stats: Physical %, Milestone rate, Done count
+
+**Missing from the always-visible Profile card:**
+- `project.originalStartDate` — the contract-signed baseline start
+- `project.originalCompletionDate` — the contract-signed baseline completion
+- `project.revisedStartDate` — latest revision order start
+- `project.revisedCompletionDate` — latest revision order completion
+
+**These fields exist on the project object** (confirmed in data model: `originalStartDate`, `revisedStartDate`, `originalCompletionDate`, `revisedCompletionDate`).
+
+**Fix:** Extend the Timeline section in the Profile card to include original/revised dates in a compact 2-row layout. Use visual differentiation (text-grey vs font-weight-bold, label/value pairs).
+
+### 2.265-E: Milestones Section — Missing Search/Filter
+
+**Current milestone section state (progress tab):**
+- 2-column grid cards (`v-col cols=12 md=6`) ✅ — already implemented
+- Milestone detail modal (`openMilestoneDetail`) ✅ — already implemented
+- Shows: status chip, target date, name, progress bar, "View Details" button ✅
+
+**Missing per the prompt:**
+- Search by milestone name ❌
+- Filter by status (PENDING/IN_PROGRESS/COMPLETED/DELAYED) ❌
+- Sort by target date / progress / name ❌
+- Pagination (for projects with many milestones) ❌
+
+**Implementation scope:** Since milestones are embedded in the project fetch response (not a separate paginated endpoint), these are all CLIENT-SIDE operations on `project.milestones`.
+
+Add: `milestoneSearch = ref('')`, `milestoneStatusFilter = ref<string|null>(null)`, `milestoneSortKey = ref('targetDate')`. Derive `filteredMilestones = computed(...)`.
+
+### 2.265-F: Overview Tab — Progress Sync State
+
+**Current state:** The overview's "Progress & Reports" expansion panel (Panel 2) shows:
+- Physical progress tonal card (with target chip)
+- Financial progress tonal card
+- Milestone completion count
+- Progress snapshot (asOfDate, costIncurredToDate, dateCompleted)
+- Remarks log preview (last 3 entries)
+- Link to Progress tab
+
+**Gap:** Progress Reports (WAR/MPR records) are NOT shown in the Overview tab at all. The progress section only shows the project's aggregate `physicalProgress` field, not the most recent WAR/MPR data.
+
+**Assessment:** The existing Overview panel is already a meaningful progress summary. The WAR/MPR detail belongs in the Progress tab (it's too verbose for overview). The prompt's requirement to "synchronize with Progress Reports" is partially satisfied by showing the aggregate physical/financial progress and the remarks log preview.
+
+**Recommendation:** The Overview tab ALREADY reflects progress meaningfully. The primary fix is showing progress reports summary (latest WAR date, latest MPR date) as 2 additional metadata lines. No major refactor needed.
+
+---
+
+## §2.264 — Phase NNN+OOO: COI Attachment Enterprise Architecture (Phase 1)
+
+## §2.264 — Phase NNN+OOO: COI Attachment Enterprise Architecture (Phase 1)
+
+> Date: 2026-06-01
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.264-A: Compliance Checklist — Gap Analysis vs MMM-D
+
+**What MMM-D delivered (Phase 3, 2026-06-01):**
+- Grid layout: required-badge/type-code · label · status · date · kebab ✅
+- Summary bar: compact chip row ✅
+- Kebab menu: Navigate, Download Template, Update Status, Remarks, Submission History ✅
+- `showRemark` toggle: inline remark editor per item ✅
+
+**What the new prompt requires on top of MMM-D:**
+
+| Prompt Action | Current MMM-D Equivalent | Gap |
+|---|---|---|
+| Open | Not present | "Open linked document" — download/open the linked file (linkedDocumentId → filePath) |
+| View | "Update Status" (canEdit=true only) | "View" action for non-editors (read-only status view) |
+| Redirect to Repository | "Navigate" emit | Already covered by Navigate → `emit('navigate', ...)` |
+| View Remarks | "Remarks" from kebab toggles showRemark | Already done |
+| View History | "Submission History" opens history drawer | Already done |
+
+**Net gap (D1):** Add "Open File" kebab action that opens/downloads the linked document (`linkedDocumentId → linkedDoc(item)?.filePath`). This should appear only when a linked document exists.
+
+**Note:** The "View" action for read-only status is implicitly handled — when `canEdit=false`, "Update Status" is hidden. A read-only "View Status" can be added to show the status info dialog without edit controls.
+
+### 2.264-B: Key Documents Persistence — Full Lifecycle Audit
+
+**Complete lifecycle trace (as of post-MMM-C):**
+
+```
+1. new.vue renders → CiAttachmentHub (mode="staging", :model-value="pendingQueue")
+2. pendingQueue = computed(() => ({ docs: pendingDocs.value, images, links }))
+3. User opens Key Docs → CiRepositoryCard @upload → CiAttachmentHub.openRepo()
+4. CiRepositoryModal (mode="staging") opens
+5. User selects file → clicks "Stage File"
+6. CiRepositoryModal.submitUpload() → emit('upload', { file, documentType, title, description })
+7. CiAttachmentHub.persistDoc() in staging mode:
+   ✅ MMM-C fix: emitStaged({ docs: [...(props.modelValue?.docs ?? []), newEntry] })
+8. emit('update:modelValue', freshStagedQueue) fires
+9. new.vue.onQueueUpdate(q) receives it → pendingDocs.value = q.docs ← new array ref
+10. save: const created = await api.post('/api/construction-projects', payload)
+11. Backend returns cpResult[0] (raw RETURNING * row) with BOTH id (UUID PK) AND project_id
+12. created.id = UUID PK (confirmed: entity has @PrimaryKey id!: string, separate from projectId property)
+13. pendingDocs.value.length > 0 → Stage 2 upload loop
+14. for each d of pendingDocs: POST /api/construction-projects/{created.id}/documents
+```
+
+**Root cause of observed persistence failures (pre-MMM-C):**
+- `persistDoc()` mutated `queue.value.docs` in-place (Vue computed props can't react to content mutations)
+- `emitQueue()` ran after the mutation but Vue's computed dependency tracking for `props.modelValue` saw no reference change
+- `onQueueUpdate` sometimes received stale queue without the just-pushed item
+- **Status: RESOLVED by MMM-C** (immutable `emitStaged()` emits a fresh object reference each time)
+
+**Remaining potential gap (D2):**
+
+The `!created?.id` defensive branch in new.vue line 497–510:
+```typescript
+if (!created?.id) {
+  toast.success('Project created successfully')
+  router.push('/coi')   // ← silently skips all attachment uploads
+  return
+}
+```
+
+- Backend `construction_projects.service.ts` returns `cpResult[0]` from `RETURNING *`
+- The `construction_projects` entity has `id` as `@PrimaryKey` — so `cpResult[0].id` IS the UUID PK
+- `created.id` WILL be populated in normal operation
+- BUT: if a network/parse error causes `created` to be `{}` or `null`, uploads are silently skipped with a misleading "Project created successfully" toast
+- **Recommended fix:** Change the guard to explicitly log a warning when `!created?.id` and show a warning toast instead of success; OR extract the project ID more safely with a fallback to `created?.project_id`.
+
+**Secondary gap (D3):** `remove-staged` tempId is the array index (`String(i)` from `activeRepoStaged`). After immutable splices in MMM-C, indices remain correct per-call. No bug.
+
+### 2.264-C: /templates/SD_ECO_001.docx — Root Cause + Resolution
+
+**Root cause:** The LLL-E migration seeded `template_url = '/templates/SD_ECO_001.docx'` (flat root path). The operator placed files in `pmo-backend/public/templates/SHAREABLE SUPPORT DOCUMENTS-20260526T231911Z-3-001/ORDERS/...` (nested subdirectory). The backend (`main.ts` line 24) serves `public/templates/` at prefix `/templates`. Files at the nested path don't match the flat URLs.
+
+**Fix (MMM-A, applied 2026-06-01):** Copied all 15 SHAREABLE `.docx` files to `public/templates/SD_ECO_{001..018}.docx` flat root. Files now present and correctly named.
+
+**Remaining operational step:** The backend must be **restarted** for the NestJS `useStaticAssets()` registration to take effect. The static middleware is registered at bootstrap — no code change needed. Once the backend restarts, `GET /templates/SD_ECO_001.docx` will return 200.
+
+### 2.264-D: Supporting Documents Repository — Architecture Gap Analysis
+
+**Current state (post-HHH-F/G, III-F, MMM-E):**
+```
+CiFolderRepository component handles: CONTAINER / FORM / TEMPLATE / SUBMISSIONS nodes
+- CONTAINER: top-level group (seeded or user-created)
+- FORM: named sub-section (e.g., "Contract Time Extension Order")
+  - TEMPLATE child: download link (seeded templateUrl OR uploaded file)
+  - SUBMISSIONS child: upload zone + flat file list
+```
+
+**What the prompt requires:**
+```
+Contract Time Extension Order (FORM node)
+├── Template (TEMPLATE): Download Official Template button
+└── Submissions (SUBMISSIONS): 
+    ├── Upload file (existing)
+    ├── Replace (new version) (MISSING)
+    ├── Versioned file list with metadata:
+    │   ├── version number (MISSING)
+    │   ├── uploader name (MISSING — backend field exists, UI doesn't surface it)
+    │   ├── upload date (MISSING in UI)
+    │   └── file size (MISSING in UI)
+    ├── Pagination / load-more (MISSING)
+    ├── Search within submissions (MISSING)
+    ├── Filter by date/type (MISSING)
+    ├── Version History drawer (MISSING)
+    └── Audit log for this folder (MISSING)
+```
+
+**Backend capability audit:**
+
+| Capability | Backend State | Gap |
+|---|---|---|
+| Document metadata (uploader, date) | `construction_document_submissions.entity.ts` exists — has `uploaded_by`, `submitted_at` | ✅ Already stored |
+| Version field | `ConstructionDocumentSubmission` entity has `version?: number` | ✅ Already in entity |
+| Replace/new version endpoint | No `replace` endpoint exists | **Gap: need POST :id/document-folders/:folderId/submissions/replace** |
+| Document audit logs | `activity_logs` table exists; fireLog() used for project-level events | Partial — folder-level events not captured |
+| Pagination for folder submissions | `GET /api/construction-projects/:id/document-folders` returns tree — no pagination at submission level | **Gap: need submission-level list endpoint with pagination** |
+| Search/filter submissions | No query params for search/filter on submissions | **Gap** |
+
+**D-NNN-1 Architecture decision:** Rather than building a new endpoint from scratch, extend the existing `GET /api/construction-projects/:id/document-folders` response to include richer submission metadata (uploader name, version), and add:
+1. `GET /api/construction-projects/:id/document-folders/:folderId/submissions` — paginated, searchable submission list for a SUBMISSIONS node
+2. `POST /api/construction-projects/:id/document-folders/:folderId/submissions/replace` — upload new version, increment version counter on the latest submission record
+
+**D-NNN-2 Frontend architecture:** Extend `CiFolderRepository.vue` SUBMISSIONS node rendering:
+- Show metadata row per file: filename | uploaded-by | date | version badge | size
+- Add "Replace" button (new version upload) beside each file
+- Add "Version History" expandable section (list of all versions for this FORM node)
+- Add search input above SUBMISSIONS file list
+- Add "Load more" pagination (10 per page default)
+- Add download count / view count chips (future — out of scope for this phase)
+
+### 2.264-E: Audit Log Requirements — Gap Analysis
+
+> **CORRECTION (Phase 3, 2026-06-01):** Initial Phase-1 assessment below was WRONG. Verification during Phase 3 found document audit logging is ALREADY fully implemented. See "ACTUAL STATE" block.
+
+**ACTUAL STATE (verified 2026-06-01):**
+- `ActivityAction` enum (`activity-log.entity.ts`) ALREADY contains: CREATE, UPDATE, DELETE, SUBMIT, PUBLISH, REJECT, WITHDRAW, **UPLOAD, REMOVE_ATTACHMENT, DOWNLOAD, BATCH_UPLOAD, REMARKS_UPDATE, TEMPLATE_UPLOAD**.
+- Document upload → `fireLog(UPLOAD)` at service line 2065 (metadata: section, documentId, fileName, documentType)
+- Document download → `fireLog(DOWNLOAD)` at line 2289 (section, docId, fileName, documentType)
+- Document delete → `fireLog(REMOVE_ATTACHMENT)` at line 2348
+- Folder create → `fireLog(CREATE)` at line 2161
+- Folder rename → `fireLog(UPDATE)` at line 2215
+- Folder delete → `fireLog(REMOVE_ATTACHMENT)` at line 2257
+- **Conclusion: Phase NNN-D requires NO work — already satisfied. No enum extension needed (would be redundant/risk breaking existing audit queries).**
+
+**Original (incorrect) Phase-1 assessment retained for audit trail:**
+- ~~`ActivityAction` enum: `CREATE, UPDATE, DELETE`~~ (wrong — enum had 13 values)
+- ~~Document events: NOT currently logged~~ (wrong — all logged via fireLog)
+
+**What the prompt requires:**
+
+| Event | Backend Location | Logging Needed |
+|---|---|---|
+| Upload document | `POST /documents` | Add `fireLog(CREATE)` with document details |
+| Replace document | New endpoint | Add `fireLog(UPDATE)` |
+| Download document | `GET /documents/:id/download` | Add `fireLog` for DOWNLOAD action |
+| View document | Modal open | Frontend-only event (no backend needed for view tracking unless required) |
+| Create folder | `POST /document-folders` | Add `fireLog(CREATE)` with folder details |
+| Rename folder | `PATCH /document-folders/:id` | Add `fireLog(UPDATE)` |
+| Delete folder | `DELETE /document-folders/:id` | Add `fireLog(DELETE)` |
+
+**D-NNN-3:** Add `ActivityAction.DOWNLOAD` to the enum. Add `fireLog()` calls at each document lifecycle operation in the service. The `CiRepositoryModal` already fetches activity logs from `/api/activity-logs/CONSTRUCTION_PROJECT/{projectId}` — this will show the new events once they are logged.
+
+### 2.264-F: new.vue ↔ edit-[id].vue Sync Check
+
+Per governance rule: New and Edit pages must have same UI structure, data-entry fields, and save workflow.
+
+**Checklist between pages:**
+
+| Feature | new.vue | edit-[id].vue | Gap |
+|---|---|---|---|
+| CiAttachmentHub mode | staging | edit | Expected — modes differ |
+| Document staging + upload | Via pendingDocs | Via direct API upload | Expected — direct after project exists |
+| Key Docs structure | CiRepositoryCard × N | CiRepositoryCard × N | ✅ Sync |
+| Supporting Docs (CiFolderRepository) | Shown only when hasProject=false (staging hides) | Shown with projectId | ✅ Correct — CiFolderRepository requires projectId |
+| Gallery | Staging via pendingImages | Via API | Expected |
+
+**Gap (D-NNN-4):** CiFolderRepository in new.vue staging mode is not shown (`hasProject = !!props.projectId && !isStaging`). This means a user creating a new project cannot pre-populate folder structure or supporting documents until after saving. This is by design (folders require a project ID). No structural sync issue.
+
+---
+
+## §2.263 — Phase MMM: Template Paths, Gallery Height, Key Docs Persistence, Checklist UI, ECO_FORMS Dedup (Phase 1)
+
+> Date: 2026-06-01
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.263-A: Template File Path Gap (Critical LLL Follow-On)
+
+**LLL-E migration seeds:** `template_url = '/templates/SD_ECO_001.docx'`
+**Actual directory structure placed by operator:**
+```
+pmo-backend/public/templates/
+  SHAREABLE SUPPORT DOCUMENTS-20260526T231911Z-3-001/
+    ORDERS/
+      [SHAREABLE] SD-ECO-ECO-001_Variation Order.docx
+      [SHAREABLE] SD-ECO-ECO-002_Work Suspension Order.docx
+      [SHAREABLE] SD-ECO-ECO-003_Work Resumption Order.docx
+      [SHAREABLE] SD-ECO-ECO-004_Contract Time Extension Order.docx
+    REPORTS AND MONITORING/
+      [SHAREABLE] SD-ECO-ECO-008_Construction Logbook.docx  (through ECO-015)
+    CERTIFICATIONS AND OTHER DOCUMENTS/
+      [SHAREABLE] SD-ECO-ECO-016_Certificate of Site Inspection.docx  (through ECO-018)
+```
+
+**Gap:** Seeded URL `/templates/SD_ECO_001.docx` does not match actual file location. Templates are NOT accessible at those URLs.
+
+**Resolution strategy (D-MMM-1):** Use `bash cp` to create type-code-named aliases in `public/templates/` root (e.g., `SD_ECO_001.docx`), copying from the nested subfolders. The original files stay in place. The LLL-E migration URL pattern (`/templates/{type_code}.docx`) then becomes correct. This is cleaner than updating all template_url values to long URL-encoded paths.
+
+**All 15 copy operations:**
+
+| Source (relative to `public/templates/SHAREABLE SUPPORT DOCUMENTS-20260526T231911Z-3-001/`) | Target |
+|---|---|
+| `ORDERS/[SHAREABLE] SD-ECO-ECO-001_Variation Order.docx` | `SD_ECO_001.docx` |
+| `ORDERS/[SHAREABLE] SD-ECO-ECO-002_Work Suspension Order.docx` | `SD_ECO_002.docx` |
+| `ORDERS/[SHAREABLE] SD-ECO-ECO-003_Work Resumption Order.docx` | `SD_ECO_003.docx` |
+| `ORDERS/[SHAREABLE] SD-ECO-ECO-004_Contract Time Extension Order.docx` | `SD_ECO_004.docx` |
+| `REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-008_Construction Logbook.docx` | `SD_ECO_008.docx` |
+| `REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-009_Weekly Accomplishment Report.docx` | `SD_ECO_009.docx` |
+| `REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-010_Monthly Progress Report.docx` | `SD_ECO_010.docx` |
+| `REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-011_Site Instruction.docx` | `SD_ECO_011.docx` |
+| `REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-012_Site Inspection Report.docx` | `SD_ECO_012.docx` |
+| `REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-013_Project Inspection Report.docx` | `SD_ECO_013.docx` |
+| `REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-014_Quality Assessment Report.docx` | `SD_ECO_014.docx` |
+| `REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-015_Safety Compliance Report.docx` | `SD_ECO_015.docx` |
+| `CERTIFICATIONS AND OTHER DOCUMENTS/[SHAREABLE] SD-ECO-ECO-016_Certificate of Site Inspection.docx` | `SD_ECO_016.docx` |
+| `CERTIFICATIONS AND OTHER DOCUMENTS/[SHAREABLE] SD-ECO-ECO-017_Certificate of Completion.docx` | `SD_ECO_017.docx` |
+| `CERTIFICATIONS AND OTHER DOCUMENTS/[SHAREABLE] SD-ECO-ECO-018_Certificate of Final Acceptance.docx` | `SD_ECO_018.docx` |
+
+### 2.263-B: Gallery Carousel Height Gap (detail-[id].vue Row 1)
+
+**Current state (lines 926–956):**
+- Left column (`md="7"`): `<v-card variant="outlined" class="h-100 overflow-hidden">` containing `<v-carousel height="260">`
+- Right column (`md="5"`): `<v-card variant="outlined" class="h-100 d-flex flex-column">` (Project Profile)
+- Row: `<v-row class="mb-4" align="stretch">`
+
+**Gap:** The inner `<v-carousel height="260">` has a fixed pixel height. The Project Profile card grows taller based on content (status chips, timeline data, funding section, progress bars). On most projects the Profile is taller than 260px. The `h-100` on the gallery wrapping card stretches to match, but the carousel INSIDE the card stays at 260px — leaving dead space below the carousel.
+
+**Additionally:** `<v-img contain position="center">` with a fixed height crops the image to the carousel container rather than filling it. The `contain` fit-mode shows the full image but leaves letterbox padding (grey background visible on sides/bottom).
+
+**Fix approach (D-MMM-2):**
+- Set carousel to `height="100%"` — but `v-carousel` requires a numeric height or a string like `"100%"`. In Vuetify 3, `height="100%"` is valid.
+- Wrap carousel in a div `style="height: 100%"` and set the outer v-card to `style="min-height: 300px"`.
+- Change `v-img` from `contain` to `cover` (fills the space without letterboxing; some cropping of edges acceptable for gallery aesthetics).
+- The empty state div uses a fixed `style="height:260px"` — change to `style="height: 100%; min-height: 300px"`.
+
+**Architecture note:** The `align="stretch"` row ensures both columns match height. The fix is: (1) make carousel height `100%` within its container, (2) change v-img to `cover`, (3) set min-height on the gallery card.
+
+### 2.263-C: Key Documents Upload Persistence — Root Cause (Critical)
+
+**Bug:** Files staged through CiRepositoryModal (Key Documents section) in new.vue staging mode do not persist to the database after project creation.
+
+**Root cause (Vue anti-pattern):**
+
+In `CiAttachmentHub.persistDoc()` (staging mode):
+```ts
+const queue = computed<StagedQueue>(() => props.modelValue)  // line 107 — computed from prop
+
+// In persistDoc:
+queue.value.docs.push({...})  // MUTATES props.modelValue.docs DIRECTLY
+emitQueue()                   // Emits spread copy
+```
+
+`queue` is a **computed** from `props.modelValue`. In Vue 3, props are reactive but conceptually readonly — `props.modelValue` is the `pendingQueue` computed in new.vue, which returns `{ docs: pendingDocs.value, ... }`.
+
+**Mutation chain:**
+- `queue.value.docs` === `pendingDocs.value` (same array reference)
+- `.push(...)` mutates `pendingDocs.value` in-place (Vue detects this via proxy interceptor on the reactive array)
+- `emitQueue` creates `[...queue.value.docs]` — a NEW array with the pushed item
+- `onQueueUpdate(q)` in new.vue: `pendingDocs.value = q.docs` — replaces the ref with the new spread array
+
+**Why this fails in practice:**
+After `onQueueUpdate`, `pendingDocs.value` is the NEW spread array. But `queue.value` in CiAttachmentHub is still a computed from `props.modelValue`. On next render, `props.modelValue.docs === new pendingDocs.value` (the spread array). So far this looks correct.
+
+**The real failure:** In the `allDocs` → `stagedDocs` chain:
+```ts
+const stagedDocs = computed(() => queue.value.docs.map((d, i) => ({ id: `staged-${i}`, ... })))
+```
+
+The `stagedDocs` is derived from `queue.value.docs`. The ID is `staged-${index}`. The delete handler uses `Number(docId.replace('staged-', ''))` as the index to splice.
+
+**The critical bug:** When the user DELETES a staged doc and then the hub re-emits, `onQueueUpdate` sets `pendingDocs.value` to the spliced array. But on the SECOND upload to the same modal session, there is a **Vue reactivity staleness window** — because `queue.value` is a computed from `props.modelValue` which is a COMPUTED in new.vue (not a ref). Vue computed caching means if `props.modelValue` reference hasn't changed between renders, `queue.value` may return a stale cached value. Since `pendingQueue` in new.vue is a computed that recreates the object literal, its reference changes only when `pendingDocs.value` changes. The direct array mutation (`push`) doesn't change `pendingDocs.value`'s reference — it changes its content — so the computed cache may not invalidate.
+
+**Net result:** The file IS in the internal array (mutation succeeded), but Vue's computed dependency tracking doesn't see the `queue` computed as dirty (because `props.modelValue` reference didn't change — only its `.docs` array contents changed). This means `emitQueue()` might read a stale `queue.value.docs`, missing the just-pushed item.
+
+**Verified pattern:** This is a known Vue 3 pitfall — mutating a reactive array's contents via a computed chain does NOT reliably invalidate parent computeds that depend on the computed's SOURCE (not the array contents).
+
+**Fix (D-MMM-3):** Replace the mutable push pattern with an immutable emit directly from the current prop value:
+```ts
+// In persistDoc — staging mode
+const updated: StagedQueue = {
+  docs: [...(props.modelValue?.docs ?? []), {
+    file: payload.file,
+    documentType: payload.documentType,
+    description: payload.description || payload.title || '',
+  }],
+  images: [...(props.modelValue?.images ?? [])],
+  links: [...(props.modelValue?.links ?? [])],
+}
+emit('update:modelValue', updated)
+```
+
+Similarly, the delete handler and image/link staging paths should use the same immutable pattern.
+
+### 2.263-D: Compliance Checklist — Current State
+
+**File:** `pmo-frontend/components/coi/CiDocumentChecklist.vue`
+
+**Current rendering:** Per-group `v-expansion-panels` with per-item list rows. Each item row shows: status chip, document type label, submission count badge, file count, missing count, latest date, inline `Edit` button, inline `History` button.
+
+**Gap (per prompt):** Actions should be behind a kebab menu (not inline buttons). Layout should be a grid — type, status, date, count columns.
+
+**Groups:** CPES_DOCS (22 items), SD_ORDERS (7), SD_REPORTS (8), SD_CERTS (4), ECO_FORMS (6), GROUP_1–6 (key docs). Items grouped by `groupCode`.
+
+**Kebab menu items to implement:** Open (navigate to document), View (open linked doc), Update Status (opens edit dialog), Remarks (inline remark input visible), History (opens history drawer).
+
+**Grid columns:** Type Code | Type Label | Status chip | Latest Submission | Required badge | Actions (kebab)
+
+### 2.263-E: ECO_FORMS "Other Forms" Redundancy
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue` Supporting Documents section (lines 851–865)
+
+**Current state:** Shows BOTH:
+1. `CiRepositoryCard` (title="Other Forms") with `@open` → `openRepo()` (launches CiRepositoryModal)
+2. `CiFolderRepository` (group-code="ECO_FORMS") — the new recursive folder system
+
+This creates visual duplication: two UIs for the same ECO_FORMS documents. The `CiRepositoryCard` + `CiRepositoryModal` is the old pattern; `CiFolderRepository` is the new one.
+
+**Fix (D-MMM-4):** Remove the `CiRepositoryCard` + `v-row` wrapper for "Other Forms" entirely. Keep ONLY the `CiFolderRepository` for ECO_FORMS. The `ecoStats` computed and `ecoFormCodes` coded stay (ecoFormCodes is still needed for docTypeCodes prop).
+
+### 2.263-F: COI Index Controls — Remaining UI Issues (LLL Follow-On)
+
+After LLL-B implementation: the single-row filter bar exists. Remaining refinements per the prompt:
+- `v-divider vertical` between filter controls and sort/view group needs proper height handling in flex row
+- Sort key `v-select` max-width could be tighter (`max-width: 130px` instead of `150px`)
+- No structural issues — the LLL-B changes already satisfied the core requirement
+
+**Assessment:** COI index UI controls are effectively addressed by LLL. Minor spacing tweaks only.
+
+### 2.263-G: Constraints Summary (Phase MMM)
+
+| ID | Constraint |
+|---|---|
+| MMM-C1 | Template files must be COPIED (not moved) — originals in subfolders stay. |
+| MMM-C2 | `persistDoc` fix must use immutable emit pattern — never mutate `props.modelValue` or computed chain. |
+| MMM-C3 | `CiDocumentChecklist` — NO changes to API calls, data model, or checklist logic. UI only. |
+| MMM-C4 | Remove CiRepositoryCard for ECO_FORMS only — do NOT remove CiRepositoryCard components used elsewhere (key docs section). |
+| MMM-C5 | Gallery fix: `cover` mode crops edges of images. Acceptable for aesthetic gallery display. If `contain` was intentional to show full image, discuss with operator. |
+| MMM-C6 | `CiAttachmentHub` (ZY-D1) is the ONLY attachment renderer — no new renderer. |
+
+---
+
+## §2.262 — Phase LLL: INSERT Bug + COI Index Refactor + Template URL Architecture + Repository Audit (Phase 1)
+
+> Date: 2026-06-01
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.262-A: Critical Issue 1 — INSERT Column/Placeholder Mismatch (Root Cause)
+
+**Error:** `INSERT has more target columns than expressions`
+
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts`, `async create()` method, line ~678
+
+**Root cause (verified via Node.js count):**
+- Column list in INSERT: **61 columns**
+- `?` placeholders in VALUES clause: **60 placeholders**
+- Values array passed to query: **61 items** (correct)
+
+The SQL string has one fewer `?` than there are columns listed. MikroORM/pg compares the column list (61) against the placeholder list (60) at query preparation time and raises `ERROR: INSERT has more target columns than expressions` (PostgreSQL syntax check, not a runtime data error).
+
+**Confirmed NOT an entity/DTO issue:** Entity has all 61 fields. DTO accepts all 61 fields. Values array provides all 61 values. The bug is exclusively in the VALUES placeholder string — one `?` was dropped when the last column (`personnel_groups`) was appended.
+
+**Fix:** Add one `?` at position 61 in the VALUES string — changing the current 60-`?` string to 61-`?`. This is a one-character fix (insert `, ?` before the closing `)`). No schema change, no DTO change, no entity change.
+
+**Impact:** Every `POST /api/construction-projects` call fails. New project creation is completely non-functional. Edit operations are unaffected (UPDATE uses a dynamic SET clause, not positional VALUES).
+
+**Critical Issue 2 — `full_name` column:** Already fixed in Phase III-A (2026-05-28). Line 2075 correctly uses `COALESCE(display_name, first_name || ' ' || last_name, email)`. ✅ No further action required.
+
+### 2.262-B: COI Index — Current Filter/View UI State
+
+**Current filter row (first row, 12 cols):**
+`search (col 3) | status (col 2) | campus (col 2) | date from (col 2) | date to (col 2) | clear (col 1)`
+
+**Current sort/view row (second row):**
+`sort key select + direction btn (left) | project count + view toggle (right)`
+
+**Issues identified:**
+1. Two separate rows feel heavy — 6 filter controls + sort + view toggle across 2 rows = cluttered
+2. Date filter uses `p.startDate` — maps to `start_date` column only; no original/revised date filtering
+3. No Project ID filter (no `project_code` substring search separate from the main search)
+4. View toggle buttons use icon-only with `size="small"` but inside an outlined divided `v-btn-toggle` — readable but can be improved
+
+**Missing advanced filters (per prompt):**
+- `project_code` text filter (Project ID)
+- `original_start_date` range (from/to)
+- `original_completion_date` range (from/to)
+- `revised_start_date` range (from/to)
+- `revised_completion_date` range (from/to)
+
+**Frontend field availability:** `UIProject` adapter (adapters.ts) already maps backend fields. Need to verify `originalStartDate`, `revisedStartDate`, `originalCompletionDate`, `revisedCompletionDate` are in the adapter and available on UIProject.
+
+**Architecture decision (D-LLL-1):** Advanced date filters live inside a collapsible "Advanced Filters" expansion panel, not always-visible — preserves clean default layout while allowing power-user filtering. The primary filter bar (search, status, campus, view toggle) stays always-visible in a single compact row.
+
+### 2.262-C: COI Index — Analytics KPI State
+
+**Current KPI stat cards (client-side computed in `computeStats()`):**
+- Total projects: `projects.length`
+- Ongoing: `filter status === 'ONGOING'`
+- Completed: `filter status === 'COMPLETE' || 'COMPLETED'`
+- Pending Review: `filter publicationStatus === 'PENDING_REVIEW'`
+- Total Contract Value: `reduce sum contract_amount`
+- Avg Progress: `reduce sum physical_progress / n`
+- Delayed: computed separately as `ONGOING && physicalAccomplishment < 50` (opinionated threshold)
+
+**Backend analytics endpoint exists:** `GET /api/construction-projects/analytics/summary` returns `{ status_distribution: [{status, count, total_contract}], campus_distribution: [{campus, count, total_contract, avg_progress}], overall: {total, total_contract_value, avg_progress} }`.
+
+**Gap:** KPI stat cards use opinionated client-side logic (50% threshold for "delayed") while the backend analytics endpoint has accurate DB-aggregated data. The stat cards should be replaced with values from the analytics/summary endpoint:
+- Total: `overall.total`
+- Active: `status_distribution find ONGOING count`
+- Completed: `status_distribution find COMPLETE count`
+- Delayed: backend should expose a delayed count (projects with `status = 'ONGOING'` AND `physical_progress < target_physical_progress - 10`) — not hardcoded 50%
+- Budget: `overall.total_contract_value`
+- Avg Progress: `overall.avg_progress`
+
+**Architecture decision (D-LLL-2):** Add a `delayed_count` field to the analytics/summary endpoint response. Count projects where `status = 'ONGOING' AND physical_progress < target_physical_progress`. This is a pure DB aggregate — no opinionated threshold.
+
+### 2.262-D: Supporting Documents — Template URL Architecture
+
+**Reference folder inventory** (`docs/references/SHAREABLE SUPPORT DOCUMENTS-20260526T231911Z-3-001/`):
+
+| Category | File | Type Code | Shareable |
+|---|---|---|---|
+| ORDERS | SD-ECO-ECO-001_Variation Order.docx | SD_ECO_001 | ✅ |
+| ORDERS | SD-ECO-ECO-002_Work Suspension Order.docx | SD_ECO_002 | ✅ |
+| ORDERS | SD-ECO-ECO-003_Work Resumption Order.docx | SD_ECO_003 | ✅ |
+| ORDERS | SD-ECO-ECO-004_Contract Time Extension Order.docx | SD_ECO_004 | ✅ |
+| ORDERS | SD-ECO-ECO-005_Notice of Non-Compliance.docx | SD_ECO_005 | ❌ DRAFT |
+| ORDERS | SD-ECO-ECO-006_Show Cause Order.docx | SD_ECO_006 | ❌ DRAFT |
+| ORDERS | SD-ECO-ECO-007_Notice of Termination.docx | SD_ECO_007 | ❌ DRAFT |
+| REPORTS | SD-ECO-ECO-008_Construction Logbook.docx | SD_ECO_008 | ✅ |
+| REPORTS | SD-ECO-ECO-009_Weekly Accomplishment Report.docx | SD_ECO_009 | ✅ |
+| REPORTS | SD-ECO-ECO-010_Monthly Progress Report.docx | SD_ECO_010 | ✅ |
+| REPORTS | SD-ECO-ECO-011_Site Instruction.docx | SD_ECO_011 | ✅ |
+| REPORTS | SD-ECO-ECO-012_Site Inspection Report.docx | SD_ECO_012 | ✅ |
+| REPORTS | SD-ECO-ECO-013_Project Inspection Report.docx | SD_ECO_013 | ✅ |
+| REPORTS | SD-ECO-ECO-014_Quality Assessment Report.docx | SD_ECO_014 | ✅ |
+| REPORTS | SD-ECO-ECO-015_Safety Compliance Report.docx | SD_ECO_015 | ✅ |
+| CERTS | SD-ECO-ECO-016_Certificate of Site Inspection.docx | SD_ECO_016 | ✅ |
+| CERTS | SD-ECO-ECO-017_Certificate of Completion.docx | SD_ECO_017 | ✅ |
+| CERTS | SD-ECO-ECO-018_Certificate of Final Acceptance.docx | SD_ECO_018 | ✅ |
+| CERTS | Mandatory Certification - LUDIP.docx | SD_ECO_019 | not in SHAREABLE folder |
+
+**Types without shareable templates:** SD_ECO_005, SD_ECO_006, SD_ECO_007, SD_ECO_019, all F_ECO_* forms, all CPES_* types.
+
+**Current DB state:** `template_url` column exists (added in Migration20260527010000) but ALL rows have `NULL` template_url. The Migration20260527020000 seeded all types without URLs.
+
+**Template serving architecture (D-LLL-3):**
+- NestJS supports `ServeStaticModule` to serve files from a static directory
+- Template files should live in `pmo-backend/public/templates/` (create if not exists)
+- Template URLs format: `/templates/{type_code}.docx`
+- Public access — no auth required for template downloads
+- **Operator action required:** Copy `[SHAREABLE]` .docx files from `docs/references/SHAREABLE SUPPORT DOCUMENTS-*/` to `pmo-backend/public/templates/` with type-code-based filenames (e.g., `SD_ECO_001.docx`, `SD_ECO_002.docx`, etc.)
+- New MikroORM migration seeds `template_url` for the 15 shareable types
+
+**Gap in NestJS static serving:** Need to verify `ServeStaticModule` is configured. If not, add it (or use Express `static()` in main.ts). Templates folder path: `pmo-backend/public/templates/`.
+
+### 2.262-E: CiAttachmentHub — Template URL Wiring
+
+**Current state:** CiFolderRepository has `seededTemplateUrl?: string | null` prop (added Phase III-F). CiAttachmentHub does NOT currently pass this prop from the `docTypeGroups` taxonomy to CiFolderRepository instances.
+
+**Fix needed:** In CiAttachmentHub, for each CiFolderRepository in the Supporting Documents section, compute the seededTemplateUrl by:
+1. Looking up the type code from `docTypeCodes[0]` prop passed to each CiFolderRepository
+2. Finding the matching type in `allDocTypes` computed
+3. Reading its `templateUrl` field
+
+This is pure frontend data-wiring — no new API needed.
+
+### 2.262-F: Repository Document Submission Table Enhancement
+
+**Current CiFolderRepository SUBMISSIONS node rendering:**
+- Shows uploaded files as a simple list (filename + actions)
+- No uploader name, no version, no upload date, no revision history
+
+**Required (per prompt):** Submission table with columns: File Name, Uploaded By, Date Uploaded, Last Modified, Version + actions (download, delete, view history).
+
+**Backend data available:** `GET /api/construction-projects/:id/documents` returns documents with `uploadedByName`, `createdAt`, `version`, `fileName`, `filePath`, `folderId`.
+
+**Architecture decision (D-LLL-4):** CiFolderRepository already receives `documents` prop (array of documents filtered to the folder). Enhance the SUBMISSIONS node to render a `v-data-table` (table mode) or `v-list` (list mode) showing all required columns. No new backend endpoint needed.
+
+### 2.262-G: Repository Audit Trail — Action Logging
+
+**Current state:** CiFolderRepository calls `api.post()`, `api.del()`, `api.upload()` — no audit logging on these frontend-initiated actions.
+
+**Backend audit logging:** `ActivityLogService.logAction()` is already integrated in the service. The following COI service methods already log:
+- `create()` → `ActivityAction.CREATE`
+- `update()` → `ActivityAction.UPDATE`
+- `remove()` → `ActivityAction.DELETE`
+- Gallery upload/delete → `ActivityAction.UPLOAD` / not yet confirmed
+
+**Gap:** `createDocumentFolder()`, `deleteDocumentFolder()`, `uploadDocument()`, `deleteDocument()` are NOT currently logging to the activity log.
+
+**Fix:** Add `this.fireLog()` calls to:
+- `createDocumentFolder()` → `ActivityAction.CREATE`
+- `deleteDocumentFolder()` → `ActivityAction.DELETE`
+- `uploadDocument()` → `ActivityAction.UPLOAD`
+- `deleteDocument()` → `ActivityAction.DELETE`
+
+All these already have `user` context passed through the controller. The `fireLog()` helper is already a fire-and-forget pattern — safe to add without blocking the operation.
+
+### 2.262-H: Constraint Summary for Phase LLL
+
+| ID | Constraint |
+|---|---|
+| LLL-C1 | INSERT fix is a one-character change only — do NOT restructure the INSERT statement |
+| LLL-C2 | Advanced filters are additive to the existing filter bar — do not remove existing filters |
+| LLL-C3 | Template URLs must point to public static paths — no auth required for template downloads |
+| LLL-C4 | Operator must physically copy .docx template files — Claude cannot handle binary file operations |
+| LLL-C5 | `construction_document_types` taxonomy rows must NOT be deleted or modified (type_code is foreign key target) — only UPDATE `template_url` |
+| LLL-C6 | `CiAttachmentHub` (ZY-D1) remains the ONLY attachment renderer — no new renderer components |
+| LLL-C7 | `api.del()` not `api.delete()` for all DELETE calls in CiFolderRepository |
+| LLL-C8 | Audit logging uses `fireLog()` fire-and-forget pattern — never blocks primary operation |
+
+---
+
+## §2.261 — June 2026 Executive Management Report: Project State Analysis (Phase 1)
+
+> Date: 2026-06-01
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.261-A: Project Inventory (as of 2026-06-01)
+
+**Backend controllers (active):**
+- `construction-projects.controller.ts` — COI CRUD + workflow + analytics
+- `public-construction.controller.ts` — COI public read-only (no auth)
+- `university-operations.controller.ts` — UO physical + financial + analytics
+- `auth.controller.ts` — JWT, Google OAuth, password reset
+- `users.controller.ts` — User management
+- `activity-log.controller.ts` — Audit trail
+- `contractors.controller.ts` — Contractor management (partial)
+- `uploads.controller.ts` — File upload pipeline
+- `media.controller.ts` — Gallery media serving
+- `documents.controller.ts` — Document entity CRUD
+
+**Database migrations:** 48 sequential migrations (001–048) covering: schema evolution, UO module, COI module, fiscal years, quarterly reports, activity logs, construction milestones/POW, MOV entries.
+
+**Frontend pages:**
+- COI: 7 pages (index, new, edit, detail, public-index, public-detail, activity-logs)
+- UO: 4 pages (index, new, physical/index, financial/index)
+- Auth/Admin: login, dashboard, users/index
+- Public: index.vue (landing)
+
+**COI Vue components (CiXxx namespace):** 29 components including CiAttachmentHub, CiProgressReportTab, CiTimelogsContainer, CiRevisionOrdersTable, CiDocumentChecklist, CiFolderRepository, CiRepositoryCard, CiMovEvidenceSection, CiPersonnelAccessCard, CiProjectAnalyticsTab, CiAuditLogPanel, CiGalleryModal, CiRepositoryModal, CiProjectHeroCard, CiCalendarLogPanel, CiBatchMilestoneDialog, CiRemarksLog, CiBasicInfoForm, CiHierarchicalSelectorModal, CiScrollToTopFab, CiProjectGuideCard, CiProjectDiary, CiBatchDiaryDialog, CiMovPendingSection, CiMovLinkBtn, CiBulletListInput, CiComplianceRepository, CiSupportingDocsRepository, CiHierarchicalSelectorTrigger.
+
+### 2.261-B: Module Completion Assessment
+
+**COI Module — feature-by-feature:**
+
+| Feature | Implementation State | Estimated Completion |
+|---|---|---|
+| Project CRUD (create, edit, archive) | Stable — multiple stabilization passes | 95% |
+| Public portal (no-auth listing + detail) | Stable — `@Public()` decorator, separate controller | 92% |
+| Project Profile (6-tab structure) | Stable — overview, schedule, progress, personnel, documents, others | 90% |
+| Gallery (upload, display, featured flag) | Stable — paginated, separate endpoint, modal viewer | 90% |
+| Progress Reports (WAR/MPR) | Stable — list/card/table views, year filter | 88% |
+| Milestone Management | Stable — list/card/table views, progress %, category, start/actual dates | 88% |
+| Timelogs | Stable — list/card/table views, year filter, kebab menus | 85% |
+| Revision Orders | Stable — table + list views, kebab menus, VOR/CTE chip | 85% |
+| Attachment Hub (nested folder system) | New — CiFolderRepository, CONTAINER/FORM/TEMPLATE/SUBMISSIONS hierarchy | 80% |
+| Supporting Documents Repository | New — recursive folder tree replaces old accordion system | 80% |
+| Compliance/Document Checklist | Stable — tracking-only, list-based remarks, JSON remarks storage | 82% |
+| POW (Program of Works) items | Built (Phase JU-B) — pending final operator verification | 75% |
+| Analytics Dashboard | Stable — status donut, campus bar, financial summary cards | 85% |
+| Activity Log / Audit Trail | Functional — per-operation CREATE/UPDATE/DELETE entries | 78% |
+| Personnel / Access Control | Functional — CiPersonnelAccessCard, useCoiAccess composable | 78% |
+| Contractor Management | Partial — contractor auth, DB entity, linkage; portal UI partial | 60% |
+| MOV Evidence System | Built — CiMovEvidenceSection, pending smoke testing | 72% |
+| COI Index (list/card/table views) | Built — date filter, sort, stat cards (Avg Progress) | 88% |
+
+**COI Module Overall Estimate: ~83%**
+
+**University Operations Module:**
+
+| Feature | Implementation State | Estimated Completion |
+|---|---|---|
+| Physical Accomplishment (BAR No. 1) | Declared stable Phase EU-A (2026-03-17) | 96% |
+| Financial Accomplishment (BAR No. 2) | Stable — hero stat cards, utilization rate, disbursement tracking | 94% |
+| Quarterly Report Lifecycle | Full — DRAFT → PENDING_REVIEW → PUBLISHED + REJECTED/UNLOCKED/REVERTED | 92% |
+| UO Analytics Dashboard | Stable — BAR1 indicators, financial trend charts | 88% |
+| Override System (per-quarter) | Stable — `override_total_target/actual`, `??` merge in computeIndicatorMetrics | 90% |
+| Narrative Fields (WAR/MPR) | Stable — catch_up_plan, facilitating_factors, ways_forward expandable rows | 88% |
+| BAR Taxonomy (migration 019) | COMPLETE + IMMUTABLE — seeded pillar/indicator taxonomy | 100% |
+| Fiscal Year Management | Functional — configurable by SuperAdmin, `fiscal_years` table | 90% |
+| Operation Assignment CRUD | Built Phase IJ — user-pillar assignment endpoints | 85% |
+
+**UO Module Overall Estimate: ~92%**
+
+**Shared Services:**
+
+| Area | Status | Estimate |
+|---|---|---|
+| JWT Auth + session management | Stable — access token, Nuxt auth middleware | 90% |
+| Google OAuth integration | Stable — `auth/google`, `auth/google/callback` | 88% |
+| Password Reset (OTP flow) | Stable — `password_reset_requests` table, email-triggered | 85% |
+| User Management (Admin panel) | Stable — CRUD, role assignment, campus assignment, soft delete | 95% |
+| RBAC (Role-Based Access Control) | Stable — SuperAdmin, Admin, Staff, Viewer, Auditor, Contractor roles; `@Roles()` guard | 85% |
+| File Upload pipeline | Stable — `uploads.controller.ts`, `media.controller.ts`, multer integration | 85% |
+| MikroORM + PostgreSQL | Stable — hybrid ORM (CRUD via ORM, analytics via raw SQL) | 92% |
+| Module Assignment System | Stable — `record_assignments` table, per-module user scoping | 80% |
+
+**Shared Services Overall Estimate: ~88%**
+
+### 2.261-C: Reporting & Analytics State
+
+- **COI Analytics:** `/api/construction-projects/analytics/summary` + `/analytics/financial-summary` — status distribution (donut), campus chart (bar), financial summary cards. All backend-sourced via raw SQL aggregates.
+- **UO Analytics:** BAR1 indicator tracking per quarter per pillar; financial appropriation/obligation/disbursement tracking; utilization rate computed server-side.
+- **Dashboard (global):** Admin dashboard at `/dashboard.vue` shows KPI cards for UO summary + construction/repair/GAD/UniOps count cards. Additive (Phase JS-C designed). Financial analytics cross-module deferred (YAGNI).
+
+**Reporting & Analytics Overall Estimate: ~82%**
+
+### 2.261-D: Document Management State
+
+- **COI Attachment Hub (`CiAttachmentHub`):** Central document renderer. Modes: staging (new.vue), edit, view (detail). Sections: Key Documents, Supporting Documents, Compliance, Other Forms, Miscellaneous.
+- **Nested Folder System (`CiFolderRepository`):** New in Phase HHH-F/G. CONTAINER → FORM → TEMPLATE/SUBMISSIONS hierarchy. Lazy preset seeding per section. Upload via SUBMISSIONS nodes.
+- **Compliance Checklist (`CiDocumentChecklist`):** Tracking-only (no upload affordances). List-based remarks (JSON stored).
+- **Gallery (`ConstructionGallery`):** Separate endpoint, paginated, modal viewer, featured flag.
+- **Document Types Taxonomy:** `construction_document_types` with groupCode/typeCode/templateUrl — seeded, READONLY.
+
+**Document Management Overall Estimate: ~80%**
+
+### 2.261-E: Security Posture
+
+**Already addressed:**
+- JWT token guard on all protected routes (`JwtAuthGuard` at controller level)
+- Role-based authorization (`@Roles()` + `RolesGuard`) — enforced server-side
+- Nuxt middleware `auth` + `permission` on all protected frontend routes
+- `@Public()` decorator pattern for designated public routes (no token required)
+- Soft-delete pattern (`deleted_at IS NULL`) — no hard deletes on users or projects
+- Activity logging — audit trail on CREATE/UPDATE/DELETE for COI operations
+- Google OAuth with redirect validation
+- Password reset OTP with expiry
+
+**Potential risks under review:**
+- File upload: MIME type validation implemented at frontend level; server-side MIME hardening (magic byte checking) not yet confirmed
+- Contractor access isolation: contractor role exists; scoping of which projects a contractor can access via portal needs verification
+- Permission escalation edge cases: section-level override system (JT-E) has design documented; enforcement implementation deferred
+- JWT token expiry and refresh rotation: functional but rotation security review not yet formally documented
+- Production rate limiting: no rate limiter middleware observed in current codebase (DoS surface)
+
+### 2.261-F: Deployment Readiness Assessment
+
+**Green (ready for pilot):**
+- Authentication and user management
+- University Operations module (physical + financial + reporting)
+- COI project CRUD and public portal
+- Gallery system
+- Role-based access control framework
+- PostgreSQL data integrity (48 migrations, FK constraints, soft delete)
+
+**Yellow (needs smoke testing before pilot go-live):**
+- Nested folder/attachment system (new — HHH-F/G, no production traffic yet)
+- Contractor portal isolation
+- Activity log coverage completeness
+- File upload MIME validation hardening
+- Analytics edge cases with sparse data
+
+**Red (blocks full production — not blocking pilot):**
+- No rate limiting middleware
+- Penetration testing not yet completed
+- Section-level permission enforcement (JT-E design only, not enforced)
+- Contractor portal UI (60% complete)
+
+**Recommendation:** Controlled Pilot Deployment is achievable for June–July 2026 with a 2-week smoke testing sprint. Full production requires completing Yellow/Red items.
+
+### 2.261-G: Two-Week Sprint Assessment (June 2–16, 2026)
+
+| Issue | Impact | Estimated Effort |
+|---|---|---|
+| Nested folder system smoke testing + fixes | High (new feature, no real-world test) | 3–5 days |
+| Contractor access scoping verification | Medium | 2–3 days |
+| Rate limiting middleware (basic) | Medium (production blocker) | 1–2 days |
+| Section-level permission enforcement (JT-E) | Medium | 2–3 days |
+| File upload MIME server-side validation | Low–Medium | 1–2 days |
+| UI/UX polish (typography, responsive checks) | Low | 2–3 days parallel |
+| Stakeholder demo environment setup | Medium | 1–2 days |
+
+**Conclusion:** A focused 2-week sprint is realistic for Controlled Pilot Deployment readiness. Full production hardening requires an additional 2–4 weeks.
+
+### 2.261-H: July Deployment Confidence
+
+- **COI Module:** 83% complete. Needs 2–3 week smoke testing sprint. Achievable by July if sprint begins immediately.
+- **UO Module:** 92% complete. Effectively production-ready for pilot with minor edge case testing.
+- **Overall Assessment:** On track for Controlled Pilot Deployment by July 2026. Full production rollout recommended for Q3–Q4 2026.
+- **Confidence:** 75% (contingent on sprint execution and no major architectural regressions in nested folder system).
+
+### 2.261-I: Stakeholder Forum Readiness
+
+**Demonstrable now:**
+- Project lifecycle: creation → editing → publishing
+- Role-based access: SuperAdmin/Admin/Staff/Viewer distinction visible in UI
+- Project monitoring: progress reports, milestones, timelogs, revision orders
+- Repository management: gallery, documents, nested folders (core flows)
+- COI Analytics: status distribution, campus breakdown, financial summary
+- UO Module: quarterly report submission, indicator tracking, financial tracking
+- Public portal: unauthenticated project listing and detail views
+- User management: CRUD, role assignment, module scoping
+
+**Still being refined (not suitable for live demo):**
+- Nested folder system (partial — demo with seeded data only)
+- Contractor portal
+- Dashboard cross-module analytics
+- MOV evidence system (needs backend verification)
+
+**Forum Recommendation:** Ready for stakeholder demonstration with a curated demo dataset. Avoid live Contractor portal and nested folder CRUD during the forum. Use seeded data for supporting documents and repository sections.
 
 ---
 

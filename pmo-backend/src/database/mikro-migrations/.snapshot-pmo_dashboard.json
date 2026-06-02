@@ -3759,6 +3759,521 @@
           "enumItems": [],
           "mappedType": "uuid"
         },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "uuid"
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "uuid",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "uuid"
+        },
+        "folder_name": {
+          "name": "folder_name",
+          "type": "varchar(200)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": 200,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "string"
+        },
+        "group_code": {
+          "name": "group_code",
+          "type": "varchar(50)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": 50,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "string"
+        },
+        "node_type": {
+          "name": "node_type",
+          "type": "varchar(30)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": 30,
+          "precision": null,
+          "scale": null,
+          "default": "'CONTAINER'",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "string"
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "int4",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": null,
+          "precision": 32,
+          "scale": 0,
+          "default": "0",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "integer"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "uuid"
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "uuid"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamptz(6)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": 6,
+          "precision": null,
+          "scale": null,
+          "default": "now()",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "datetime"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamptz(6)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": 6,
+          "precision": null,
+          "scale": null,
+          "default": "now()",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "datetime"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamptz(6)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": 6,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "datetime"
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "uuid",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "uuid"
+        }
+      },
+      "name": "construction_document_folders",
+      "schema": "public",
+      "indexes": [
+        {
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": false,
+          "keyName": "construction_document_folders_pkey",
+          "unique": true,
+          "primary": true
+        },
+        {
+          "columnNames": [
+            "parent_id"
+          ],
+          "composite": false,
+          "constraint": false,
+          "keyName": "idx_construction_document_folders_parent",
+          "unique": false,
+          "primary": false
+        },
+        {
+          "columnNames": [
+            "project_id"
+          ],
+          "composite": false,
+          "constraint": false,
+          "keyName": "idx_construction_document_folders_project",
+          "unique": false,
+          "primary": false
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {
+        "construction_document_folders_created_by_fkey": {
+          "columnNames": [
+            "created_by"
+          ],
+          "constraintName": "construction_document_folders_created_by_fkey",
+          "localTableName": "public.construction_document_folders",
+          "referencedTableName": "public.users",
+          "referencedColumnNames": [
+            "id"
+          ],
+          "updateRule": "no action",
+          "deleteRule": "no action"
+        },
+        "construction_document_folders_deleted_by_fkey": {
+          "columnNames": [
+            "deleted_by"
+          ],
+          "constraintName": "construction_document_folders_deleted_by_fkey",
+          "localTableName": "public.construction_document_folders",
+          "referencedTableName": "public.users",
+          "referencedColumnNames": [
+            "id"
+          ],
+          "updateRule": "no action",
+          "deleteRule": "no action"
+        },
+        "construction_document_folders_parent_id_fkey": {
+          "columnNames": [
+            "parent_id"
+          ],
+          "constraintName": "construction_document_folders_parent_id_fkey",
+          "localTableName": "public.construction_document_folders",
+          "referencedTableName": "public.construction_document_folders",
+          "referencedColumnNames": [
+            "id"
+          ],
+          "updateRule": "no action",
+          "deleteRule": "cascade"
+        },
+        "construction_document_folders_project_id_fkey": {
+          "columnNames": [
+            "project_id"
+          ],
+          "constraintName": "construction_document_folders_project_id_fkey",
+          "localTableName": "public.construction_document_folders",
+          "referencedTableName": "public.construction_projects",
+          "referencedColumnNames": [
+            "id"
+          ],
+          "updateRule": "no action",
+          "deleteRule": "cascade"
+        },
+        "construction_document_folders_updated_by_fkey": {
+          "columnNames": [
+            "updated_by"
+          ],
+          "constraintName": "construction_document_folders_updated_by_fkey",
+          "localTableName": "public.construction_document_folders",
+          "referencedTableName": "public.users",
+          "referencedColumnNames": [
+            "id"
+          ],
+          "updateRule": "no action",
+          "deleteRule": "no action"
+        }
+      },
+      "nativeEnums": {
+        "building_status_enum": {
+          "name": "building_status_enum",
+          "schema": "public",
+          "items": [
+            "OPERATIONAL",
+            "UNDER_CONSTRUCTION",
+            "RENOVATION",
+            "CLOSED"
+          ]
+        },
+        "building_type_enum": {
+          "name": "building_type_enum",
+          "schema": "public",
+          "items": [
+            "ACADEMIC",
+            "ADMINISTRATIVE",
+            "RESIDENTIAL",
+            "OTHER"
+          ]
+        },
+        "campus_enum": {
+          "name": "campus_enum",
+          "schema": "public",
+          "items": [
+            "MAIN",
+            "CABADBARAN",
+            "BOTH"
+          ]
+        },
+        "condition_enum": {
+          "name": "condition_enum",
+          "schema": "public",
+          "items": [
+            "POOR",
+            "FAIR",
+            "GOOD",
+            "VERY_GOOD",
+            "EXCELLENT"
+          ]
+        },
+        "contractor_status_enum": {
+          "name": "contractor_status_enum",
+          "schema": "public",
+          "items": [
+            "ACTIVE",
+            "SUSPENDED",
+            "BLACKLISTED"
+          ]
+        },
+        "department_status_enum": {
+          "name": "department_status_enum",
+          "schema": "public",
+          "items": [
+            "ACTIVE",
+            "INACTIVE"
+          ]
+        },
+        "fund_type_enum": {
+          "name": "fund_type_enum",
+          "schema": "public",
+          "items": [
+            "RAF_PROGRAMS",
+            "RAF_PROJECTS",
+            "RAF_CONTINUING",
+            "IGF_MAIN",
+            "IGF_CABADBARAN"
+          ]
+        },
+        "media_type_enum": {
+          "name": "media_type_enum",
+          "schema": "public",
+          "items": [
+            "IMAGE",
+            "VIDEO",
+            "DOCUMENT",
+            "OTHER"
+          ]
+        },
+        "module_type": {
+          "name": "module_type",
+          "schema": "public",
+          "items": [
+            "CONSTRUCTION",
+            "REPAIR",
+            "OPERATIONS",
+            "ALL"
+          ]
+        },
+        "operation_type_enum": {
+          "name": "operation_type_enum",
+          "schema": "public",
+          "items": [
+            "HIGHER_EDUCATION",
+            "ADVANCED_EDUCATION",
+            "RESEARCH",
+            "TECHNICAL_ADVISORY"
+          ]
+        },
+        "project_status_enum": {
+          "name": "project_status_enum",
+          "schema": "public",
+          "items": [
+            "PLANNING",
+            "ONGOING",
+            "COMPLETED",
+            "ON_HOLD",
+            "CANCELLED",
+            "PROPOSAL",
+            "COMPLETE"
+          ]
+        },
+        "project_type_enum": {
+          "name": "project_type_enum",
+          "schema": "public",
+          "items": [
+            "CONSTRUCTION",
+            "REPAIR",
+            "RESEARCH",
+            "EXTENSION",
+            "TRAINING",
+            "OTHER"
+          ]
+        },
+        "publication_status_enum": {
+          "name": "publication_status_enum",
+          "schema": "public",
+          "items": [
+            "DRAFT",
+            "PENDING_REVIEW",
+            "PUBLISHED",
+            "REJECTED"
+          ]
+        },
+        "repair_status_enum": {
+          "name": "repair_status_enum",
+          "schema": "public",
+          "items": [
+            "REPORTED",
+            "INSPECTED",
+            "APPROVED",
+            "IN_PROGRESS",
+            "COMPLETED",
+            "CANCELLED"
+          ]
+        },
+        "room_status_enum": {
+          "name": "room_status_enum",
+          "schema": "public",
+          "items": [
+            "AVAILABLE",
+            "OCCUPIED",
+            "UNDER_MAINTENANCE",
+            "UNAVAILABLE"
+          ]
+        },
+        "room_type_enum": {
+          "name": "room_type_enum",
+          "schema": "public",
+          "items": [
+            "CLASSROOM",
+            "LABORATORY",
+            "OFFICE",
+            "CONFERENCE",
+            "AUDITORIUM",
+            "OTHER"
+          ]
+        },
+        "semester_enum": {
+          "name": "semester_enum",
+          "schema": "public",
+          "items": [
+            "FIRST",
+            "SECOND",
+            "SUMMER"
+          ]
+        },
+        "setting_data_type_enum": {
+          "name": "setting_data_type_enum",
+          "schema": "public",
+          "items": [
+            "STRING",
+            "NUMBER",
+            "BOOLEAN",
+            "JSON",
+            "DATE",
+            "DATETIME"
+          ]
+        },
+        "urgency_level_enum": {
+          "name": "urgency_level_enum",
+          "schema": "public",
+          "items": [
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ]
+        }
+      },
+      "comment": null
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": true,
+          "nullable": false,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": "gen_random_uuid()",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "uuid"
+        },
         "checklist_item_id": {
           "name": "checklist_item_id",
           "type": "uuid",
@@ -11953,6 +12468,38 @@
           "comment": null,
           "enumItems": [],
           "mappedType": "json"
+        },
+        "sdg_goals": {
+          "name": "sdg_goals",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": "'[]'",
+          "comment": "UN Sustainable Development Goals aligned with this project (array of SDG_n keys)",
+          "enumItems": [],
+          "mappedType": "json"
+        },
+        "custom_supporting_sections": {
+          "name": "custom_supporting_sections",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": "'[]'",
+          "comment": "Per-project custom Supporting Document repository folders (rendered as repository cards) — mirrors custom_key_sections",
+          "enumItems": [],
+          "mappedType": "json"
         }
       },
       "name": "construction_projects",
@@ -16375,6 +16922,22 @@
             "DRAFT"
           ],
           "mappedType": "enum"
+        },
+        "folder_id": {
+          "name": "folder_id",
+          "type": "uuid",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "uuid"
         }
       },
       "name": "documents",
@@ -16398,6 +16961,16 @@
           "composite": true,
           "constraint": false,
           "keyName": "idx_documents_docpair",
+          "unique": false,
+          "primary": false
+        },
+        {
+          "columnNames": [
+            "folder_id"
+          ],
+          "composite": false,
+          "constraint": false,
+          "keyName": "idx_documents_folder_id",
           "unique": false,
           "primary": false
         },
@@ -16449,6 +17022,19 @@
           ],
           "updateRule": "no action",
           "deleteRule": "no action"
+        },
+        "documents_folder_id_fkey": {
+          "columnNames": [
+            "folder_id"
+          ],
+          "constraintName": "documents_folder_id_fkey",
+          "localTableName": "public.documents",
+          "referencedTableName": "public.construction_document_folders",
+          "referencedColumnNames": [
+            "id"
+          ],
+          "updateRule": "no action",
+          "deleteRule": "set null"
         },
         "documents_updated_by_fkey": {
           "columnNames": [

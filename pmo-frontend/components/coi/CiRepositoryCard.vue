@@ -1,8 +1,11 @@
 <script setup lang="ts">
 // ZY-2: Summary card for a repository section (Key Docs / Orders / Reports /
-// Certifications / Other Forms). Shows document count, type-completion bar, latest
-// upload, and action buttons. Detail lives in CiRepositoryModal (opened via @open).
+// Certifications / Other Forms). Shows document count, latest upload metadata,
+// and action buttons. Detail lives in CiRepositoryModal (opened via @open).
 // III-E: Extended with optional templateUrl, statusBreakdown, and uploaderName props.
+// WWW-A: Removed misleading "Type coverage" progress bar (completedCount/totalTypes
+// has no defined meaning for open-ended document repositories). Shows file count
+// chip + latest upload line instead.
 
 interface StatusBreakdown {
   submitted: number
@@ -16,8 +19,6 @@ interface Props {
   icon: string
   color: string
   docCount: number
-  completedCount: number
-  totalTypes: number
   latestUpload?: string | null
   canUpload?: boolean
   loading?: boolean
@@ -39,10 +40,6 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{ open: []; upload: [] }>()
 
-const completionPct = computed(() =>
-  props.totalTypes > 0 ? Math.round((props.completedCount / props.totalTypes) * 100) : 0,
-)
-
 const latestLabel = computed(() => {
   if (!props.latestUpload) return 'No uploads yet'
   const d = new Date(props.latestUpload)
@@ -54,26 +51,19 @@ const latestLabel = computed(() => {
 
 <template>
   <v-card variant="outlined" class="d-flex flex-column" style="height: 100%">
-    <v-card-title class="d-flex align-center ga-2 text-body-1">
-      <v-icon :icon="icon" :color="color" size="small" />
-      <span class="font-weight-medium">{{ title }}</span>
-      <v-spacer />
-      <v-chip size="x-small" variant="tonal" :color="color">{{ docCount }}</v-chip>
+    <v-card-title class="d-flex align-center ga-2 text-body-1 flex-wrap" style="min-height:48px">
+      <v-icon :icon="icon" :color="color" size="small" class="flex-shrink-0" />
+      <span class="font-weight-medium flex-grow-1" style="white-space:normal;word-break:break-word;min-width:0;line-height:1.3">{{ title }}</span>
+      <v-chip size="x-small" variant="tonal" :color="color" class="flex-shrink-0 ml-1">{{ docCount }}</v-chip>
     </v-card-title>
     <v-divider />
     <v-card-text class="flex-grow-1">
-      <!-- Type coverage bar -->
-      <div class="d-flex justify-space-between text-caption text-medium-emphasis mb-1">
-        <span>Type coverage</span>
-        <span>{{ completedCount }}/{{ totalTypes }}</span>
+      <!-- WWW-A: File count summary (replaces misleading progress bar) -->
+      <div class="d-flex align-center ga-2 flex-wrap mb-2">
+        <v-chip size="x-small" variant="tonal" :color="color" prepend-icon="mdi-file-multiple-outline">
+          {{ docCount }} {{ docCount === 1 ? 'file' : 'files' }}
+        </v-chip>
       </div>
-      <v-progress-linear
-        :model-value="completionPct"
-        :color="color"
-        height="6"
-        rounded
-        class="mb-2"
-      />
 
       <!-- Status breakdown chips (III-E) -->
       <div v-if="statusBreakdown" class="d-flex flex-wrap ga-1 mb-2">

@@ -121,6 +121,16 @@ watch([modalSearch, modalFilterType], () => { modalDisplayLimit.value = MODAL_PA
 const showUpload = ref(props.expandUpload)
 const uploadFile = ref<File | null>(null)
 const uploadType = ref<string>(props.typeCodes[0] ?? '')
+
+// WWW-F: dismissible guidance text (stored per-browser in localStorage)
+const guidanceDismissed = ref(false)
+onMounted(() => {
+  guidanceDismissed.value = localStorage.getItem('coi-repo-modal-guide-dismissed') === '1'
+})
+function dismissGuidance() {
+  guidanceDismissed.value = true
+  localStorage.setItem('coi-repo-modal-guide-dismissed', '1')
+}
 const uploadTitle = ref('')
 const uploadDescription = ref('')
 
@@ -135,6 +145,8 @@ function submitUpload() {
   uploadFile.value = null
   uploadTitle.value = ''
   uploadDescription.value = ''
+  // PPP-B: collapse upload zone so the newly uploaded file is immediately visible in the list below
+  showUpload.value = false
 }
 
 // AAA-H-2: drag-and-drop + batch upload
@@ -146,6 +158,8 @@ function handleModalFileBatch(files: File[]) {
   for (const file of files) {
     emit('upload', { file, documentType: type, title: file.name, description: '' })
   }
+  // PPP-B: collapse upload zone after batch so the file list is visible
+  showUpload.value = false
 }
 function handleModalDrop(e: DragEvent) {
   isDragOver.value = false
@@ -175,10 +189,22 @@ watch(
   (v) => {
     if (v) {
       showUpload.value = props.expandUpload
-      if (!uploadType.value) uploadType.value = props.typeCodes[0] ?? ''
+      // TTT-A: always reset to THIS repository's primary type. The modal is a shared
+      // instance; a stale uploadType from a previously-opened repo would file uploads
+      // under the wrong documentType, making them invisible in the current repository.
+      uploadType.value = props.typeCodes[0] ?? ''
       modalDisplayLimit.value = MODAL_PAGE_SIZE
       fetchRecentActivity()
     }
+  },
+)
+
+// TTT-A: resync uploadType when the active repository changes (covers reactive swap
+// of activeRepo.typeCodes while the shared modal is open).
+watch(
+  () => props.typeCodes,
+  (codes) => {
+    uploadType.value = codes?.[0] ?? ''
   },
 )
 
@@ -256,6 +282,19 @@ async function downloadDoc(doc: RepoDoc) {
       </v-row>
 
       <v-card-text style="max-height:78vh;overflow-y:auto">
+        <!-- WWW-F: Dismissible usage guidance (shown once per browser, hidden in staging mode) -->
+        <v-alert
+          v-if="!guidanceDismissed && mode !== 'staging'"
+          type="info"
+          variant="tonal"
+          density="compact"
+          closable
+          class="mb-3"
+          @click:close="dismissGuidance"
+        >
+          Download the official template · Upload your accomplished form · View and download previous submissions · Track version history.
+        </v-alert>
+
         <!-- Blank-form templates -->
         <div v-if="templates.length" class="d-flex align-center ga-2 flex-wrap mb-3">
           <span class="text-caption text-medium-emphasis">Blank forms:</span>

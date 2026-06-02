@@ -70,6 +70,7 @@ interface Props {
   canEditRemarks?: boolean
   modelValue?: StagedQueue
   customKeySections?: CustomKeySection[]
+  customSupportingSections?: CustomKeySection[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -80,6 +81,7 @@ const props = withDefaults(defineProps<Props>(), {
   canEditRemarks: false,
   modelValue: () => ({ docs: [], images: [], links: [] }),
   customKeySections: () => [],
+  customSupportingSections: () => [],
 })
 
 const emit = defineEmits<{ 'update:modelValue': [value: StagedQueue] }>()
@@ -96,6 +98,7 @@ const documents = ref<HubDoc[]>([])
 const gallery = ref<HubGallery[]>([])
 const docTypeGroups = ref<HubDocTypeGroup[]>([])
 const loadingDocs = ref(false)
+const docsError = ref<string | null>(null)   // VVV-B: surface GET /documents failures
 const loadingGallery = ref(false)
 const deletingDoc = reactive<Record<string, boolean>>({})
 const deletingGallery = reactive<Record<string, boolean>>({})
@@ -105,11 +108,15 @@ const activeSection = ref('')
 
 // ── Staging queue proxy ─────────────────────────────────────
 const queue = computed<StagedQueue>(() => props.modelValue)
-function emitQueue() {
+
+// MMM-C: Immutable staging emit. Builds a fresh StagedQueue from props.modelValue
+// (never mutates the computed/prop in place) so Vue's computed dependency chain
+// reliably invalidates. Pass only the slice(s) being changed; the rest are cloned.
+function emitStaged(next: Partial<StagedQueue>) {
   emit('update:modelValue', {
-    docs: [...queue.value.docs],
-    images: [...queue.value.images],
-    links: [...queue.value.links],
+    docs: next.docs ?? [...(props.modelValue?.docs ?? [])],
+    images: next.images ?? [...(props.modelValue?.images ?? [])],
+    links: next.links ?? [...(props.modelValue?.links ?? [])],
   })
 }
 
@@ -125,6 +132,17 @@ const typeCodeToLabel = computed<Record<string, string>>(() => {
 function codesForGroup(groupCode: string): string[] {
   return (docTypeGroups.value.find((g) => g.groupCode === groupCode)?.types ?? []).map((t) => t.typeCode)
 }
+
+// LLL-F: Build the seeded official-template list for a group (only types with a templateUrl).
+function seededTemplatesForGroup(groupCode: string): Array<{ code: string; label: string; url: string }> {
+  return (docTypeGroups.value.find((g) => g.groupCode === groupCode)?.types ?? [])
+    .filter((t) => !!t.templateUrl)
+    .map((t) => ({ code: t.typeCode, label: t.typeLabel, url: t.templateUrl as string }))
+}
+const sdOrdersTemplates = computed(() => seededTemplatesForGroup('SD_ORDERS'))
+const sdReportsTemplates = computed(() => seededTemplatesForGroup('SD_REPORTS'))
+const sdCertsTemplates = computed(() => seededTemplatesForGroup('SD_CERTS'))
+const ecoFormsTemplates = computed(() => seededTemplatesForGroup('ECO_FORMS'))
 
 const keyCodes = KEY_DOC_TYPECODES as readonly string[]
 const ecoFormCodes = computed(() => codesForGroup('ECO_FORMS'))
@@ -176,9 +194,8 @@ function repoStats(codes: string[]) {
   }, null)
   return { docCount: docs.length, completedCount: completed, totalTypes: codes.length, latestUpload: latest }
 }
-// EEE-F: Orders/Reports/Certs now render via inline CiSupportingDocsRepository
-// (per-type checklist workspace) — their summary stats live in that component.
-const ecoStats = computed(() => repoStats(ecoFormCodes.value))
+// MMM-E: ecoStats removed — the Other Forms flat CiRepositoryCard was replaced by
+// the CiFolderRepository, which computes its own stats.
 
 // ── Shared repository modal ─────────────────────────────────
 const repoModalOpen = ref(false)
@@ -191,7 +208,18 @@ function openRepo(title: string, icon: string, color: string, typeCodes: string[
   repoExpandUpload.value = expand
   repoModalOpen.value = true
 }
-const activeRepoDocs = computed(() => allDocs.value.filter((d) => activeRepo.value.typeCodes.includes(d.documentType)))
+// WWW-C: open Miscellaneous using sentinel so activeRepoDocs returns otherDocs
+function openMiscRepo(expand = false) {
+  openRepo('Miscellaneous & Uncategorized', 'mdi-paperclip', 'blue-grey', ['__MISC__'], expand)
+}
+const miscLatestUpload = computed(() =>
+  otherDocs.value.length > 0 ? (otherDocs.value[0].createdAt ?? null) : null,
+)
+const activeRepoDocs = computed(() => {
+  // WWW-C: '__MISC__' sentinel → return all non-managed docs (otherDocs / Miscellaneous)
+  if (activeRepo.value.typeCodes[0] === '__MISC__') return otherDocs.value as HubDoc[]
+  return allDocs.value.filter((d) => activeRepo.value.typeCodes.includes(d.documentType))
+})
 const activeRepoStaged = computed(() =>
   queue.value.docs
     .map((d, i) => ({ tempId: String(i), documentType: d.documentType, fileName: d.file.name }))
@@ -202,11 +230,14 @@ const activeRepoStaged = computed(() =>
 async function fetchDocuments() {
   if (!hasProject.value) return
   loadingDocs.value = true
+  docsError.value = null
   try {
     const res = await api.get<{ data: HubDoc[] }>(`/api/construction-projects/${props.projectId}/documents`)
     documents.value = res.data || []
-  } catch (err) {
+  } catch (err: unknown) {
     console.error('[CiAttachmentHub] fetch documents failed:', err)
+    // VVV-B: never let a failed load masquerade as an empty repository
+    docsError.value = (err as { message?: string })?.message || 'Failed to load documents. Please retry.'
   } finally {
     loadingDocs.value = false
   }
@@ -269,12 +300,16 @@ async function fetchChecklistRemarks() {
 async function persistDoc(payload: { file: File; documentType: string; title?: string; description?: string }) {
   if (payload.file.size > 20 * 1024 * 1024) { toast.error('File exceeds 20 MB'); return }
   if (isStaging.value) {
-    queue.value.docs.push({
-      file: payload.file,
-      documentType: payload.documentType,
-      description: payload.description || payload.title || '',
+    emitStaged({
+      docs: [
+        ...(props.modelValue?.docs ?? []),
+        {
+          file: payload.file,
+          documentType: payload.documentType,
+          description: payload.description || payload.title || '',
+        },
+      ],
     })
-    emitQueue()
     return
   }
   try {
@@ -286,6 +321,8 @@ async function persistDoc(payload: { file: File; documentType: string; title?: s
     await api.upload(`/api/construction-projects/${props.projectId}/documents`, fd)
     toast.success('Document uploaded')
     await fetchDocuments()
+    // SSS-C / OOO-C: keep the compliance checklist in sync (backend auto-links on upload)
+    checklistRef.value?.refresh()
   } catch (err: unknown) {
     toast.error((err as { message?: string })?.message || 'Upload failed')
   }
@@ -294,7 +331,11 @@ async function persistDoc(payload: { file: File; documentType: string; title?: s
 async function deleteDocument(docId: string) {
   if (isStaging.value) {
     const idx = Number(docId.replace('staged-', ''))
-    if (!Number.isNaN(idx)) { queue.value.docs.splice(idx, 1); emitQueue() }
+    if (!Number.isNaN(idx)) {
+      const docs = [...(props.modelValue?.docs ?? [])]
+      docs.splice(idx, 1)
+      emitStaged({ docs })
+    }
     return
   }
   deletingDoc[docId] = true
@@ -311,7 +352,11 @@ async function deleteDocument(docId: string) {
 
 function removeStaged(tempId: string) {
   const idx = Number(tempId)
-  if (!Number.isNaN(idx)) { queue.value.docs.splice(idx, 1); emitQueue() }
+  if (!Number.isNaN(idx)) {
+    const docs = [...(props.modelValue?.docs ?? [])]
+    docs.splice(idx, 1)
+    emitStaged({ docs })
+  }
 }
 
 // Key Documents — enterprise card definitions
@@ -385,6 +430,68 @@ async function removeCustomSection(id: string) {
   }
 }
 
+// ── SSS-C: Supporting Documents repository-card model ───────────────────────
+// One repository card per seeded template typeCode, grouped by category.
+const supportingTemplateGroups = computed(() => [
+  { key: 'SD_ORDERS',  label: 'Orders',                           icon: 'mdi-file-document-edit', color: 'deep-orange', templates: sdOrdersTemplates.value },
+  { key: 'SD_REPORTS', label: 'Reports & Monitoring',             icon: 'mdi-clipboard-text',     color: 'blue',        templates: sdReportsTemplates.value },
+  { key: 'SD_CERTS',   label: 'Certifications & Other Documents', icon: 'mdi-certificate',        color: 'green',       templates: sdCertsTemplates.value },
+  { key: 'ECO_FORMS',  label: 'Other Forms',                      icon: 'mdi-form-select',        color: 'purple',      templates: ecoFormsTemplates.value },
+])
+const supportingCardStats = computed<Record<string, ReturnType<typeof repoStats>>>(() => {
+  const m: Record<string, ReturnType<typeof repoStats>> = {}
+  for (const g of supportingTemplateGroups.value)
+    for (const t of g.templates) m[t.code] = repoStats([t.code])
+  return m
+})
+
+// SSS-C: per-project custom Supporting Document folders (rendered as cards)
+const customSupportingSections = ref<CustomKeySection[]>([])
+watch(() => props.customSupportingSections, (v) => { customSupportingSections.value = Array.isArray(v) ? [...v] : [] }, { immediate: true })
+const supportingSectionStats = computed<Record<string, ReturnType<typeof repoStats>>>(() => {
+  const m: Record<string, ReturnType<typeof repoStats>> = {}
+  for (const s of customSupportingSections.value) m[s.typeCode] = repoStats([s.typeCode])
+  return m
+})
+// WWW-B: per-CPES-type repository card stats
+const cpesCardStats = computed<Record<string, ReturnType<typeof repoStats>>>(() => {
+  const m: Record<string, ReturnType<typeof repoStats>> = {}
+  for (const t of cpesTypes.value) m[t.typeCode] = repoStats([t.typeCode])
+  return m
+})
+const addSupportingOpen = ref(false)
+const newSupportingLabel = ref('')
+const savingSupporting = ref(false)
+async function saveSupportingSection() {
+  const label = newSupportingLabel.value.trim()
+  if (!label || !props.projectId) return
+  const id = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  const next = [...customSupportingSections.value, { id, label, typeCode: `CSS_${id}` }]
+  savingSupporting.value = true
+  try {
+    await api.patch(`/api/construction-projects/${props.projectId}/custom-supporting-sections`, { sections: next })
+    customSupportingSections.value = next
+    toast.success('Folder added')
+    addSupportingOpen.value = false
+    newSupportingLabel.value = ''
+  } catch {
+    toast.error('Failed to add folder')
+  } finally {
+    savingSupporting.value = false
+  }
+}
+async function removeSupportingSection(id: string) {
+  if (!props.projectId) return
+  const next = customSupportingSections.value.filter((s) => s.id !== id)
+  try {
+    await api.patch(`/api/construction-projects/${props.projectId}/custom-supporting-sections`, { sections: next })
+    customSupportingSections.value = next
+    toast.success('Folder removed')
+  } catch {
+    toast.error('Failed to remove folder')
+  }
+}
+
 // Other Attachments upload form
 const otherDocFile = ref<File | null>(null)
 const otherDocType = ref('attachment')
@@ -421,8 +528,7 @@ const galleryModalOpen = ref(false)
 async function persistGallery(file: File, caption: string, category: string, takenDate: string) {
   if (file.size > 10 * 1024 * 1024) { toast.error('Image exceeds 10 MB'); return }
   if (isStaging.value) {
-    queue.value.images.push({ file, caption, category })
-    emitQueue()
+    emitStaged({ images: [...(props.modelValue?.images ?? []), { file, caption, category }] })
     return
   }
   try {
@@ -441,7 +547,11 @@ async function persistGallery(file: File, caption: string, category: string, tak
 async function deleteGalleryItem(id: string) {
   if (isStaging.value) {
     const idx = Number(id.replace('staged-img-', ''))
-    if (!Number.isNaN(idx)) { queue.value.images.splice(idx, 1); emitQueue() }
+    if (!Number.isNaN(idx)) {
+      const images = [...(props.modelValue?.images ?? [])]
+      images.splice(idx, 1)
+      emitStaged({ images })
+    }
     return
   }
   deletingGallery[id] = true
@@ -461,11 +571,16 @@ const linkUrl = ref('')
 const linkTitle = ref('')
 const linkDescription = ref('')
 const URL_RE = /^https?:\/\/.+/i
+// MMM-C: immutable removal of a staged external link
+function removeStagedLink(i: number) {
+  const links = [...(props.modelValue?.links ?? [])]
+  links.splice(i, 1)
+  emitStaged({ links })
+}
 async function submitLink() {
   if (!linkUrl.value || !URL_RE.test(linkUrl.value)) { toast.error('Must be a valid URL starting with https://'); return }
   if (isStaging.value) {
-    queue.value.links.push({ url: linkUrl.value, title: linkTitle.value, description: linkDescription.value })
-    emitQueue()
+    emitStaged({ links: [...(props.modelValue?.links ?? []), { url: linkUrl.value, title: linkTitle.value, description: linkDescription.value }] })
     linkUrl.value = ''; linkTitle.value = ''; linkDescription.value = ''
     return
   }
@@ -558,44 +673,18 @@ const sections = computed(() => {
   return base
 })
 
-// ── HHH-G: Preset CONTAINER folder seeds for Supporting Documents ───────────
-const PRESET_FOLDERS: { groupCode: string; label: string; sortOrder: number }[] = [
-  { groupCode: 'SD_ORDERS',  label: 'Orders',                            sortOrder: 0 },
-  { groupCode: 'SD_REPORTS', label: 'Reports & Monitoring',              sortOrder: 1 },
-  { groupCode: 'SD_CERTS',   label: 'Certifications & Other Documents',  sortOrder: 2 },
-  { groupCode: 'ECO_FORMS',  label: 'Other Forms',                       sortOrder: 3 },
-]
+// SSS-D8: Supporting Documents now use the repository-card model (SSS-C), not the
+// folder-tree. The preset CONTAINER/FORM seeding (HHH-G/PPP-C/RRR-A) is retired —
+// no longer seeded on the 'supporting' watch. CiFolderRepository remains only in the
+// Miscellaneous section's optional folder workspace.
 
-let seededFolders = false
-
-async function seedPresetFolders() {
-  if (seededFolders || !hasProject.value) return
-  seededFolders = true
-  try {
-    const existing = await api.get<any[]>(`/api/construction-projects/${props.projectId}/document-folders`)
-    const existingCodes = new Set((Array.isArray(existing) ? existing : []).map((f: any) => f.groupCode))
-    for (const p of PRESET_FOLDERS) {
-      if (!existingCodes.has(p.groupCode)) {
-        await api.post(`/api/construction-projects/${props.projectId}/document-folders`, {
-          folder_name: p.label,
-          group_code: p.groupCode,
-          node_type: 'CONTAINER',
-          sort_order: p.sortOrder,
-        })
-      }
-    }
-  } catch (e) {
-    console.error('[CiAttachmentHub] seed preset folders failed', e)
-  }
+// OOO-C: after a folder/document upload, refresh documents AND re-sync the
+// compliance checklist (backend auto-links checklist items on upload).
+const checklistRef = ref<{ refresh: () => void } | null>(null)
+async function onFolderUploaded() {
+  await fetchDocuments()
+  checklistRef.value?.refresh()
 }
-
-// Seed when user opens supporting section for the first time
-watch(activeSection, (sec) => {
-  if (sec === 'supporting') seedPresetFolders()
-})
-
-// Refresh documents after folder upload/delete
-function onFolderUploaded() { fetchDocuments() }
 function onFolderDeleted() { fetchDocuments() }
 
 onMounted(() => {
@@ -648,6 +737,24 @@ defineExpose({ fetchDocuments, fetchGallery })
       </v-tab>
     </v-tabs>
 
+    <!-- VVV-B: document-load error state (covers Key + Supporting Documents) -->
+    <v-alert
+      v-if="docsError && hasProject"
+      type="error"
+      variant="tonal"
+      density="compact"
+      class="mb-3"
+      icon="mdi-alert-circle-outline"
+    >
+      <div class="d-flex align-center ga-2 flex-wrap">
+        <span>{{ docsError }}</span>
+        <v-spacer />
+        <v-btn size="small" variant="tonal" color="error" prepend-icon="mdi-refresh" :loading="loadingDocs" @click="fetchDocuments">
+          Retry
+        </v-btn>
+      </div>
+    </v-alert>
+
     <v-window v-model="activeSection">
       <!-- ===== Section 1: Key Documents ===== -->
       <v-window-item value="key">
@@ -656,8 +763,6 @@ defineExpose({ fetchDocuments, fetchGallery })
             <CiRepositoryCard
               :title="def.label" :icon="def.icon" :color="def.color"
               :doc-count="keyCardStats[def.typeCode].docCount"
-              :completed-count="keyCardStats[def.typeCode].completedCount"
-              :total-types="keyCardStats[def.typeCode].totalTypes"
               :latest-upload="keyCardStats[def.typeCode].latestUpload"
               :can-upload="canUpload"
               @open="openRepo(def.label, def.icon, def.color, [def.typeCode])"
@@ -668,8 +773,6 @@ defineExpose({ fetchDocuments, fetchGallery })
             <CiRepositoryCard
               title="Other Key Documents" icon="mdi-file-star-outline" color="warning"
               :doc-count="otherKeyStats.docCount"
-              :completed-count="otherKeyStats.completedCount"
-              :total-types="otherKeyStats.totalTypes"
               :latest-upload="otherKeyStats.latestUpload"
               :can-upload="canUpload"
               @open="openRepo('Other Key Documents', 'mdi-file-star-outline', 'warning', otherKeyCodes)"
@@ -681,8 +784,6 @@ defineExpose({ fetchDocuments, fetchGallery })
               <CiRepositoryCard
                 :title="sec.label" icon="mdi-folder-plus-outline" color="blue-grey"
                 :doc-count="customSectionStats[sec.typeCode].docCount"
-                :completed-count="customSectionStats[sec.typeCode].completedCount"
-                :total-types="customSectionStats[sec.typeCode].totalTypes"
                 :latest-upload="customSectionStats[sec.typeCode].latestUpload"
                 :can-upload="canUpload"
                 @open="openRepo(sec.label, 'mdi-folder-plus-outline', 'blue-grey', [sec.typeCode])"
@@ -754,7 +855,7 @@ defineExpose({ fetchDocuments, fetchGallery })
                   <template #prepend><v-icon icon="mdi-image-outline" color="orange" /></template>
                   <v-list-item-title>{{ im.file.name }}</v-list-item-title>
                   <v-list-item-subtitle>{{ im.category }}<span v-if="im.caption"> — {{ im.caption }}</span></v-list-item-subtitle>
-                  <template #append><v-btn icon="mdi-close" size="small" variant="text" color="error" @click="queue.images.splice(i, 1); emitQueue()" /></template>
+                  <template #append><v-btn icon="mdi-close" size="small" variant="text" color="error" @click="deleteGalleryItem(`staged-img-${i}`)" /></template>
                 </v-list-item>
               </v-list>
             </template>
@@ -768,217 +869,199 @@ defineExpose({ fetchDocuments, fetchGallery })
         </v-card>
       </v-window-item>
 
-      <!-- ===== Section 4: Supporting Documents (III-F: CiSupportingDocsRepository removed; folder-only) ===== -->
+      <!-- ===== Section 4: Supporting Documents (SSS-C: repository-card grid, identical to Key Documents) ===== -->
       <v-window-item value="supporting">
         <template v-if="hasProject">
-          <!-- Orders folder repository -->
-          <div class="mb-4">
-            <div class="d-flex align-center ga-2 mb-2">
-              <v-icon size="18" color="deep-orange">mdi-file-document-edit</v-icon>
-              <span class="text-subtitle-2 font-weight-medium">Orders</span>
+          <!-- One repository card per seeded template, grouped by category -->
+          <template v-for="g in supportingTemplateGroups" :key="g.key">
+            <div v-if="g.templates.length" class="d-flex align-center ga-2 mb-2 mt-1">
+              <v-icon size="25" :color="g.color">{{ g.icon }}</v-icon>
+              <span class="text-subtitle-5 font-weight-bold">{{ g.label }}</span>
+              <v-chip size="x-small" variant="tonal" :color="g.color">{{ g.templates.length }}</v-chip>
             </div>
-            <CiFolderRepository
-              :project-id="projectId"
-              group-code="SD_ORDERS"
-              :doc-type-codes="sdOrdersCodes"
-              :documents="documents"
-              :can-edit="canUpload"
-              :can-delete="canDelete"
-              @uploaded="onFolderUploaded"
-              @deleted="onFolderDeleted"
-            />
+            <v-row v-if="g.templates.length" dense class="mb-3">
+              <v-col v-for="t in g.templates" :key="t.code" cols="12" md="6" lg="3">
+                <CiRepositoryCard
+                  :title="t.label" :icon="g.icon" :color="g.color"
+                  :doc-count="supportingCardStats[t.code]?.docCount ?? 0"
+                  :latest-upload="supportingCardStats[t.code]?.latestUpload ?? null"
+                  :template-url="t.url"
+                  :can-upload="canUpload"
+                  @open="openRepo(t.label, g.icon, g.color, [t.code])"
+                  @upload="openRepo(t.label, g.icon, g.color, [t.code], true)"
+                />
+              </v-col>
+            </v-row>
+          </template>
+
+          <!-- Custom Supporting Folders (rendered as repository cards) -->
+          <v-divider class="my-3" />
+          <div class="d-flex align-center ga-2 mb-2 mt-1">
+            <v-icon size="25" color="blue-grey">mdi-folder-multiple-outline</v-icon>
+            <span class="text-subtitle-1 font-weight-bold">Custom Folders</span>
+            <v-chip v-if="customSupportingSections.length" size="x-small" variant="tonal" color="blue-grey">{{ customSupportingSections.length }}</v-chip>
           </div>
+          <v-row dense class="mb-2">
+            <v-col v-for="sec in customSupportingSections" :key="sec.id" cols="12" md="6" lg="3">
+              <div class="position-relative" style="height:100%">
+                <CiRepositoryCard
+                  :title="sec.label" icon="mdi-folder-outline" color="blue-grey"
+                  :doc-count="supportingSectionStats[sec.typeCode]?.docCount ?? 0"
+                  :latest-upload="supportingSectionStats[sec.typeCode]?.latestUpload ?? null"
+                  :can-upload="canUpload"
+                  @open="openRepo(sec.label, 'mdi-folder-outline', 'blue-grey', [sec.typeCode])"
+                  @upload="openRepo(sec.label, 'mdi-folder-outline', 'blue-grey', [sec.typeCode], true)"
+                />
+                <v-btn
+                  v-if="canUpload"
+                  icon="mdi-close" size="x-small" variant="text" color="error"
+                  style="position:absolute;top:4px;right:4px"
+                  @click="removeSupportingSection(sec.id)"
+                />
+              </div>
+            </v-col>
+            <v-col v-if="canUpload" cols="12" md="6" lg="3">
+              <v-card variant="outlined" class="d-flex align-center justify-center" style="height:100%;min-height:140px;border-style:dashed" @click="addSupportingOpen = true">
+                <div class="text-center text-medium-emphasis pa-4" style="cursor:pointer">
+                  <v-icon icon="mdi-folder-plus-outline" size="32" color="blue-grey" />
+                  <div class="text-body-2 mt-1">Add Folder</div>
+                </div>
+              </v-card>
+            </v-col>
+          </v-row>
 
-          <v-divider class="my-4" />
-
-          <!-- Reports & Monitoring folder repository -->
-          <div class="mb-4">
-            <div class="d-flex align-center ga-2 mb-2">
-              <v-icon size="18" color="blue">mdi-clipboard-text</v-icon>
-              <span class="text-subtitle-2 font-weight-medium">Reports & Monitoring</span>
-            </div>
-            <CiFolderRepository
-              :project-id="projectId"
-              group-code="SD_REPORTS"
-              :doc-type-codes="sdReportsCodes"
-              :documents="documents"
-              :can-edit="canUpload"
-              :can-delete="canDelete"
-              @uploaded="onFolderUploaded"
-              @deleted="onFolderDeleted"
-            />
-          </div>
-
-          <v-divider class="my-4" />
-
-          <!-- Certifications folder repository -->
-          <div class="mb-4">
-            <div class="d-flex align-center ga-2 mb-2">
-              <v-icon size="18" color="green">mdi-certificate</v-icon>
-              <span class="text-subtitle-2 font-weight-medium">Certifications & Other Documents</span>
-            </div>
-            <CiFolderRepository
-              :project-id="projectId"
-              group-code="SD_CERTS"
-              :doc-type-codes="sdCertsCodes"
-              :documents="documents"
-              :can-edit="canUpload"
-              :can-delete="canDelete"
-              @uploaded="onFolderUploaded"
-              @deleted="onFolderDeleted"
-            />
-          </div>
-
+          <v-alert type="info" variant="tonal" density="compact" class="mt-2">
+            Each card is a dedicated repository for an official ECO support document. Open a repository to download the official template, upload submissions (version-tracked), search, and review history. PDF/DOCX/XLSX up to 20 MB.
+          </v-alert>
         </template>
         <v-alert v-else type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-information-outline">
           Supporting-document repositories become available once the project is saved.
         </v-alert>
+      </v-window-item>
 
-        <!-- Other Forms: flat repository card + nested folder workspace -->
-        <v-divider class="my-2" />
-        <v-row dense class="mb-3">
-          <v-col cols="12" sm="6" lg="4">
+      <!-- ===== Section 5: CPES Documents (WWW-B + CPES-fix: 3-col, text-wrap, guide) ===== -->
+      <v-window-item v-if="cpesTypes.length" value="cpes">
+        <!-- Blockquote-style guide -->
+        <blockquote class="mb-4 pa-3 rounded" style="border-left:4px solid rgb(var(--v-theme-teal));background:rgba(var(--v-theme-teal),0.06)">
+          <div class="d-flex align-start ga-2">
+            <v-icon icon="mdi-information-outline" color="teal" size="18" class="mt-1 flex-shrink-0" />
+            <div>
+              <div class="text-body-2 font-weight-medium text-teal-darken-2 mb-1">How to use this repository</div>
+              <div class="text-caption text-grey-darken-2">
+                Each card represents a CPES documentary requirement. Open a repository to upload your accomplished document, download the official template, and track submission history.
+                Uploading a document here automatically updates the <strong>Compliance Checklist</strong> status for that requirement.
+              </div>
+            </div>
+          </div>
+        </blockquote>
+
+        <!-- 3-column grid (lg="4" → 3 cards per row on large screens) -->
+        <v-row dense>
+          <v-col v-for="t in cpesTypes" :key="t.typeCode" cols="12" sm="6" lg="4">
             <CiRepositoryCard
-              title="Other Forms" icon="mdi-form-select" color="purple"
-              :doc-count="ecoStats.docCount" :completed-count="ecoStats.completedCount" :total-types="ecoStats.totalTypes" :latest-upload="ecoStats.latestUpload"
+              :title="t.typeLabel"
+              icon="mdi-certificate-outline"
+              color="teal"
+              :doc-count="cpesCardStats[t.typeCode]?.docCount ?? 0"
+              :latest-upload="cpesCardStats[t.typeCode]?.latestUpload ?? null"
+              :template-url="t.templateUrl ?? null"
               :can-upload="canUpload"
-              @open="openRepo('Other Forms', 'mdi-form-select', 'purple', ecoFormCodes)"
-              @upload="openRepo('Other Forms', 'mdi-form-select', 'purple', ecoFormCodes, true)"
+              @open="openRepo(t.typeLabel, 'mdi-certificate-outline', 'teal', [t.typeCode])"
+              @upload="openRepo(t.typeLabel, 'mdi-certificate-outline', 'teal', [t.typeCode], true)"
             />
           </v-col>
         </v-row>
-        <div v-if="hasProject">
-          <div class="d-flex align-center ga-2 mb-2">
-            <v-icon size="16" color="purple">mdi-folder-multiple-outline</v-icon>
-            <span class="text-body-2 font-weight-medium">Other Forms — Folder Repository</span>
-          </div>
-          <CiFolderRepository
-            :project-id="projectId"
-            group-code="ECO_FORMS"
-            :doc-type-codes="ecoFormCodes"
-            :documents="documents"
-            :can-edit="canUpload"
-            :can-delete="canDelete"
-            @uploaded="onFolderUploaded"
-            @deleted="onFolderDeleted"
-          />
-        </div>
-      </v-window-item>
-
-      <!-- ===== Section 5: CPES Documents ===== -->
-      <v-window-item v-if="cpesTypes.length" value="cpes">
-        <CiComplianceRepository
-          :project-id="projectId"
-          :can-edit="canUpload"
-          :can-edit-remarks="canEditRemarks"
-          :documents="documents"
-        />
       </v-window-item>
 
       <!-- ===== Section 6: Compliance Checklist ===== -->
       <v-window-item v-if="hasProject" value="checklist">
         <CiDocumentChecklist
+          ref="checklistRef"
           :project-id="projectId"
           :can-edit="canUpload"
           :documents="documents"
           :group-remarks="checklistGroupRemarks"
           :can-edit-remarks="canEditRemarks"
+          :key-doc-count="allDocs.filter(d => (keyCodes as string[]).includes(d.documentType)).length"
+          :supporting-doc-count="[...sdOrdersCodes, ...sdReportsCodes, ...sdCertsCodes, ...ecoFormCodes].reduce((acc, c) => acc + allDocs.filter(d => d.documentType === c).length, 0)"
+          :gallery-count="gallery.length"
+          :misc-doc-count="otherDocs.length"
           @remarks-update="handleRemarksUpdate"
           @navigate="onChecklistNavigate"
         />
       </v-window-item>
 
       <!-- ===== Section 6: Other Attachments ===== -->
+      <!-- ===== Section 6b: Miscellaneous & Uncategorized (WWW-C: repository-card architecture) ===== -->
       <v-window-item value="other">
-        <v-card variant="outlined">
-          <v-card-title class="d-flex align-center ga-2 text-body-1">
-            <v-icon icon="mdi-paperclip" size="small" />Miscellaneous &amp; Uncategorized
-            <v-chip v-if="otherDocs.length" size="x-small" variant="tonal" color="primary">{{ otherDocs.length }}</v-chip>
-          </v-card-title>
-          <v-divider />
-          <v-card-text>
-            <v-alert type="success" variant="tonal" density="compact" icon="mdi-clipboard-check-outline" class="mb-3">
-              Uploading a document with a recognized type will <strong>automatically update</strong> the Compliance Checklist.
+        <!-- Repository card for all unclassified documents -->
+        <v-row dense class="mb-3">
+          <v-col cols="12" md="6" lg="4">
+            <CiRepositoryCard
+              title="Miscellaneous & Uncategorized"
+              icon="mdi-paperclip"
+              color="blue-grey"
+              :doc-count="otherDocs.length"
+              :latest-upload="miscLatestUpload"
+              :can-upload="canUpload"
+              @open="openMiscRepo()"
+              @upload="openMiscRepo(true)"
+            />
+          </v-col>
+          <v-col cols="12">
+            <v-alert type="info" variant="tonal" density="compact" class="mt-1" icon="mdi-information-outline">
+              Documents without a recognized type are stored here. Use specific repositories (Key Documents, Supporting Documents) for structured submissions.
             </v-alert>
-            <v-list v-if="otherDocs.length" density="compact" class="mb-2">
-              <v-list-item v-for="doc in otherDocs" :key="doc.id">
-                <template #prepend><v-icon icon="mdi-file-document" color="primary" size="small" /></template>
-                <v-list-item-title>
-                  <a v-if="doc.filePath" href="#" class="text-decoration-none" @click.prevent="downloadDoc(doc)">{{ doc.fileName }}</a>
-                  <span v-else>{{ doc.fileName }}</span>
-                </v-list-item-title>
-                <v-list-item-subtitle class="d-flex flex-wrap ga-2 text-caption">
-                  <span>{{ typeCodeToLabel[doc.documentType] || doc.documentType }}</span>
-                  <span v-if="doc.createdAt"><v-icon size="x-small">mdi-calendar</v-icon> {{ formatDate(doc.createdAt) }}</span>
-                </v-list-item-subtitle>
-                <template #append>
-                  <v-btn v-if="canDelete" icon="mdi-delete" size="small" variant="text" color="error" :loading="deletingDoc[doc.id]" @click.stop="deleteDocument(doc.id)" />
-                </template>
-              </v-list-item>
-            </v-list>
-            <p v-else class="text-grey text-body-2 mb-3">No other documents yet.</p>
+          </v-col>
+        </v-row>
 
-            <template v-if="canUpload">
-              <v-btn variant="tonal" color="primary" size="small" :prepend-icon="showOtherUpload ? 'mdi-chevron-up' : 'mdi-upload'" class="mb-2" @click="showOtherUpload = !showOtherUpload">
-                {{ showOtherUpload ? 'Hide Upload' : 'Upload Document' }}
-              </v-btn>
-              <v-expand-transition>
-                <v-row v-if="showOtherUpload" dense>
-                  <v-col cols="12" sm="6"><v-file-input v-model="otherDocFile" label="File (≤ 20 MB)" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip" prepend-icon="mdi-paperclip" show-size variant="outlined" density="comfortable" hide-details /></v-col>
-                  <v-col cols="12" sm="6"><v-select v-model="otherDocType" label="Type" :items="otherDocTypeItems" variant="outlined" density="comfortable" hide-details /></v-col>
-                  <v-col cols="12" sm="8"><v-text-field v-model="otherDocTitle" label="Title (optional)" variant="outlined" density="comfortable" hide-details /></v-col>
-                  <v-col cols="12" sm="4"><v-text-field v-model="otherDocDescription" label="Description" variant="outlined" density="comfortable" hide-details /></v-col>
-                  <v-col cols="12" class="d-flex justify-end"><v-btn color="primary" :disabled="!otherDocFile" prepend-icon="mdi-upload" @click="uploadOtherDoc">{{ isStaging ? 'Stage' : 'Upload' }}</v-btn></v-col>
-                </v-row>
-              </v-expand-transition>
-            </template>
+        <!-- Folder workspace for MISC group -->
+        <template v-if="hasProject">
+          <v-divider class="my-3" />
+          <div class="d-flex align-center ga-2 mb-2">
+            <v-icon size="18" color="blue-grey">mdi-folder-multiple-outline</v-icon>
+            <span class="text-subtitle-2 font-weight-medium">Folder Workspace</span>
+          </div>
+          <CiFolderRepository
+            :project-id="projectId"
+            group-code="MISC"
+            :documents="documents"
+            :can-edit="canUpload"
+            :can-delete="canDelete"
+            @uploaded="onFolderUploaded"
+            @deleted="onFolderDeleted"
+          />
+        </template>
 
-            <!-- HHH-G: Folder workspace for Misc section -->
-            <template v-if="hasProject">
-              <v-divider class="my-4" />
-              <div class="text-overline text-grey-darken-1 mb-2">FOLDER WORKSPACE</div>
-              <CiFolderRepository
-                :project-id="projectId"
-                group-code="MISC"
-                :documents="documents"
-                :can-edit="canUpload"
-                :can-delete="canDelete"
-                @uploaded="onFolderUploaded"
-                @deleted="onFolderDeleted"
-              />
+        <!-- External links (preserved) -->
+        <v-divider class="my-4" />
+        <div class="text-overline text-medium-emphasis mb-2">EXTERNAL LINKS</div>
+        <v-list v-if="documentLinks.length" density="compact" class="mb-3">
+          <v-list-item v-for="doc in documentLinks" :key="doc.id">
+            <template #prepend><v-icon icon="mdi-google-drive" color="info" /></template>
+            <v-list-item-title>
+              <a v-if="doc.filePath" :href="doc.filePath" target="_blank" rel="noopener" class="text-decoration-none">{{ doc.fileName || doc.filePath }}</a>
+              <span v-else>{{ doc.fileName }}</span>
+            </v-list-item-title>
+            <template #append>
+              <v-btn v-if="canDelete" icon="mdi-delete" size="small" variant="text" color="error" :loading="deletingDoc[doc.id]" @click.stop="deleteDocument(doc.id)" />
             </template>
-
-            <!-- External links -->
-            <v-divider class="my-4" />
-            <div class="text-overline text-medium-emphasis mb-2">EXTERNAL LINKS</div>
-            <v-list v-if="documentLinks.length" density="compact" class="mb-3">
-              <v-list-item v-for="doc in documentLinks" :key="doc.id">
-                <template #prepend><v-icon icon="mdi-google-drive" color="info" /></template>
-                <v-list-item-title>
-                  <a v-if="doc.filePath" :href="doc.filePath" target="_blank" rel="noopener" class="text-decoration-none">{{ doc.fileName || doc.filePath }}</a>
-                  <span v-else>{{ doc.fileName }}</span>
-                </v-list-item-title>
-                <template #append>
-                  <v-btn v-if="canDelete" icon="mdi-delete" size="small" variant="text" color="error" :loading="deletingDoc[doc.id]" @click.stop="deleteDocument(doc.id)" />
-                </template>
-              </v-list-item>
-            </v-list>
-            <template v-if="isStaging && queue.links.length">
-              <v-list density="compact" class="mb-3">
-                <v-list-item v-for="(lk, i) in queue.links" :key="`stg-lk-${i}`">
-                  <template #prepend><v-icon icon="mdi-link-variant" color="orange" /></template>
-                  <v-list-item-title>{{ lk.title || lk.url }}</v-list-item-title>
-                  <template #append><v-btn icon="mdi-close" size="small" variant="text" color="error" @click="queue.links.splice(i, 1); emitQueue()" /></template>
-                </v-list-item>
-              </v-list>
-            </template>
-            <v-row v-if="canUpload" dense>
-              <v-col cols="12" sm="7"><v-text-field v-model="linkUrl" label="External URL" placeholder="https://..." prepend-inner-icon="mdi-link" variant="outlined" density="comfortable" hide-details /></v-col>
-              <v-col cols="12" sm="3"><v-text-field v-model="linkTitle" label="Title" variant="outlined" density="comfortable" hide-details /></v-col>
-              <v-col cols="12" sm="2"><v-btn color="info" block prepend-icon="mdi-link-plus" :disabled="!linkUrl" @click="submitLink">{{ isStaging ? 'Stage' : 'Add' }}</v-btn></v-col>
-            </v-row>
-          </v-card-text>
-        </v-card>
+          </v-list-item>
+        </v-list>
+        <template v-if="isStaging && queue.links.length">
+          <v-list density="compact" class="mb-3">
+            <v-list-item v-for="(lk, i) in queue.links" :key="`stg-lk-${i}`">
+              <template #prepend><v-icon icon="mdi-link-variant" color="orange" /></template>
+              <v-list-item-title>{{ lk.title || lk.url }}</v-list-item-title>
+              <template #append><v-btn icon="mdi-close" size="small" variant="text" color="error" @click="removeStagedLink(i)" /></template>
+            </v-list-item>
+          </v-list>
+        </template>
+        <v-row v-if="canUpload" dense>
+          <v-col cols="12" sm="7"><v-text-field v-model="linkUrl" label="External URL" placeholder="https://..." prepend-inner-icon="mdi-link" variant="outlined" density="comfortable" hide-details /></v-col>
+          <v-col cols="12" sm="3"><v-text-field v-model="linkTitle" label="Title" variant="outlined" density="comfortable" hide-details /></v-col>
+          <v-col cols="12" sm="2"><v-btn color="info" block prepend-icon="mdi-link-plus" :disabled="!linkUrl" @click="submitLink">{{ isStaging ? 'Stage' : 'Add' }}</v-btn></v-col>
+        </v-row>
       </v-window-item>
 
       <!-- ===== Section 7: Audit Log ===== -->
@@ -1041,6 +1124,31 @@ defineExpose({ fetchDocuments, fetchGallery })
           <v-spacer />
           <v-btn variant="text" @click="addSectionOpen = false">Cancel</v-btn>
           <v-btn color="primary" :loading="savingSection" :disabled="!newSectionLabel.trim()" @click="saveCustomSection">Add</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- SSS-C: Add custom Supporting Document folder -->
+    <v-dialog v-model="addSupportingOpen" max-width="420">
+      <v-card>
+        <v-card-title class="text-body-1">Add Supporting Document Folder</v-card-title>
+        <v-divider />
+        <v-card-text>
+          <v-text-field
+            v-model="newSupportingLabel"
+            label="Folder name"
+            placeholder="e.g. Notice to Proceed"
+            variant="outlined"
+            density="comfortable"
+            autofocus
+            hide-details
+            @keyup.enter="saveSupportingSection"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="addSupportingOpen = false">Cancel</v-btn>
+          <v-btn color="primary" :loading="savingSupporting" :disabled="!newSupportingLabel.trim()" @click="saveSupportingSection">Add</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

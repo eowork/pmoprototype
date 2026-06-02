@@ -65,6 +65,12 @@ export default defineNuxtConfig({
         target: 'http://localhost:3000/uploads',
         changeOrigin: true,
       },
+      // UUU-A: Serve seeded document templates from NestJS static dir (/templates).
+      // Without this, template download links hit the Nuxt dev server and 404.
+      '/templates': {
+        target: 'http://localhost:3000/templates',
+        changeOrigin: true,
+      },
     },
   },
 })

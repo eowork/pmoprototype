@@ -31,9 +31,15 @@ export class ActivityLogService {
     entityId: string,
     metadata?: Record<string, unknown>,
   ): Promise<void> {
+    // SSS-FIX: callers invoke this fire-and-forget (not awaited), so its
+    // persistAndFlush must NOT run on the shared request-scoped EntityManager —
+    // its implicit transaction would race with the caller's subsequent queries
+    // (e.g. findOne after update), producing "Transaction query already complete".
+    // Forking gives this write its own UoW + connection, fully isolated.
+    const em = this.em.fork();
     try {
-      const userRef = this.em.getReference(User, user.sub);
-      const log = this.repo.create({
+      const userRef = em.getReference(User, user.sub);
+      const log = em.create(ActivityLog, {
         user: userRef,
         userEmail: user.email,
         userName: user.email,
@@ -43,7 +49,7 @@ export class ActivityLogService {
         metadata,
         createdAt: new Date(),
       });
-      await this.em.persistAndFlush(log);
+      await em.persistAndFlush(log);
     } catch (err) {
       this.logger.warn(
         `[ActivityLog] Failed to record ${action} on ${entityType}:${entityId} — ${(err as Error).message}`,

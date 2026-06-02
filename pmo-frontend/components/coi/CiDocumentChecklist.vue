@@ -18,12 +18,21 @@ interface Props {
   documents?: DocumentItem[]
   groupRemarks?: Record<string, GroupRemarkEntry[]>
   canEditRemarks?: boolean
+  // WWW-G: cross-section summary counters from CiAttachmentHub
+  keyDocCount?: number
+  supportingDocCount?: number
+  galleryCount?: number
+  miscDocCount?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
   documents: () => [],
   groupRemarks: () => ({}),
   canEditRemarks: false,
+  keyDocCount: 0,
+  supportingDocCount: 0,
+  galleryCount: 0,
+  miscDocCount: 0,
 })
 
 const emit = defineEmits<{
@@ -88,6 +97,13 @@ const form = ref({
 const authStore = useAuthStore()
 const draftRemark = ref<Record<string, string>>({})
 const savingRemark = reactive<Record<string, boolean>>({})
+
+// MMM-D: per-item remark editor visibility (toggled from the kebab "Remarks" action)
+const showRemark = reactive<Record<string, boolean>>({})
+function toggleRemark(id: string) {
+  draftRemark.value[id] = draftRemark.value[id] ?? ''
+  showRemark[id] = !showRemark[id]
+}
 
 interface RemarkEntry { text: string; author?: string | null; timestamp: string }
 
@@ -246,6 +262,14 @@ function openEdit(item: ChecklistItem) {
   dialog.value = true
 }
 
+// NNN-A: read-only status view (for non-editors)
+const viewStatusDialog = ref(false)
+const viewStatusItem = ref<ChecklistItem | null>(null)
+function openViewStatus(item: ChecklistItem) {
+  viewStatusItem.value = item
+  viewStatusDialog.value = true
+}
+
 async function save() {
   if (!editing.value) return
   submitting.value = true
@@ -358,6 +382,35 @@ defineExpose({ refresh: fetchChecklist })
 
 <template>
   <div>
+    <!-- WWW-G: Cross-section attachment overview (master summary) -->
+    <v-card variant="outlined" class="mb-4" rounded="lg">
+      <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
+        <v-icon icon="mdi-view-dashboard-outline" size="small" color="primary" />
+        <span class="text-subtitle-2 font-weight-medium">Attachment Overview</span>
+        <v-chip size="x-small" variant="tonal" color="primary">All Sections</v-chip>
+      </v-card-title>
+      <v-card-text class="py-3">
+        <v-row dense>
+          <v-col cols="6" sm="3">
+            <div class="text-caption text-grey">Key Documents</div>
+            <div class="text-body-1 font-weight-bold">{{ keyDocCount ?? 0 }} <span class="text-caption text-grey">files</span></div>
+          </v-col>
+          <v-col cols="6" sm="3">
+            <div class="text-caption text-grey">Supporting Docs</div>
+            <div class="text-body-1 font-weight-bold">{{ supportingDocCount ?? 0 }} <span class="text-caption text-grey">files</span></div>
+          </v-col>
+          <v-col cols="6" sm="3">
+            <div class="text-caption text-grey">Gallery</div>
+            <div class="text-body-1 font-weight-bold">{{ galleryCount ?? 0 }} <span class="text-caption text-grey">images</span></div>
+          </v-col>
+          <v-col cols="6" sm="3">
+            <div class="text-caption text-grey">Miscellaneous</div>
+            <div class="text-body-1 font-weight-bold">{{ miscDocCount ?? 0 }} <span class="text-caption text-grey">files</span></div>
+          </v-col>
+        </v-row>
+      </v-card-text>
+    </v-card>
+
     <!-- Compliance summary card -->
     <v-card class="mb-4">
       <v-card-title class="d-flex align-center ga-2">
@@ -365,31 +418,22 @@ defineExpose({ refresh: fetchChecklist })
         <span>Document Compliance Checklist</span>
       </v-card-title>
       <v-divider />
-      <v-card-text>
-        <v-row>
-          <v-col cols="6" sm="3">
-            <p class="text-caption text-grey mb-1">Total Items</p>
-            <p class="text-subtitle-2 font-weight-bold">{{ summary.total }}</p>
-          </v-col>
-          <v-col cols="6" sm="3">
-            <p class="text-caption text-grey mb-1">Submitted</p>
-            <p class="text-subtitle-2 font-weight-bold">
-              {{ summary.submitted }} / {{ summary.total }}
-            </p>
-          </v-col>
-          <v-col cols="6" sm="3">
-            <p class="text-caption text-grey mb-1">Approved</p>
-            <p class="text-subtitle-2 font-weight-bold text-success">
-              {{ summary.approved }}
-            </p>
-          </v-col>
-          <v-col cols="6" sm="3">
-            <p class="text-caption text-grey mb-1">Required Compliance</p>
-            <p class="text-subtitle-2 font-weight-bold">
-              {{ summary.requiredApproved }} / {{ summary.required }}
-            </p>
-          </v-col>
-        </v-row>
+      <v-card-text class="py-3">
+        <!-- MMM-D4: compact single-row chip summary -->
+        <div class="d-flex flex-wrap align-center ga-2">
+          <v-chip size="small" variant="tonal" color="grey-darken-1" prepend-icon="mdi-format-list-checks">
+            Total {{ summary.total }}
+          </v-chip>
+          <v-chip size="small" variant="tonal" color="info" prepend-icon="mdi-send">
+            Submitted {{ summary.submitted }}/{{ summary.total }}
+          </v-chip>
+          <v-chip size="small" variant="tonal" color="success" prepend-icon="mdi-check-circle">
+            Approved {{ summary.approved }}
+          </v-chip>
+          <v-chip size="small" variant="tonal" color="error" prepend-icon="mdi-asterisk">
+            Required {{ summary.requiredApproved }}/{{ summary.required }}
+          </v-chip>
+        </div>
       </v-card-text>
     </v-card>
 
@@ -429,128 +473,164 @@ defineExpose({ refresh: fetchChecklist })
           </div>
         </v-expansion-panel-title>
         <v-expansion-panel-text>
-            <v-list density="compact" class="pa-0">
-              <v-list-item
-                v-for="item in g.items"
-                :key="item.id"
-                lines="two"
-                class="px-0 py-1"
-              >
-                <template #prepend>
-                  <v-icon
-                    :icon="item.submissionStatus === 'NOT_SUBMITTED' ? 'mdi-circle-outline' : 'mdi-check-circle'"
-                    :color="statusColor(item.submissionStatus)"
-                    size="small"
-                    class="mr-1"
-                  />
-                </template>
-                <v-list-item-title class="text-body-2 font-weight-medium">
-                  {{ item.documentType?.typeLabel || 'Unknown type' }}
-                  <v-icon
-                    v-if="item.documentType?.isRequired"
-                    icon="mdi-asterisk"
-                    size="x-small"
-                    color="error"
-                    class="ml-1"
-                  />
-                </v-list-item-title>
-                <v-list-item-subtitle>
-                  <div class="d-flex align-center flex-wrap ga-1 mt-0">
-                    <v-chip :color="statusColor(item.submissionStatus)" size="small" variant="tonal">
-                      {{ statusLabel(item.submissionStatus) }}
+            <!-- MMM-D: compact grid rows (type code | label | status | date | kebab) -->
+            <div class="pa-0">
+              <div v-for="item in g.items" :key="item.id" class="border-b">
+                <!-- Main row -->
+                <div class="d-flex align-center ga-2 py-2 px-1">
+                  <!-- Col 1: required badge + type code -->
+                  <div style="min-width: 92px; max-width: 92px">
+                    <v-chip size="x-small" :color="item.documentType?.isRequired ? 'error' : 'grey'" variant="tonal">
+                      {{ item.documentType?.isRequired ? 'Required' : 'Optional' }}
                     </v-chip>
+                    <div class="text-caption text-grey-darken-1 mt-1 text-truncate">{{ item.documentType?.typeCode }}</div>
+                  </div>
+                  <!-- Col 2: type label (+ remark count indicator) -->
+                  <div class="flex-grow-1 d-flex align-center ga-2" style="min-width: 0">
+                    <span class="text-body-2 font-weight-medium text-truncate">{{ item.documentType?.typeLabel || 'Unknown type' }}</span>
                     <v-chip
-                      v-if="item.documentType?.templateUrl"
+                      v-if="parseItemRemarks(item).length"
                       size="x-small"
-                      color="info"
                       variant="tonal"
-                      prepend-icon="mdi-file-download"
-                      :href="item.documentType.templateUrl"
-                      target="_blank"
-                      rel="noopener"
-                      tag="a"
-                      class="text-decoration-none"
+                      color="blue-grey"
+                      prepend-icon="mdi-comment-text-outline"
+                      class="flex-shrink-0 cursor-pointer"
+                      @click="toggleRemark(item.id)"
                     >
-                      Download Template
-                    </v-chip>
-                    <v-chip
-                      v-if="linkedDoc(item)"
-                      size="x-small"
-                      color="primary"
-                      variant="tonal"
-                      prepend-icon="mdi-download"
-                      :href="linkedDoc(item)!.filePath"
-                      target="_blank"
-                      rel="noopener"
-                      tag="a"
-                      class="text-decoration-none"
-                    >
-                      {{ linkedDoc(item)!.fileName }}
+                      {{ parseItemRemarks(item).length }}
                     </v-chip>
                   </div>
-                  <!-- HHH-H: List-based item remarks (all roles see history; canEditRemarks can add) -->
-                  <div class="mt-2">
-                    <!-- Remark history list -->
-                    <div v-if="parseItemRemarks(item).length" class="d-flex flex-column ga-1 mb-2">
-                      <div
-                        v-for="(remark, ri) in parseItemRemarks(item)"
-                        :key="ri"
-                        class="d-flex align-start ga-2 pa-2 bg-grey-lighten-5 rounded text-body-2"
-                      >
-                        <v-icon size="14" color="grey" class="mt-1 flex-shrink-0">mdi-comment-text-outline</v-icon>
-                        <div class="flex-grow-1">
-                          <div class="text-body-2">{{ remark.text }}</div>
-                          <div class="text-caption text-grey mt-1">
-                            <span v-if="remark.author">{{ remark.author }}</span>
-                            <span v-if="remark.author && remark.timestamp"> · </span>
-                            <span v-if="remark.timestamp">{{ formatRemarkDate(remark.timestamp) }}</span>
-                          </div>
+                  <!-- Col 3: status chip -->
+                  <v-chip :color="statusColor(item.submissionStatus)" size="small" variant="tonal" style="min-width: 110px; justify-content: center" class="flex-shrink-0">
+                    {{ statusLabel(item.submissionStatus) }}
+                  </v-chip>
+                  <!-- Col 4: latest date -->
+                  <div class="text-caption text-grey d-none d-sm-block flex-shrink-0" style="min-width: 92px; text-align: right">
+                    {{ item.submittedAt ? formatDate(item.submittedAt) : '—' }}
+                  </div>
+                  <!-- Col 5: kebab menu (replaces inline Edit + History buttons) -->
+                  <v-menu location="bottom end">
+                    <template #activator="{ props: menuProps }">
+                      <v-btn v-bind="menuProps" icon="mdi-dots-vertical" size="small" variant="text" color="grey-darken-1" class="flex-shrink-0" />
+                    </template>
+                    <v-list density="compact" nav>
+                      <v-list-item
+                        prepend-icon="mdi-folder-arrow-right-outline"
+                        title="Navigate"
+                        @click="emit('navigate', { groupCode: item.documentType?.groupCode, typeCode: item.documentType?.typeCode })"
+                      />
+                      <!-- NNN-A: open the linked submission file (only when one is attached) -->
+                      <v-list-item
+                        v-if="linkedDoc(item)"
+                        prepend-icon="mdi-open-in-new"
+                        title="Open Linked File"
+                        :href="linkedDoc(item)!.filePath"
+                        target="_blank"
+                        rel="noopener"
+                        tag="a"
+                      />
+                      <v-list-item
+                        v-if="item.documentType?.templateUrl"
+                        prepend-icon="mdi-file-download"
+                        title="Download Template"
+                        :href="item.documentType.templateUrl"
+                        target="_blank"
+                        rel="noopener"
+                        tag="a"
+                      />
+                      <v-list-item
+                        v-if="canEdit"
+                        prepend-icon="mdi-pencil-outline"
+                        title="Update Status"
+                        @click="openEdit(item)"
+                      />
+                      <!-- NNN-A: read-only status view for non-editors -->
+                      <v-list-item
+                        v-else
+                        prepend-icon="mdi-eye-outline"
+                        title="View Status"
+                        @click="openViewStatus(item)"
+                      />
+                      <v-list-item
+                        v-if="canEditRemarks"
+                        prepend-icon="mdi-comment-text-outline"
+                        title="Remarks"
+                        @click="toggleRemark(item.id)"
+                      />
+                      <v-list-item
+                        prepend-icon="mdi-history"
+                        title="Submission History"
+                        @click="openHistory(item)"
+                      />
+                    </v-list>
+                  </v-menu>
+                </div>
+
+                <!-- Linked file chip (if a document is attached) -->
+                <div v-if="linkedDoc(item)" class="px-1 pb-1">
+                  <v-chip
+                    size="x-small"
+                    color="primary"
+                    variant="tonal"
+                    prepend-icon="mdi-download"
+                    :href="linkedDoc(item)!.filePath"
+                    target="_blank"
+                    rel="noopener"
+                    tag="a"
+                    class="text-decoration-none"
+                  >
+                    {{ linkedDoc(item)!.fileName }}
+                  </v-chip>
+                </div>
+
+                <!-- Inline remark editor (toggled via kebab "Remarks") -->
+                <div v-if="showRemark[item.id]" class="pa-2 bg-grey-lighten-5">
+                  <!-- Remark history -->
+                  <div v-if="parseItemRemarks(item).length" class="d-flex flex-column ga-1 mb-2">
+                    <div
+                      v-for="(remark, ri) in parseItemRemarks(item)"
+                      :key="ri"
+                      class="d-flex align-start ga-2 pa-2 bg-white rounded text-body-2"
+                    >
+                      <v-icon size="14" color="grey" class="mt-1 flex-shrink-0">mdi-comment-text-outline</v-icon>
+                      <div class="flex-grow-1">
+                        <div class="text-body-2">{{ remark.text }}</div>
+                        <div class="text-caption text-grey mt-1">
+                          <span v-if="remark.author">{{ remark.author }}</span>
+                          <span v-if="remark.author && remark.timestamp"> · </span>
+                          <span v-if="remark.timestamp">{{ formatRemarkDate(remark.timestamp) }}</span>
                         </div>
                       </div>
                     </div>
-                    <!-- Add remark input (canEditRemarks) -->
-                    <div v-if="canEditRemarks" class="d-flex align-center ga-1">
-                      <v-text-field
-                        v-model="draftRemark[item.id]"
-                        placeholder="Add a remark…"
-                        density="compact"
-                        variant="outlined"
-                        hide-details
-                        single-line
-                        style="flex: 1"
-                        @keydown.enter="addItemRemark(item)"
-                      />
-                      <v-btn
-                        size="small"
-                        color="primary"
-                        variant="tonal"
-                        :loading="savingRemark[item.id]"
-                        :disabled="!(draftRemark[item.id] ?? '').trim()"
-                        icon="mdi-send"
-                        @click="addItemRemark(item)"
-                      />
-                    </div>
                   </div>
-                </v-list-item-subtitle>
-                <template #append>
-                  <div class="d-flex flex-column align-center ga-0">
-                    <v-btn
-                      icon="mdi-folder-arrow-right-outline" size="x-small" variant="text" color="primary"
-                      @click="emit('navigate', { groupCode: item.documentType?.groupCode, typeCode: item.documentType?.typeCode })"
+                  <!-- Add remark input (canEditRemarks) -->
+                  <div v-if="canEditRemarks" class="d-flex align-center ga-1">
+                    <v-text-field
+                      v-model="draftRemark[item.id]"
+                      placeholder="Add a remark…"
+                      density="compact"
+                      variant="outlined"
+                      hide-details
+                      single-line
+                      style="flex: 1"
+                      @keydown.enter="addItemRemark(item)"
                     />
-                    <v-btn icon="mdi-history" size="x-small" variant="text" color="grey" @click="openHistory(item)" />
                     <v-btn
-                      v-if="canEdit"
-                      icon="mdi-pencil"
-                      size="x-small"
-                      variant="text"
-                      :loading="!!updating[item.id]"
-                      @click="openEdit(item)"
+                      size="small"
+                      color="primary"
+                      variant="tonal"
+                      :loading="savingRemark[item.id]"
+                      :disabled="!(draftRemark[item.id] ?? '').trim()"
+                      icon="mdi-send"
+                      @click="addItemRemark(item)"
                     />
                   </div>
-                </template>
-              </v-list-item>
-            </v-list>
+                  <div v-else-if="!parseItemRemarks(item).length" class="text-caption text-grey">
+                    No remarks yet.
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <!-- KV-D3: Per-group remarks field (always at card bottom) -->
             <div v-if="canEditRemarks || remarksForGroup(g.groupCode).length" class="mt-2 pt-2 border-t">
@@ -713,6 +793,31 @@ defineExpose({ refresh: fetchChecklist })
           <v-spacer />
           <v-btn variant="text" :disabled="submitting" @click="dialog = false">Cancel</v-btn>
           <v-btn color="primary" :loading="submitting" @click="save">Save</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- NNN-A: Read-only status view (non-editors) -->
+    <v-dialog v-model="viewStatusDialog" max-width="480">
+      <v-card>
+        <v-card-title>Submission Status</v-card-title>
+        <v-card-subtitle>{{ viewStatusItem?.documentType?.typeLabel }}</v-card-subtitle>
+        <v-divider />
+        <v-card-text class="pt-4">
+          <v-chip :color="statusColor(viewStatusItem?.submissionStatus ?? 'NOT_SUBMITTED')" class="mb-3" variant="tonal">
+            {{ statusLabel(viewStatusItem?.submissionStatus ?? 'NOT_SUBMITTED') }}
+          </v-chip>
+          <p v-if="viewStatusItem?.reviewNotes" class="text-body-2 mb-2">{{ viewStatusItem.reviewNotes }}</p>
+          <p v-if="viewStatusItem?.submittedAt" class="text-caption text-grey">Submitted: {{ formatDate(viewStatusItem.submittedAt) }}</p>
+          <p v-if="viewStatusItem?.reviewedAt" class="text-caption text-grey">Reviewed: {{ formatDate(viewStatusItem.reviewedAt) }}</p>
+          <p v-if="viewStatusItem?.expiryDate" class="text-caption text-grey">Expires: {{ formatDate(viewStatusItem.expiryDate) }}</p>
+          <p v-if="!viewStatusItem?.reviewNotes && !viewStatusItem?.submittedAt" class="text-caption text-grey">
+            No submission recorded yet.
+          </p>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="viewStatusDialog = false">Close</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

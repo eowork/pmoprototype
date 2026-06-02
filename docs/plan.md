@@ -1,7 +1,7 @@
 ﻿# [Active Plan] PMO Dashboard — COI Module Development
 > **Governance:** ACE v2.4
-> **Phase:** JA–LU ✅ | **MA–PM ✅** | **QA–ZZ ✅** | **AAA–EEE ✅** | **FFF-A/B/C ✅ | FFF-D–G ✅** | **GGG-A–H ✅ | GGG-R ✅ | GGG-S ✅** | **HHH-A–J ✅** | **III-A–G ✅**
-> **Last Updated:** 2026-05-28 (ALL COI PHASES ✅ COMPLETE — FFF/GGG/HHH/III fully implemented; backend fix deployed; folder system, view modes, analytics, checklist, repository refactor done. Branch: pmo-coi)
+> **Phase:** JA–LU ✅ | **MA–PM ✅** | **QA–ZZ ✅** | **AAA–EEE ✅** | **FFF-A/B/C ✅ | FFF-D–G ✅** | **GGG-A–H ✅ | GGG-R ✅ | GGG-S ✅** | **HHH-A–J ✅** | **III-A–G ✅** | **MR-A ✅** | **LLL-A–I ✅** | **MMM-A–G ✅** | **NNN ✅ | OOO ✅** | **PPP ⬜** | **QQQ ⬜** | **RRR ⬜** | **SSS ⬜** | **TTT ✅ (cherry-picked)** | **UUU ✅** | **VVV ✅** | **WWW ✅**
+> **Last Updated:** 2026-06-02 (WWW Phase 3 complete: progress bar removed, CPES→card, Misc→card, autosave (new+edit), modal guidance, checklist master summary; vue-tsc clean)
 > **Archive:** `docs/plan_Artifact_April_2026.md` (full history) | `docs/archive/` (pre-JA phases) | `docs/archive/plan_completed_phases_JA_to_JR_2026-05-13.md` (KL-B target)
 > **Research Reference:** `research.md` Architecture Reference + Sections 2.129–2.235
 
@@ -30082,3 +30082,4392 @@ Confirm `CiAttachmentHub mode="view"` in detail page: `canUpload=false`, `canDel
 | FFF-D | Checklist as tracking-only | ✅ verified (GGG-D confirmed) |
 | FFF-G | Detail/New/Edit synchronization verification | ✅ verified — tab orders match; CiAttachmentHub modes correct |
 | detail-[id].vue milestone.title bug | TS error from pre-existing UIMilestone.name mismatch | ✅ fixed |
+
+---
+
+# Phase LLL — COI INSERT Fix + Index Refactor + Template URL + Repository Audit
+
+**Status:** ✅ Phase 3 COMPLETE — Groups 1–5 implemented & TypeScript-verified (2026-06-01). Backend tsc exit 0; frontend vue-tsc 0 new errors in touched files. Pending: operator runs migration + copies 15 template .docx files + smoke test.
+**Research Reference:** §2.262 (research.md)
+**Last Updated:** 2026-06-01
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase LLL)
+
+| ID | Directive |
+|----|-----------|
+| LLL-D1 | INSERT fix is a one-character change — add one `?` to the VALUES string only. Do NOT restructure the INSERT, reorder columns, or touch the values array. |
+| LLL-D2 | Advanced filters are additive — do not remove search, status, campus, or existing date filters. |
+| LLL-D3 | Template URL migration uses `UPDATE … WHERE type_code = ?` — never INSERT or DELETE taxonomy rows. |
+| LLL-D4 | `pmo-backend/public/templates/` stores template files served as static assets. No auth required. Operator must copy the .docx files manually — Claude cannot write binary files. |
+| LLL-D5 | Audit logging uses `this.fireLog()` fire-and-forget — never throws, never blocks the primary operation. |
+| LLL-D6 | `CiAttachmentHub` (ZY-D1) is the ONLY attachment renderer. CiFolderRepository is a child component within it — no standalone use outside the hub. |
+| LLL-D7 | `api.del()` (not `api.delete()`) for all DELETE calls in frontend components. |
+| LLL-D8 | The `analytics/summary` backend endpoint must be called in parallel with `findAll` on index load — NOT as a replacement for findAll (list still needs all records for filtering/sorting). |
+
+---
+
+## GROUP 1 — Critical INSERT Bug Fix
+
+### LLL-A: Fix Missing `?` Placeholder in `create()` INSERT
+
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts`
+
+**Root cause (§2.262-A):** 61 columns listed, VALUES clause has 60 `?`, values array has 61 items. PostgreSQL raises `INSERT has more target columns than expressions` at query preparation.
+
+**A1: Locate the VALUES string**
+
+In `async create()`, find the INSERT statement approximately at line 695:
+```
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+```
+
+**A2: Add the 61st `?`**
+
+Change the VALUES clause to have 61 `?` placeholders:
+```
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+```
+(61 `?` separated by `, `)
+
+**A3: Verify parity**
+
+After edit, run:
+```bash
+node -e "const fs=require('fs');const c=fs.readFileSync('pmo-backend/src/construction-projects/construction-projects.service.ts','utf-8');const i=c.indexOf('INSERT INTO construction_projects');const chunk=c.substring(i,i+3000);const colEnd=chunk.indexOf('VALUES');const cols=chunk.substring(chunk.indexOf('(')+1,colEnd).trim().replace(/\s*\)\s*$/,'').split(',').length;const vStart=chunk.indexOf('VALUES (')+8;const vEnd=chunk.indexOf('RETURNING',vStart);const ph=(chunk.substring(vStart,vEnd).match(/\?/g)||[]).length;console.log('Cols:',cols,'Placeholders:',ph,'Match:',cols===ph);"
+```
+Expected: `Cols: 61 Placeholders: 61 Match: true`
+
+### LLL-A Verification
+- [ ] Node parity script returns `Match: true`
+- [ ] `POST /api/construction-projects` with valid payload returns 201 (no 500)
+- [ ] New project appears in project list
+- [ ] Edit and delete of existing projects unaffected
+
+---
+
+## GROUP 2 — COI Index UI Refactor
+
+### LLL-B: Filter Bar UI Compactness
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+
+**Current pain:** Two-row filter block (filter row + sort/view row) with 6 filter inputs always visible.
+
+**B1: Collapse to single primary bar**
+
+Replace the two `v-row` blocks (filter row + sort/view row) with a single compact row:
+
+```vue
+<v-row dense align="center" class="mb-3">
+  <!-- Search: flexible width -->
+  <v-col cols="12" sm="4" md="4">
+    <v-text-field v-model="search" placeholder="Search project name, code, campus…"
+      prepend-inner-icon="mdi-magnify" variant="outlined" density="compact" clearable hide-details single-line />
+  </v-col>
+
+  <!-- Status filter -->
+  <v-col cols="6" sm="2" md="2">
+    <v-select v-model="filterStatus" :items="statusFilterOptions" label="Status"
+      variant="outlined" density="compact" hide-details />
+  </v-col>
+
+  <!-- Campus filter -->
+  <v-col cols="6" sm="2" md="2">
+    <v-select v-model="filterCampus" :items="campusFilterOptions" label="Campus"
+      variant="outlined" density="compact" hide-details />
+  </v-col>
+
+  <!-- Spacer + controls group -->
+  <v-col cols="12" sm="4" md="4" class="d-flex align-center justify-end ga-2">
+    <!-- Advanced filters toggle -->
+    <v-btn
+      :color="showAdvancedFilters ? 'primary' : 'grey-darken-1'"
+      :variant="showAdvancedFilters ? 'tonal' : 'text'"
+      size="small"
+      prepend-icon="mdi-filter-variant"
+      @click="showAdvancedFilters = !showAdvancedFilters"
+    >Advanced</v-btn>
+    <!-- Clear -->
+    <v-btn v-if="hasActiveFilters" variant="text" size="small" icon="mdi-filter-off"
+      color="grey-darken-1" title="Clear filters" @click="clearFilters" />
+    <!-- Sort direction -->
+    <v-btn
+      :icon="sortDir === 'asc' ? 'mdi-sort-ascending' : 'mdi-sort-descending'"
+      size="small" variant="text" color="grey-darken-1"
+      :title="sortDir === 'asc' ? 'Ascending' : 'Descending'"
+      @click="sortDir = sortDir === 'asc' ? 'desc' : 'asc'"
+    />
+    <!-- Sort key -->
+    <v-select v-model="sortKey" :items="sortOptions" density="compact" variant="outlined"
+      hide-details style="max-width:160px" />
+    <!-- Project count -->
+    <span class="text-body-2 text-grey-darken-1 text-no-wrap">
+      {{ filteredProjects.length }} project{{ filteredProjects.length !== 1 ? 's' : '' }}
+    </span>
+    <!-- View toggle -->
+    <v-btn-toggle v-model="viewMode" density="compact" variant="outlined" divided mandatory color="primary">
+      <v-btn value="list" size="small" :icon="true" title="List view"><v-icon size="18">mdi-format-list-bulleted</v-icon></v-btn>
+      <v-btn value="card" size="small" :icon="true" title="Card view"><v-icon size="18">mdi-view-grid-outline</v-icon></v-btn>
+      <v-btn value="table" size="small" :icon="true" title="Table view"><v-icon size="18">mdi-table</v-icon></v-btn>
+    </v-btn-toggle>
+  </v-col>
+</v-row>
+```
+
+Add `showAdvancedFilters = ref(false)` to script.
+
+**B2: Advanced filters panel (collapsible)**
+
+Below the primary bar, add a `v-expand-transition`:
+
+```vue
+<v-expand-transition>
+  <div v-if="showAdvancedFilters">
+    <v-card variant="tonal" color="grey-lighten-4" class="mb-3 pa-3">
+      <v-row dense>
+        <!-- Project Code filter -->
+        <v-col cols="12" sm="6" md="3">
+          <v-text-field v-model="filterProjectCode" label="Project Code / ID"
+            variant="outlined" density="compact" hide-details clearable prepend-inner-icon="mdi-identifier" />
+        </v-col>
+        <!-- Original Start Date range -->
+        <v-col cols="6" sm="3" md="2">
+          <v-text-field v-model="filterOrigStartFrom" type="date" label="Orig. Start From"
+            variant="outlined" density="compact" hide-details clearable />
+        </v-col>
+        <v-col cols="6" sm="3" md="2">
+          <v-text-field v-model="filterOrigStartTo" type="date" label="Orig. Start To"
+            variant="outlined" density="compact" hide-details clearable />
+        </v-col>
+        <!-- Original Completion Date range -->
+        <v-col cols="6" sm="3" md="2">
+          <v-text-field v-model="filterOrigEndFrom" type="date" label="Orig. End From"
+            variant="outlined" density="compact" hide-details clearable />
+        </v-col>
+        <v-col cols="6" sm="3" md="2">
+          <v-text-field v-model="filterOrigEndTo" type="date" label="Orig. End To"
+            variant="outlined" density="compact" hide-details clearable />
+        </v-col>
+        <!-- Revised dates row -->
+        <v-col cols="6" sm="3" md="2">
+          <v-text-field v-model="filterRevStartFrom" type="date" label="Rev. Start From"
+            variant="outlined" density="compact" hide-details clearable />
+        </v-col>
+        <v-col cols="6" sm="3" md="2">
+          <v-text-field v-model="filterRevStartTo" type="date" label="Rev. Start To"
+            variant="outlined" density="compact" hide-details clearable />
+        </v-col>
+        <v-col cols="6" sm="3" md="2">
+          <v-text-field v-model="filterRevEndFrom" type="date" label="Rev. End From"
+            variant="outlined" density="compact" hide-details clearable />
+        </v-col>
+        <v-col cols="6" sm="3" md="2">
+          <v-text-field v-model="filterRevEndTo" type="date" label="Rev. End To"
+            variant="outlined" density="compact" hide-details clearable />
+        </v-col>
+      </v-row>
+    </v-card>
+  </div>
+</v-expand-transition>
+```
+
+### LLL-C: Advanced Filter Logic
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+
+**C1: Add refs**
+
+```ts
+const showAdvancedFilters = ref(false)
+const filterProjectCode   = ref('')
+const filterOrigStartFrom = ref('')
+const filterOrigStartTo   = ref('')
+const filterOrigEndFrom   = ref('')
+const filterOrigEndTo     = ref('')
+const filterRevStartFrom  = ref('')
+const filterRevStartTo    = ref('')
+const filterRevEndFrom    = ref('')
+const filterRevEndTo      = ref('')
+```
+
+**C2: Extend `clearFilters()`**
+
+```ts
+function clearFilters() {
+  filterStatus.value   = ''
+  filterCampus.value   = ''
+  filterDateFrom.value = ''
+  filterDateTo.value   = ''
+  search.value         = ''
+  filterProjectCode.value   = ''
+  filterOrigStartFrom.value = ''
+  filterOrigStartTo.value   = ''
+  filterOrigEndFrom.value   = ''
+  filterOrigEndTo.value     = ''
+  filterRevStartFrom.value  = ''
+  filterRevStartTo.value    = ''
+  filterRevEndFrom.value    = ''
+  filterRevEndTo.value      = ''
+}
+```
+
+**C3: Extend `hasActiveFilters`**
+
+```ts
+const hasActiveFilters = computed(() =>
+  !!(filterStatus.value || filterCampus.value || filterDateFrom.value || filterDateTo.value ||
+     search.value || filterProjectCode.value ||
+     filterOrigStartFrom.value || filterOrigStartTo.value ||
+     filterOrigEndFrom.value || filterOrigEndTo.value ||
+     filterRevStartFrom.value || filterRevStartTo.value ||
+     filterRevEndFrom.value || filterRevEndTo.value)
+)
+```
+
+**C4: Extend `filteredProjects` computed**
+
+After existing filters, append:
+
+```ts
+// Project code filter
+if (filterProjectCode.value) {
+  const code = filterProjectCode.value.toLowerCase()
+  result = result.filter(p => (p.projectCode || '').toLowerCase().includes(code))
+}
+// Original start date range
+if (filterOrigStartFrom.value) result = result.filter(p => (p.originalStartDate || '') >= filterOrigStartFrom.value)
+if (filterOrigStartTo.value)   result = result.filter(p => (p.originalStartDate || '') <= filterOrigStartTo.value)
+// Original completion date range
+if (filterOrigEndFrom.value)   result = result.filter(p => (p.originalCompletionDate || '') >= filterOrigEndFrom.value)
+if (filterOrigEndTo.value)     result = result.filter(p => (p.originalCompletionDate || '') <= filterOrigEndTo.value)
+// Revised start date range
+if (filterRevStartFrom.value)  result = result.filter(p => (p.revisedStartDate || '') >= filterRevStartFrom.value)
+if (filterRevStartTo.value)    result = result.filter(p => (p.revisedStartDate || '') <= filterRevStartTo.value)
+// Revised completion date range
+if (filterRevEndFrom.value)    result = result.filter(p => (p.revisedCompletionDate || '') >= filterRevEndFrom.value)
+if (filterRevEndTo.value)      result = result.filter(p => (p.revisedCompletionDate || '') <= filterRevEndTo.value)
+```
+
+**C5: Verify UIProject adapter has required date fields**
+
+Open `pmo-frontend/utils/adapters.ts`. Confirm `UIProject` interface and `adaptProjects()` include:
+- `originalStartDate`, `originalCompletionDate`, `revisedStartDate`, `revisedCompletionDate`
+
+If absent, add to `UIProject` interface and map in `adaptProjects()` from backend response fields `original_start_date`, `original_completion_date`, `revised_start_date`, `revised_completion_date`.
+
+### LLL-D: Analytics KPI — Backend-Driven Stats
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Backend file:** `pmo-backend/src/construction-projects/construction-projects.service.ts`
+
+**D1: Add `delayed_count` to analytics/summary backend response**
+
+In `getAnalyticsSummary()` (or equivalent method), add to the overall query:
+
+```sql
+SELECT
+  COUNT(*) AS total,
+  COALESCE(SUM(contract_amount::numeric), 0) AS total_contract_value,
+  COALESCE(AVG(physical_progress::numeric), 0) AS avg_progress,
+  COUNT(*) FILTER (WHERE status = 'ONGOING' AND physical_progress::numeric < target_physical_progress::numeric) AS delayed_count
+FROM construction_projects
+WHERE deleted_at IS NULL
+```
+
+Add `delayed_count: number` to the response object.
+
+**D2: Frontend — call analytics/summary in parallel with project list load**
+
+In the `onMounted` / `loadProjects()` function, add a parallel call to the analytics endpoint:
+
+```ts
+const [projectsRes, analyticsRes] = await Promise.all([
+  api.get('/api/construction-projects'),
+  api.get('/api/construction-projects/analytics/summary'),
+])
+```
+
+Store analytics response in `analyticsData = ref<any>(null)`.
+
+**D3: Sync KPI stat cards from backend analytics**
+
+Replace `computeStats()` client-side logic for `stats` object with values from `analyticsData`:
+
+```ts
+// After both loads complete:
+stats.value.total              = analyticsData.value?.overall?.total ?? projects.value.length
+stats.value.ongoing            = analyticsData.value?.status_distribution?.find((s:any) => s.status === 'ONGOING')?.count ?? 0
+stats.value.completed          = analyticsData.value?.status_distribution?.find((s:any) => s.status === 'COMPLETE' || s.status === 'COMPLETED')?.count ?? 0
+stats.value.pendingReview      = projects.value.filter(p => p.publicationStatus === 'PENDING_REVIEW').length
+stats.value.totalContractValue = analyticsData.value?.overall?.total_contract_value ?? 0
+stats.value.avgProgress        = analyticsData.value?.overall?.avg_progress ?? 0
+```
+
+The `delayedCount` computed can now use the backend value:
+```ts
+const delayedCount = computed(() => analyticsData.value?.overall?.delayed_count ?? 0)
+```
+
+---
+
+## GROUP 3 — Template URL System
+
+### LLL-E: New MikroORM Migration — Seed Template URLs
+
+**File:** `pmo-backend/src/database/mikro-migrations/Migration20260601010000_SeedDocumentTypeTemplateUrls.ts`
+
+**E1: Migration file content**
+
+```ts
+import { Migration } from '@mikro-orm/migrations';
+
+export class Migration20260601010000_SeedDocumentTypeTemplateUrls extends Migration {
+  async up(): Promise<void> {
+    // Seed template_url for 15 SHAREABLE ECO templates.
+    // Files must be present at pmo-backend/public/templates/{type_code}.docx
+    // Operator action: copy [SHAREABLE] .docx files from docs/references/SHAREABLE SUPPORT DOCUMENTS-*/
+    // to pmo-backend/public/templates/ with filenames matching type_code (e.g., SD_ECO_001.docx)
+    const shareable = [
+      'SD_ECO_001','SD_ECO_002','SD_ECO_003','SD_ECO_004',
+      'SD_ECO_008','SD_ECO_009','SD_ECO_010','SD_ECO_011',
+      'SD_ECO_012','SD_ECO_013','SD_ECO_014','SD_ECO_015',
+      'SD_ECO_016','SD_ECO_017','SD_ECO_018',
+    ];
+    for (const code of shareable) {
+      await this.execute(
+        `UPDATE construction_document_types SET template_url = ? WHERE type_code = ?`,
+        [`/templates/${code}.docx`, code],
+      );
+    }
+  }
+
+  async down(): Promise<void> {
+    await this.execute(
+      `UPDATE construction_document_types SET template_url = NULL
+       WHERE type_code IN (
+         'SD_ECO_001','SD_ECO_002','SD_ECO_003','SD_ECO_004',
+         'SD_ECO_008','SD_ECO_009','SD_ECO_010','SD_ECO_011',
+         'SD_ECO_012','SD_ECO_013','SD_ECO_014','SD_ECO_015',
+         'SD_ECO_016','SD_ECO_017','SD_ECO_018'
+       )`,
+    );
+  }
+}
+```
+
+**E2: Create templates static directory**
+
+Verify `pmo-backend/public/templates/` exists. Create it if not:
+```bash
+mkdir -p pmo-backend/public/templates
+```
+
+**E3: Verify NestJS static serving**
+
+Check `pmo-backend/src/main.ts` for `useStaticAssets` or `ServeStaticModule` configuration. The `/templates/` path must be served publicly.
+
+If `ServeStaticModule` is used, ensure the `rootPath` points to `pmo-backend/public/` and prefix is `/`. If using Express static middleware, add:
+```ts
+app.useStaticAssets(join(__dirname, '..', 'public'));
+```
+(if not already present).
+
+**Operator Action Required:** Copy template files from `docs/references/SHAREABLE SUPPORT DOCUMENTS-20260526T231911Z-3-001/` to `pmo-backend/public/templates/` using the type_code as the filename:
+
+| Source File | Target Filename |
+|---|---|
+| ORDERS/[SHAREABLE] SD-ECO-ECO-001_Variation Order.docx | SD_ECO_001.docx |
+| ORDERS/[SHAREABLE] SD-ECO-ECO-002_Work Suspension Order.docx | SD_ECO_002.docx |
+| ORDERS/[SHAREABLE] SD-ECO-ECO-003_Work Resumption Order.docx | SD_ECO_003.docx |
+| ORDERS/[SHAREABLE] SD-ECO-ECO-004_Contract Time Extension Order.docx | SD_ECO_004.docx |
+| REPORTS/[SHAREABLE] SD-ECO-ECO-008_Construction Logbook.docx | SD_ECO_008.docx |
+| REPORTS/[SHAREABLE] SD-ECO-ECO-009_Weekly Accomplishment Report.docx | SD_ECO_009.docx |
+| REPORTS/[SHAREABLE] SD-ECO-ECO-010_Monthly Progress Report.docx | SD_ECO_010.docx |
+| REPORTS/[SHAREABLE] SD-ECO-ECO-011_Site Instruction.docx | SD_ECO_011.docx |
+| REPORTS/[SHAREABLE] SD-ECO-ECO-012_Site Inspection Report.docx | SD_ECO_012.docx |
+| REPORTS/[SHAREABLE] SD-ECO-ECO-013_Project Inspection Report.docx | SD_ECO_013.docx |
+| REPORTS/[SHAREABLE] SD-ECO-ECO-014_Quality Assessment Report.docx | SD_ECO_014.docx |
+| REPORTS/[SHAREABLE] SD-ECO-ECO-015_Safety Compliance Report.docx | SD_ECO_015.docx |
+| CERTS/[SHAREABLE] SD-ECO-ECO-016_Certificate of Site Inspection.docx | SD_ECO_016.docx |
+| CERTS/[SHAREABLE] SD-ECO-ECO-017_Certificate of Completion.docx | SD_ECO_017.docx |
+| CERTS/[SHAREABLE] SD-ECO-ECO-018_Certificate of Final Acceptance.docx | SD_ECO_018.docx |
+
+### LLL-F: CiAttachmentHub — Wire templateUrl to CiFolderRepository
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+**F1: Add computed helper**
+
+```ts
+function getSeededTemplateUrl(typeCode: string | undefined): string | null {
+  if (!typeCode) return null
+  const found = allDocTypes.value.find(t => t.typeCode === typeCode)
+  return found?.templateUrl ?? null
+}
+```
+
+**F2: Pass seededTemplateUrl prop on each CiFolderRepository in the SD sections**
+
+For each `<CiFolderRepository>` in the Supporting Documents section (`v-window-item value="supporting"`), add:
+```vue
+:seeded-template-url="getSeededTemplateUrl(/* first docTypeCode */)"
+```
+
+Specifically, the three SD groups each pass `docTypeCodes` — use `docTypeCodes[0]` to look up the templateUrl:
+- SD_ORDERS group: `getSeededTemplateUrl('SD_ECO_001')` for the Variation Order folder, etc.
+
+Wait — the CiFolderRepository for SD groups handles an entire group (multiple type codes, one per form). The `seededTemplateUrl` is a per-repo prop, but each SD folder is one form. 
+
+**Revised approach:** Pass a template URL map instead. Add `seededTemplateUrls?: Record<string, string | null>` prop to CiFolderRepository (keyed by typeCode). In TEMPLATE node rendering, look up the URL using the folder's associated docTypeCode.
+
+**Alternative simpler approach:** Since each CiFolderRepository renders ONE group (e.g., SD_ORDERS), and each form within is a FORM-typed folder with a specific typeCode in its name, the TEMPLATE node for each form needs to know its specific URL. 
+
+The cleanest approach per current architecture: `seededTemplateUrl` remains a single string on CiFolderRepository. Each CiFolderRepository in the hub is already instantiated per form type. Pass the specific typeCode's templateUrl.
+
+Verify in CiAttachmentHub how the SD section is currently rendered — whether it uses one CiFolderRepository per group or per form. If per group, need the map approach. If per form, the single string approach works.
+
+**Action:** Check current CiAttachmentHub template for SD section CiFolderRepository usage pattern, then implement the appropriate wiring.
+
+---
+
+## GROUP 4 — Repository Submission Table + Audit Logging
+
+### LLL-G: CiFolderRepository — Enhanced Submission Table
+
+**File:** `pmo-frontend/components/coi/CiFolderRepository.vue`
+
+**G1: Add table headers for submission view**
+
+```ts
+const submissionTableHeaders = [
+  { title: 'File Name', key: 'fileName', sortable: true },
+  { title: 'Uploaded By', key: 'uploadedByName', sortable: false },
+  { title: 'Date Uploaded', key: 'createdAt', sortable: true },
+  { title: 'Version', key: 'version', sortable: false, align: 'center' as const },
+  { title: 'Actions', key: 'actions', sortable: false, align: 'center' as const },
+]
+```
+
+**G2: Replace SUBMISSIONS file list with v-data-table**
+
+In the SUBMISSIONS node rendering block, replace the simple `v-list` file items with:
+
+```vue
+<v-data-table
+  :items="folderDocuments(node.id)"
+  :headers="submissionTableHeaders"
+  density="compact"
+  hover
+  :items-per-page="5"
+  :items-per-page-options="[5,10,25]"
+  class="text-body-2"
+>
+  <template #item.fileName="{ item }">
+    <div class="d-flex align-center ga-1">
+      <v-icon size="16" color="primary">mdi-file-document-outline</v-icon>
+      <span>{{ item.fileName }}</span>
+    </div>
+  </template>
+  <template #item.uploadedByName="{ item }">
+    <span class="text-body-2 text-medium-emphasis">{{ item.uploadedByName || '—' }}</span>
+  </template>
+  <template #item.createdAt="{ item }">
+    <span class="text-body-2 text-medium-emphasis">{{ formatDate(item.createdAt) }}</span>
+  </template>
+  <template #item.version="{ item }">
+    <v-chip size="x-small" variant="tonal" color="info">v{{ item.version || 1 }}</v-chip>
+  </template>
+  <template #item.actions="{ item }">
+    <v-btn :href="item.filePath" target="_blank" size="x-small" variant="text" icon="mdi-download" color="primary" title="Download" />
+    <v-btn v-if="canDelete" size="x-small" variant="text" icon="mdi-delete-outline" color="error" title="Delete"
+      @click="deleteDocument(item.id)" />
+  </template>
+</v-data-table>
+```
+
+**G3: Add `folderDocuments(folderId)` helper**
+
+```ts
+function folderDocuments(folderId: string) {
+  return (props.documents || []).filter(d => d.folderId === folderId)
+}
+```
+
+**G4: Ensure `documents` prop type includes required fields**
+
+The `documents` prop on CiFolderRepository must include `fileName`, `filePath`, `uploadedByName`, `createdAt`, `version`, `folderId`. Verify interface definition and update if needed.
+
+### LLL-H: Backend — Audit Logging for Document Folder + Upload Operations
+
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts`
+
+**H1: Add `fireLog` to `createDocumentFolder()`**
+
+Locate `async createDocumentFolder()`. After `await this.em.persistAndFlush(entity)`, add:
+```ts
+this.fireLog(user, ActivityAction.CREATE, entity.projectId, { folderId: entity.id, folderName: entity.folderName, nodeType: entity.nodeType });
+```
+(Ensure `user?: JwtPayload` is added to the method signature if not present — check controller call site.)
+
+**H2: Add `fireLog` to `deleteDocumentFolder()`**
+
+Locate `async deleteDocumentFolder()` (or the delete method for folders). After soft-delete, add:
+```ts
+this.fireLog(user, ActivityAction.DELETE, folder.projectId, { folderId: id, folderName: folder.folderName });
+```
+
+**H3: Add `fireLog` to `uploadDocument()` / `createDocument()`**
+
+Locate the document upload/create service method. After `await this.em.persistAndFlush(doc)`, add:
+```ts
+this.fireLog(user, ActivityAction.UPLOAD, doc.projectId, { documentId: doc.id, fileName: doc.fileName, documentType: doc.documentType });
+```
+
+**H4: Add `fireLog` to `deleteDocument()`**
+
+Locate the document delete service method. After soft-delete or hard-delete, add:
+```ts
+this.fireLog(user, ActivityAction.DELETE, doc.projectId, { documentId: id, fileName: doc.fileName });
+```
+
+**H5: Verify controller passes `user` to service methods**
+
+Check `construction-projects.controller.ts` for the folder and document endpoints. Confirm `@CurrentUser()` or `@Req()` user is passed to the service. If missing, add `user: JwtPayload` param to controller methods and pass to service.
+
+---
+
+## GROUP 5 — Verification Gate
+
+### LLL-I: TypeScript + Regression
+
+**I1:** `npx vue-tsc --noEmit` in `pmo-frontend/` — 0 new errors
+**I2:** Backend TypeScript check: `npx tsc --noEmit` in `pmo-backend/` — exit 0
+**I3:** Operator smoke tests:
+  - Create a new project → should succeed (201)
+  - Edit an existing project → should succeed
+  - COI index loads with list/card/table views functional
+  - Advanced filters expand and filter correctly
+  - Supporting Documents section shows "Download Template" for SD_ECO_001-004, 008-018 (after operator copies files)
+  - SUBMISSIONS node shows submission table with filename/uploader/date/version
+  - Activity log shows folder creation and document upload entries
+
+---
+
+## Phase LLL Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| INSERT parity: 61 cols = 61 `?` = 61 values | LLL-A | ✅ verified (node parity script) |
+| New project creation succeeds (201) | LLL-A | ⬜ operator smoke test |
+| Edit project unaffected | LLL-A | ✅ (UPDATE uses dynamic SET, untouched) |
+| Filter bar in single compact row | LLL-B | ✅ code |
+| Advanced filters panel expands/collapses | LLL-B | ✅ code (v-expand-transition) |
+| Project code filter functional | LLL-C | ✅ code |
+| Original start/completion date filters functional | LLL-C | ✅ code |
+| Revised start/completion date filters functional | LLL-C | ✅ code |
+| clearFilters() clears all new filter refs | LLL-C | ✅ code |
+| UIProject has date fields mapped from adapter | LLL-C | ✅ code (added to UIProject + BackendProject + adaptProject; backend findAll SELECT extended) |
+| Analytics/summary called in parallel on load | LLL-D | ✅ (already on mount; fetchAnalytics) |
+| KPI stat cards sourced from backend analytics | LLL-D | ✅ code (syncStatsFromAnalytics) |
+| Delayed count uses DB logic (progress < target) | LLL-D | ✅ code (FILTER aggregate + frontend uses delayed_count) |
+| Migration LLL-E created with correct SQL | LLL-E | ✅ code (Migration20260601010000) |
+| `pmo-backend/public/templates/` directory exists | LLL-E | ✅ created (+ README mapping) |
+| NestJS static asset serving includes templates | LLL-E | ✅ code (useStaticAssets /templates in main.ts) |
+| Template URLs visible in taxonomy API response after migration | LLL-E | ⬜ operator runs migration |
+| Per-group seeded templates helper in CiAttachmentHub | LLL-F | ✅ code (seededTemplatesForGroup) |
+| SD section CiFolderRepository receives seeded-templates | LLL-F | ✅ code (all 4 SD/ECO repos) |
+| "Official Templates" panel renders seeded templates | LLL-F | ✅ code (CiFolderRepository panel) |
+| SUBMISSIONS nodes show v-data-table with all columns | LLL-G | ✅ code (File/By/Date/Modified/Version/Actions) |
+| docsFor() helper filters correctly by folderId | LLL-G | ✅ (existing helper reused) |
+| createDocumentFolder() logs CREATE activity | LLL-H | ✅ already implemented (verified) |
+| removeDocumentFolder() logs activity | LLL-H | ✅ already implemented (REMOVE_ATTACHMENT) |
+| addDocumentToProject() logs UPLOAD activity | LLL-H | ✅ already implemented (verified) |
+| removeDocument() logs activity | LLL-H | ✅ already implemented (REMOVE_ATTACHMENT) |
+| TypeScript: 0 new errors in touched files | LLL-I | ✅ backend tsc exit 0; frontend touched files clean |
+| No regression in existing COI CRUD flows | LLL-I | ⬜ operator smoke test |
+
+## Phase LLL Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (CRITICAL) | LLL-A (INSERT fix) | Minimal — 1 char change | Must be first; blocks all new project testing |
+| Group 2 (HIGH) | LLL-B/C/D (index refactor) | Low — additive frontend | Independent; requires adapter check for date fields |
+| Group 3 (MEDIUM) | LLL-E/F (template URL) | Medium — new migration + static serving | Requires operator to copy .docx files |
+| Group 4 (MEDIUM) | LLL-G/H (submission table + audit) | Medium — component + service changes | Independent of Groups 2/3 |
+| Group 5 (LOW) | LLL-I (verification) | Low | After Groups 1–4 |
+
+---
+
+# Phase MR — June 2026 Executive Management Report
+
+**Status:** ✅ Phase 3 COMPLETE — Report delivered to `docs/reports/June 1, 2026 Report Update.md` (2026-06-01)
+**Research Reference:** §2.261 (research.md)
+**Last Updated:** 2026-06-01
+**Output:** `docs/reports/June 1, 2026 Report Update.md`
+**Audience:** University President, VP, PMO Management, ECO, MEO, MIS, Stakeholders, Non-technical Decision Makers
+
+---
+
+## Governance Directives (Phase MR)
+
+| ID | Directive |
+|----|-----------|
+| MR-D1 | Report is a DELIVERABLE document — not a living plan/research artifact. Placed in `docs/reports/`. Does NOT conflict with Two Living Documents rule. |
+| MR-D2 | All completion percentages are evidence-based estimates derived from §2.261 research findings. Do NOT inflate or deflate. |
+| MR-D3 | Security section must be balanced — acknowledge both addressed items and remaining risks without exaggeration. |
+| MR-D4 | No technical implementation jargon. Frame all technical items in management-understandable terms (no MikroORM, vue-tsc, NestJS — use "database migration", "frontend build", "web API"). |
+| MR-D5 | Report file name is EXACT: `June 1, 2026 Report Update.md` (as specified by operator). |
+| MR-D6 | Create `docs/reports/` directory first (if not existing) via Bash `mkdir -p`. |
+
+---
+
+## Phase MR-A: Create Executive Management Report
+
+**File:** `docs/reports/June 1, 2026 Report Update.md`
+**Scope:** 11 sections as specified in prompt
+**Risk:** Low — documentation only, no code changes
+**Dependencies:** §2.261 research complete ✅
+
+### MR-A-1: Create output directory
+
+```bash
+mkdir -p "D:/Programming/pmo-dash/docs/reports"
+```
+
+### MR-A-2: Write report file
+
+Write complete 11-section Markdown report to `docs/reports/June 1, 2026 Report Update.md` using §2.261 findings:
+
+**Section 1 — Executive Summary**
+- Status: First Phase Development complete for UO; COI at ~83% (Controlled Pilot readiness)
+- Milestones: 48 DB migrations, 2 major modules, 29+ COI components, public portal, audit trail
+- Under refinement: nested folder system, contractor portal, dashboard analytics
+
+**Section 2 — Development Progress (with % bars or tables)**
+- COI Module: 83%
+- University Operations: 92%
+- Shared Services / Auth: 88%
+- Reporting & Analytics: 82%
+- Document Management: 80%
+- RBAC: 85%
+- Audit Trail & Monitoring: 78%
+- **Overall: ~84%**
+
+**Section 3 — Testing Completed**
+- Functional: CRUD, auth, registration, password reset, RBAC, gallery, project lifecycle
+- Role-based: SuperAdmin/Admin/Staff/Viewer/Auditor/Contractor
+- UI/UX: desktop responsiveness, navigation, form validation
+- Database: ORM migrations, raw SQL analytics
+- Audit trail, file upload
+
+**Section 4 — Security Review**
+- Addressed: JWT, RBAC guards, route protection, soft delete, activity logging, OAuth, password reset OTP
+- Risks under review: file MIME validation, contractor scoping, rate limiting, permission escalation edge cases
+
+**Section 5 — Deployment Readiness**
+- Recommendation: Ready for Controlled Pilot Deployment (not yet full production)
+- Green/Yellow/Red breakdown from §2.261-F
+
+**Section 6 — Two-Week Risk Mitigation**
+- Sprint items from §2.261-G
+- Conclusion: 2 weeks sufficient for pilot readiness
+
+**Section 7 — July Deployment Target**
+- Assessment: On Track (75% confidence)
+- Contingent on smoke testing sprint starting immediately
+
+**Section 8 — Stakeholder Forum Readiness**
+- Demonstrable: full project lifecycle, RBAC, monitoring, repositories, analytics, UO module
+- Not suitable for live demo: contractor portal, nested folder CRUD, MOV evidence
+
+**Section 9 — Current Development Position**
+- Phase 3 (Integration & Stabilization), transitioning to Phase 4 (Pilot Deployment)
+
+**Section 10 — Simple Anecdote**
+- Management-friendly analogy for non-technical readers
+
+**Section 11 — Final Recommendation**
+- ~84% overall completion
+- Recommend Controlled Pilot Deployment
+- Forum: Ready with curated data
+- July: Achievable (conditional)
+- Next priorities: smoke testing sprint, rate limiting, contractor portal, forum environment setup
+
+### MR-A Verification
+
+| Criterion | Status |
+|---|---|
+| File exists at `docs/reports/June 1, 2026 Report Update.md` | ✅ |
+| All 11 sections present | ✅ |
+| Completion percentages sourced from §2.261 | ✅ |
+| No unexplained technical acronyms | ✅ |
+| Professional executive tone throughout | ✅ |
+| Security section is balanced (no overstatement) | ✅ |
+
+---
+
+# Phase MMM — Template Path Fix + Gallery Height + Key Docs Persistence + Checklist UI + ECO_FORMS Dedup
+
+**Status:** ✅ Phase 3 COMPLETE — Groups 1–6 implemented (2026-06-01). 15 templates copied; gallery height fixed; immutable staging pattern; checklist grid+kebab; ECO_FORMS dedup. Pending: operator runtime smoke test.
+**Research Reference:** §2.263 (research.md)
+**Last Updated:** 2026-06-01
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase MMM)
+
+| ID | Directive |
+|----|-----------|
+| MMM-D1 | Template files are COPIED (not moved) — originals in subfolders stay intact. |
+| MMM-D2 | `persistDoc` and sibling staging functions in CiAttachmentHub must use immutable emit — NEVER mutate `props.modelValue` or computed chain directly. |
+| MMM-D3 | CiDocumentChecklist: UI/template changes only — no API, data model, or business logic changes. |
+| MMM-D4 | Remove ONLY the ECO_FORMS `CiRepositoryCard` from the Supporting Documents section — no other CiRepositoryCard removal. |
+| MMM-D5 | `v-img cover` is the approved fit mode for the gallery carousel (aesthetic presentation; edge cropping acceptable). |
+| MMM-D6 | Migration20260601010000 template_url values remain unchanged (`/templates/{code}.docx`). Fix is at the filesystem level (copy files to match those paths). |
+
+---
+
+## GROUP 1 — Template Path Fix (Pre-requisite)
+
+### MMM-A: Copy Template Files to Type-Code Names
+
+**Action:** Use `bash cp` to copy the 15 SHAREABLE `.docx` files to their type-code names in `pmo-backend/public/templates/`.
+
+All 15 `cp` commands are executed in Phase 3 via Bash tool. Source: the subfolder structure already present. Targets: flat files matching the seeded `template_url` paths.
+
+```bash
+BASE="pmo-backend/public/templates/SHAREABLE SUPPORT DOCUMENTS-20260526T231911Z-3-001"
+DEST="pmo-backend/public/templates"
+cp "$BASE/ORDERS/[SHAREABLE] SD-ECO-ECO-001_Variation Order.docx" "$DEST/SD_ECO_001.docx"
+cp "$BASE/ORDERS/[SHAREABLE] SD-ECO-ECO-002_Work Suspension Order.docx" "$DEST/SD_ECO_002.docx"
+cp "$BASE/ORDERS/[SHAREABLE] SD-ECO-ECO-003_Work Resumption Order.docx" "$DEST/SD_ECO_003.docx"
+cp "$BASE/ORDERS/[SHAREABLE] SD-ECO-ECO-004_Contract Time Extension Order.docx" "$DEST/SD_ECO_004.docx"
+cp "$BASE/REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-008_Construction Logbook.docx" "$DEST/SD_ECO_008.docx"
+cp "$BASE/REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-009_Weekly Accomplishment Report.docx" "$DEST/SD_ECO_009.docx"
+cp "$BASE/REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-010_Monthly Progress Report.docx" "$DEST/SD_ECO_010.docx"
+cp "$BASE/REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-011_Site Instruction.docx" "$DEST/SD_ECO_011.docx"
+cp "$BASE/REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-012_Site Inspection Report.docx" "$DEST/SD_ECO_012.docx"
+cp "$BASE/REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-013_Project Inspection Report.docx" "$DEST/SD_ECO_013.docx"
+cp "$BASE/REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-014_Quality Assessment Report.docx" "$DEST/SD_ECO_014.docx"
+cp "$BASE/REPORTS AND MONITORING/[SHAREABLE] SD-ECO-ECO-015_Safety Compliance Report.docx" "$DEST/SD_ECO_015.docx"
+cp "$BASE/CERTIFICATIONS AND OTHER DOCUMENTS/[SHAREABLE] SD-ECO-ECO-016_Certificate of Site Inspection.docx" "$DEST/SD_ECO_016.docx"
+cp "$BASE/CERTIFICATIONS AND OTHER DOCUMENTS/[SHAREABLE] SD-ECO-ECO-017_Certificate of Completion.docx" "$DEST/SD_ECO_017.docx"
+cp "$BASE/CERTIFICATIONS AND OTHER DOCUMENTS/[SHAREABLE] SD-ECO-ECO-018_Certificate of Final Acceptance.docx" "$DEST/SD_ECO_018.docx"
+```
+
+### MMM-A Verification
+- [ ] `ls pmo-backend/public/templates/SD_ECO_001.docx` (and all 15) — files exist
+- [ ] `GET /templates/SD_ECO_001.docx` returns 200 with content-type for .docx
+
+---
+
+## GROUP 2 — Gallery Carousel Height Fix
+
+### MMM-B: Fix Gallery Container Height in detail-[id].vue
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+**Region:** Lines 925–956 (FFF-A Row 1)
+
+**B1: Gallery card — remove fixed inner height, use CSS stretch**
+
+Change the carousel wrapper card and inner elements to fill `h-100`:
+
+```vue
+<!-- Before -->
+<v-card variant="outlined" class="h-100 overflow-hidden">
+  <v-carousel v-if="carouselImages.length" height="260" ...>
+    <v-carousel-item ...>
+      <v-img ... height="260" contain ...>
+```
+
+```vue
+<!-- After -->
+<v-card variant="outlined" class="h-100 overflow-hidden d-flex flex-column" style="min-height: 300px">
+  <v-carousel v-if="carouselImages.length" height="100%" hide-delimiter-background show-arrows="hover" :continuous="false" class="flex-grow-1">
+    <v-carousel-item v-for="img in carouselImages" :key="img.id">
+      <v-img :src="img.imageUrl" height="100%" cover position="center" class="cursor-zoom-in"
+        @click="...">
+        <div v-if="img.caption" class="carousel-caption text-body-2 px-3 py-2">{{ img.caption }}</div>
+      </v-img>
+    </v-carousel-item>
+  </v-carousel>
+```
+
+**B2: Empty state — match height**
+
+```vue
+<!-- Before -->
+<div v-else class="d-flex flex-column align-center justify-center text-grey" style="height:260px">
+
+<!-- After -->
+<div v-else class="d-flex flex-column align-center justify-center text-grey flex-grow-1" style="min-height: 300px">
+```
+
+### MMM-B Verification
+- [ ] On a project with a tall Profile card, gallery visually matches Profile card height
+- [ ] Gallery images fill the entire carousel area (no dead space below)
+- [ ] Caption overlay visible at bottom
+- [ ] Empty-state div has consistent height with adjacent card
+
+---
+
+## GROUP 3 — Key Documents Staging Persistence Fix
+
+### MMM-C: Immutable Queue Pattern in CiAttachmentHub
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+**Root cause (§2.263-C):** Staging operations mutate `queue.value` (computed from `props.modelValue`) in place, bypassing Vue 3's computed invalidation. Files appear staged in the UI (because the array mutation is visible via Vue's proxy), but the computed dependency chain may return stale values when `emitQueue` fires.
+
+**C1: Fix `persistDoc` staging branch**
+
+Replace:
+```ts
+if (isStaging.value) {
+  queue.value.docs.push({
+    file: payload.file,
+    documentType: payload.documentType,
+    description: payload.description || payload.title || '',
+  })
+  emitQueue()
+  return
+}
+```
+
+With:
+```ts
+if (isStaging.value) {
+  emit('update:modelValue', {
+    docs: [
+      ...(props.modelValue?.docs ?? []),
+      { file: payload.file, documentType: payload.documentType, description: payload.description || payload.title || '' },
+    ],
+    images: [...(props.modelValue?.images ?? [])],
+    links: [...(props.modelValue?.links ?? [])],
+  })
+  return
+}
+```
+
+**C2: Fix `deleteDocument` staging branch**
+
+Replace:
+```ts
+if (isStaging.value) {
+  const idx = Number(docId.replace('staged-', ''))
+  if (!Number.isNaN(idx)) { queue.value.docs.splice(idx, 1); emitQueue() }
+  return
+}
+```
+
+With:
+```ts
+if (isStaging.value) {
+  const idx = Number(docId.replace('staged-', ''))
+  if (!Number.isNaN(idx)) {
+    const docs = [...(props.modelValue?.docs ?? [])]
+    docs.splice(idx, 1)
+    emit('update:modelValue', {
+      docs,
+      images: [...(props.modelValue?.images ?? [])],
+      links: [...(props.modelValue?.links ?? [])],
+    })
+  }
+  return
+}
+```
+
+**C3: Fix gallery staging branches (2 locations)**
+
+Locate `persistGallery` and `deleteGalleryItem`. Where they have `queue.value.images.push(...)` or `queue.value.images.splice(...)` in staging mode — apply the same immutable emit pattern:
+
+persistGallery staging (around line 434):
+```ts
+if (isStaging.value) {
+  emit('update:modelValue', {
+    docs: [...(props.modelValue?.docs ?? [])],
+    images: [...(props.modelValue?.images ?? []), { file, caption, category }],
+    links: [...(props.modelValue?.links ?? [])],
+  })
+  return
+}
+```
+
+deleteGalleryItem staging (around line 453):
+```ts
+if (isStaging.value) {
+  const idx = Number(id)
+  if (!Number.isNaN(idx)) {
+    const images = [...(props.modelValue?.images ?? [])]
+    images.splice(idx, 1)
+    emit('update:modelValue', {
+      docs: [...(props.modelValue?.docs ?? [])],
+      images,
+      links: [...(props.modelValue?.links ?? [])],
+    })
+  }
+  return
+}
+```
+
+**C4: Fix link staging**
+
+Locate `submitLink` staging branch (around line 477). Apply same pattern.
+
+**C5: Remove `emitQueue()` calls from staging paths**
+
+After fixing C1–C4, `emitQueue()` should no longer be called from staging branches (it now emits directly). The `emitQueue()` function itself stays — it's still used in the `queue.images.splice` template-inline expressions for the gallery list (check if those exist and fix them too).
+
+**C6: Verify `removeStaged` is also immutable**
+
+`removeStaged(tempId: string)` at line 323. It uses `queue.value.docs.splice(...)`. Apply same immutable fix.
+
+### MMM-C Verification
+- [ ] Upload a file via Key Documents modal in new.vue → create project → file visible in detail page
+- [ ] Staged file survives navigating between tabs on the new project form
+- [ ] Delete a staged file → file removed from queue → submit → no ghost upload
+- [ ] Multiple uploads in same session all persist
+
+---
+
+## GROUP 4 — Compliance Checklist UI Refactor
+
+### MMM-D: Grid Layout + Kebab Menus in CiDocumentChecklist
+
+**File:** `pmo-frontend/components/coi/CiDocumentChecklist.vue`
+
+**D1: Change per-item row to grid layout**
+
+Replace the current list-item row rendering per checklist item with a compact `v-row` using fixed columns:
+
+```vue
+<!-- Per-item inside the group expansion panel -->
+<div class="checklist-item-row d-flex align-center ga-2 py-2 px-1 border-b">
+  <!-- Col 1: Required badge + type code -->
+  <div style="min-width: 90px; max-width: 90px">
+    <v-chip size="x-small" :color="item.documentType?.isRequired ? 'error' : 'grey'" variant="tonal">
+      {{ item.documentType?.isRequired ? 'Required' : 'Optional' }}
+    </v-chip>
+    <div class="text-caption text-grey-darken-1 mt-1 text-truncate">{{ item.documentType?.typeCode }}</div>
+  </div>
+  <!-- Col 2: Type label (flex-grow) -->
+  <div class="flex-grow-1 text-body-2 font-weight-medium">{{ item.documentType?.typeLabel }}</div>
+  <!-- Col 3: Status chip -->
+  <v-chip :color="statusColor(item.submissionStatus)" size="small" variant="tonal" style="min-width: 110px">
+    {{ statusLabel(item.submissionStatus) }}
+  </v-chip>
+  <!-- Col 4: Latest date -->
+  <div class="text-caption text-grey" style="min-width: 90px; text-align: right">
+    {{ item.submittedAt ? formatDate(item.submittedAt) : '—' }}
+  </div>
+  <!-- Col 5: Kebab menu (replaces inline Edit + History buttons) -->
+  <v-menu location="bottom end">
+    <template #activator="{ props: menuProps }">
+      <v-btn v-bind="menuProps" icon="mdi-dots-vertical" size="small" variant="text" color="grey-darken-1" />
+    </template>
+    <v-list density="compact" nav>
+      <v-list-item prepend-icon="mdi-open-in-new" title="Navigate" @click="emit('navigate', { typeCode: item.documentType?.typeCode })" />
+      <v-list-item v-if="canEdit" prepend-icon="mdi-pencil-outline" title="Update Status" @click="openEdit(item)" />
+      <v-list-item prepend-icon="mdi-comment-text-outline" title="Remarks" @click="draftRemark[item.id] = draftRemark[item.id] ?? ''; showRemark[item.id] = !showRemark[item.id]" />
+      <v-list-item prepend-icon="mdi-history" title="Submission History" @click="openHistory(item)" />
+    </v-list>
+  </v-menu>
+</div>
+<!-- Inline remark row (shown when user clicks Remarks from kebab) -->
+<div v-if="showRemark[item.id]" class="pa-2 bg-grey-lighten-5">
+  <!-- ... existing remark display + input ... -->
+</div>
+```
+
+**D2: Add `showRemark` reactive state**
+
+Add alongside `draftRemark`:
+```ts
+const showRemark = reactive<Record<string, boolean>>({})
+```
+
+**D3: Group header improvement**
+
+Keep group expansion panels; update the header to show `group.groupLabel` + `submittedCount/total count` + `missingCount as error badge`.
+
+**D4: Summary bar at top**
+
+Keep the existing summary card but make it more compact (single row of chips).
+
+### MMM-D Verification
+- [ ] Checklist renders in grid (type code | label | status | date | kebab)
+- [ ] Edit/History inline buttons removed
+- [ ] Kebab menu has Navigate, Update Status, Remarks, History items
+- [ ] Clicking "Remarks" in kebab toggles inline remark editor per item
+- [ ] Existing remark + history + status update functionality unchanged
+
+---
+
+## GROUP 5 — ECO_FORMS CiRepositoryCard Removal
+
+### MMM-E: Remove Redundant "Other Forms" Repository Card
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+**E1: Remove the "Other Forms" CiRepositoryCard block**
+
+Locate and remove (approximately lines 851–865):
+```vue
+<!-- Other Forms: flat repository card + nested folder workspace -->
+<v-divider class="my-2" />
+<v-row dense class="mb-3">
+  <v-col cols="12" sm="6" lg="4">
+    <CiRepositoryCard
+      title="Other Forms" icon="mdi-form-select" color="purple"
+      :doc-count="ecoStats.docCount" ...
+      @open="openRepo('Other Forms', 'mdi-form-select', 'purple', ecoFormCodes)"
+      @upload="openRepo('Other Forms', 'mdi-form-select', 'purple', ecoFormCodes, true)"
+    />
+  </v-col>
+</v-row>
+```
+
+**Keep** the CiFolderRepository for ECO_FORMS (below the removed block) — that becomes the ONLY interface for ECO_FORMS.
+
+**E2: Add a section header above the ECO_FORMS CiFolderRepository**
+
+Replace the now-orphaned "Other Forms — Folder Repository" label with a proper section header matching the SD groups:
+
+```vue
+<v-divider class="my-4" />
+<div class="mb-4">
+  <div class="d-flex align-center ga-2 mb-2">
+    <v-icon size="18" color="purple">mdi-form-select</v-icon>
+    <span class="text-subtitle-2 font-weight-medium">Other Forms</span>
+  </div>
+  <CiFolderRepository ... />
+</div>
+```
+
+**E3: Remove `ecoStats` computed if no longer needed**
+
+Check if `ecoStats` is used anywhere else in the template. If only the removed CiRepositoryCard used it, remove the computed to keep the file clean.
+
+### MMM-E Verification
+- [ ] Supporting Documents section shows NO "Other Forms" repository card
+- [ ] ECO_FORMS CiFolderRepository shows correctly with section header
+- [ ] Folder creation, upload, template download all work in ECO_FORMS section
+- [ ] No stale `ecoStats` error
+
+---
+
+## GROUP 6 — Verification Gate
+
+### MMM-F: TypeScript + Regression
+
+**F1:** `npx vue-tsc --noEmit` in `pmo-frontend/` — 0 new errors in touched files
+**F2:** Backend tsc — exit 0 (no backend changes in this phase except none)
+**F3:** Operator smoke tests:
+- `GET /templates/SD_ECO_001.docx` returns 200 (template file accessible)
+- Upload key document in new.vue → create project → file visible in detail
+- Compliance checklist shows grid layout with kebab menus
+- Supporting Documents "Other Forms" shows only folder repository (no card)
+- Gallery carousel fills full height of adjacent Project Profile card
+
+---
+
+## Phase MMM Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| 15 type-code .docx files exist in public/templates/ | MMM-A | ✅ verified (15 files, 1–1.7MB each) |
+| `/templates/SD_ECO_001.docx` returns 200 | MMM-A | ⬜ operator smoke (file present; matches migration URL) |
+| Gallery carousel height matches Project Profile | MMM-B | ✅ code (h-100 flex + min-height 300) |
+| Gallery images use cover fit (no dead space) | MMM-B | ✅ code (contain→cover) |
+| Key doc upload in staging persists after project creation | MMM-C | ✅ code (immutable emitStaged) |
+| Multiple staged uploads all persist | MMM-C | ✅ code (fresh array each emit) |
+| Staging delete removes file correctly | MMM-C | ✅ code (immutable splice) |
+| Checklist grid layout: type/status/date/kebab columns | MMM-D | ✅ code |
+| Checklist inline Edit/History buttons removed | MMM-D | ✅ code (moved into kebab) |
+| Kebab has Navigate/Status/Remarks/History | MMM-D | ✅ code (+ Download Template when present) |
+| ECO_FORMS CiRepositoryCard removed | MMM-E | ✅ code |
+| Other Forms section shows only CiFolderRepository | MMM-E | ✅ code (with section header) |
+| TypeScript: 0 new errors in touched files | MMM-F | ✅ vue-tsc — 0 errors in CiAttachmentHub/CiDocumentChecklist/detail-[id].vue (pre-existing errors elsewhere are untouched) |
+| No regression in LLL features | MMM-F | ⬜ operator smoke |
+
+## Phase MMM Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (CRITICAL) | MMM-A (template file copies) | Low — file system only | Must run first; templates must be accessible before frontend can show them |
+| Group 2 (HIGH) | MMM-B (gallery height) | Low — CSS/template only | Independent |
+| Group 3 (HIGH) | MMM-C (staging persistence) | Medium — modifies reactive core of hub | Independent; most impactful for UX |
+| Group 4 (MEDIUM) | MMM-D (checklist UI) | Low — UI only, no logic change | Independent |
+| Group 5 (LOW) | MMM-E (ECO_FORMS dedup) | Low — removes card, no logic change | Independent |
+| Group 6 (LOW) | MMM-F (verification) | Low | After all groups |
+
+---
+
+# Phase NNN — Attachment Module: Checklist Gap, Persistence Guard, Audit Log Infrastructure
+
+**Status:** ✅ Phase 3 COMPLETE — NNN-A (checklist kebab), NNN-B (persistence guard) implemented; NNN-C operational (backend restart); NNN-D found ALREADY IMPLEMENTED (no work). (2026-06-01)
+**Research Reference:** §2.264-A, §2.264-B, §2.264-C, §2.264-E
+**Last Updated:** 2026-06-01
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase NNN)
+
+| ID | Directive |
+|----|-----------|
+| NNN-D1 | Checklist UI changes are TEMPLATE ONLY — no changes to API, data model, business logic, or PATCH endpoints. |
+| NNN-D2 | `/templates/SD_ECO_001.docx` fix is OPERATIONAL (backend restart) — zero code changes required. Document the resolution step only. |
+| NNN-D3 | Persistence guard in new.vue must NOT change the happy-path logic. Add a warning branch only for the edge case; do not refactor the Stage 2 upload loop. |
+| NNN-D4 | Audit log additions are `fireLog()` call-sites only — no new tables, no schema migration, no new entities. Reuse existing `activity_logs` mechanism. |
+| NNN-D5 | `ActivityAction` enum extension (DOWNLOAD, FOLDER_CREATE, FOLDER_RENAME, FOLDER_DELETE) must be additive — existing enum values unchanged. |
+| NNN-D6 | CiDocumentChecklist is the ONLY file for checklist changes. Do not touch CiAttachmentHub or CiRepositoryModal for NNN-A. |
+
+---
+
+## GROUP 1 — Checklist Kebab "Open File" + "View Status" Actions (NNN-A)
+
+### NNN-A: Add missing kebab actions to CiDocumentChecklist
+
+**File:** `pmo-frontend/components/coi/CiDocumentChecklist.vue`
+
+**A1: Add `viewStatusDialog` + `viewStatusItem` state (alongside existing `dialog`/`editing` vars):**
+
+```typescript
+const viewStatusDialog = ref(false)
+const viewStatusItem = ref<ChecklistItem | null>(null)
+function openViewStatus(item: ChecklistItem) {
+  viewStatusItem.value = item
+  viewStatusDialog.value = true
+}
+```
+
+**A2: In the kebab `v-list`, after "Navigate" and before "Download Template":**
+
+```vue
+<!-- Open linked file (only when a document is attached) -->
+<v-list-item
+  v-if="linkedDoc(item)"
+  prepend-icon="mdi-open-in-new"
+  title="Open Linked File"
+  :href="linkedDoc(item)!.filePath"
+  target="_blank"
+  rel="noopener"
+  tag="a"
+/>
+<!-- View Status (shown to all roles; non-editors see this instead of Update Status) -->
+<v-list-item
+  v-if="!canEdit"
+  prepend-icon="mdi-eye-outline"
+  title="View Status"
+  @click="openViewStatus(item)"
+/>
+```
+
+**A3: Add read-only View Status dialog at bottom of template (beside the edit dialog):**
+
+```vue
+<v-dialog v-model="viewStatusDialog" max-width="480">
+  <v-card>
+    <v-card-title>Submission Status</v-card-title>
+    <v-card-subtitle>{{ viewStatusItem?.documentType?.typeLabel }}</v-card-subtitle>
+    <v-divider />
+    <v-card-text class="pt-4">
+      <v-chip :color="statusColor(viewStatusItem?.submissionStatus ?? 'NOT_SUBMITTED')" class="mb-3" variant="tonal">
+        {{ statusLabel(viewStatusItem?.submissionStatus ?? 'NOT_SUBMITTED') }}
+      </v-chip>
+      <p v-if="viewStatusItem?.reviewNotes" class="text-body-2 mb-2">{{ viewStatusItem.reviewNotes }}</p>
+      <p v-if="viewStatusItem?.submittedAt" class="text-caption text-grey">Submitted: {{ formatDate(viewStatusItem.submittedAt) }}</p>
+      <p v-if="viewStatusItem?.reviewedAt" class="text-caption text-grey">Reviewed: {{ formatDate(viewStatusItem.reviewedAt) }}</p>
+      <p v-if="viewStatusItem?.expiryDate" class="text-caption text-grey">Expires: {{ formatDate(viewStatusItem.expiryDate) }}</p>
+    </v-card-text>
+    <v-card-actions>
+      <v-spacer />
+      <v-btn variant="text" @click="viewStatusDialog = false">Close</v-btn>
+    </v-card-actions>
+  </v-card>
+</v-dialog>
+```
+
+### NNN-A Verification
+- [ ] Kebab shows "Open Linked File" only when linkedDocumentId is set
+- [ ] Clicking opens linked file in new tab
+- [ ] Non-editors (canEdit=false) see "View Status" in kebab
+- [ ] View Status dialog: status chip, review notes, submitted/reviewed/expiry dates (read-only)
+- [ ] Edit dialog still functional for canEdit=true users
+
+---
+
+## GROUP 2 — Persistence Guard Improvement (NNN-B)
+
+### NNN-B: Harden new.vue project creation → attachment upload lifecycle
+
+**File:** `pmo-frontend/pages/coi/new.vue`
+
+**B1: Replace the silent `!created?.id` fallback (lines ~497–510)**
+
+Current code:
+```typescript
+const created = await api.post<{ id?: string }>('/api/construction-projects', payload)
+if (!created?.id) {
+  toast.success('Project created successfully')
+  router.push('/coi')
+  return
+}
+```
+
+Replace with:
+```typescript
+const created = await api.post<{ id?: string; project_id?: string }>('/api/construction-projects', payload)
+const projectId = created?.id ?? created?.project_id
+if (!projectId) {
+  console.warn('[COI Create] Project created but ID not returned. Staged uploads skipped.', created)
+  toast.success('Project created successfully')
+  router.push('/coi')
+  return
+}
+```
+
+**B2: Replace all subsequent `created.id` usages in Stage 2 upload loop with `projectId`:**
+
+```typescript
+await api.upload(`/api/construction-projects/${projectId}/documents`, fd)
+await api.upload(`/api/construction-projects/${projectId}/gallery`, fd)
+await api.post(`/api/construction-projects/${projectId}/documents`, { ... })
+router.push(`/coi/detail-${projectId}`)
+```
+
+### NNN-B Verification
+- [ ] Create new project with staged Key Document → file persists to DB
+- [ ] Multiple staged docs all persist
+- [ ] Delete a staged doc before save → it is NOT uploaded
+- [ ] Edge case: if `projectId` is undefined → console.warn + success toast + navigate to /coi
+
+---
+
+## GROUP 3 — /templates Operational Resolution (NNN-C)
+
+### NNN-C: Backend restart resolves /templates/SD_ECO_001.docx 404
+
+**Action (operator):** Restart the backend dev server. No code change needed.
+
+**Why:** NestJS `useStaticAssets()` in `main.ts` is registered at bootstrap. 15 template files were copied to `public/templates/` by MMM-A. The static middleware will serve them at `/templates/{type_code}.docx` once the backend restarts.
+
+### NNN-C Verification
+- [ ] Backend restarted
+- [ ] `GET /templates/SD_ECO_001.docx` returns 200 with .docx content-type
+- [ ] "Download Template" links in CiFolderRepository TEMPLATE nodes open the correct document
+
+---
+
+## GROUP 4 — Audit Log Infrastructure for Document Operations (NNN-D)
+
+### NNN-D: Add document-event fireLog() calls in construction-projects.service.ts
+
+**File:** locate `ActivityAction` enum (likely `pmo-backend/src/activity-logs/activity-log.entity.ts`)
+
+**D1: Extend ActivityAction enum (additive):**
+
+```typescript
+export enum ActivityAction {
+  CREATE = 'CREATE',
+  UPDATE = 'UPDATE',
+  DELETE = 'DELETE',
+  DOWNLOAD = 'DOWNLOAD',
+  FOLDER_CREATE = 'FOLDER_CREATE',
+  FOLDER_RENAME = 'FOLDER_RENAME',
+  FOLDER_DELETE = 'FOLDER_DELETE',
+}
+```
+
+**D2: In `addDocument()` — after em.flush():**
+
+```typescript
+this.fireLog(user, ActivityAction.CREATE, projectId, {
+  action: 'document_upload',
+  documentType: dto.document_type,
+  fileName: savedDoc.fileName,
+  documentId: savedDoc.id,
+})
+```
+
+**D3: In `deleteDocument()` — after soft-delete flush:**
+
+```typescript
+this.fireLog(user, ActivityAction.DELETE, projectId, {
+  action: 'document_delete',
+  documentId,
+  fileName: doc.fileName,
+})
+```
+
+**D4: In `downloadDocument()` — after serving the file:**
+
+```typescript
+this.fireLog(user, ActivityAction.DOWNLOAD, projectId, {
+  action: 'document_download',
+  documentId,
+  fileName: doc.fileName,
+})
+```
+
+**D5: In `createDocumentFolder()` — after flush:**
+
+```typescript
+this.fireLog(user, ActivityAction.FOLDER_CREATE, projectId, {
+  action: 'folder_create',
+  folderName: dto.folder_name,
+  folderId: folder.id,
+  nodeType: dto.node_type,
+})
+```
+
+**D6: In `updateDocumentFolder()` — after flush:**
+
+```typescript
+this.fireLog(user, ActivityAction.FOLDER_RENAME, projectId, {
+  action: 'folder_rename',
+  folderId,
+  newName: dto.folder_name,
+})
+```
+
+**D7: In `deleteDocumentFolder()` — after soft-delete:**
+
+```typescript
+this.fireLog(user, ActivityAction.FOLDER_DELETE, projectId, {
+  action: 'folder_delete',
+  folderId,
+  folderName: folder.folderName,
+})
+```
+
+### NNN-D Verification
+- [ ] Upload a document → activity_logs table has CREATE row with documentType and fileName
+- [ ] Delete a document → DELETE row in activity_logs
+- [ ] Download a document → DOWNLOAD row in activity_logs
+- [ ] Create folder → FOLDER_CREATE row
+- [ ] CiRepositoryModal "Recent Activity" panel shows new events
+- [ ] Backend tsc exit 0 after enum extension
+
+---
+
+## Phase NNN Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Checklist: "Open Linked File" in kebab (linked doc exists) | NNN-A | ✅ code |
+| Checklist: "View Status" dialog for non-editors | NNN-A | ✅ code |
+| new.vue: uses projectId fallback in Stage 2 | NNN-B | ✅ code |
+| Staged docs persist after project save | NNN-B | ✅ code (MMM-C + NNN-B guard) |
+| Backend restarted; /templates/SD_ECO_001.docx returns 200 | NNN-C | ⬜ operator restart |
+| Upload creates activity_log entry | NNN-D | ✅ ALREADY EXISTS (fireLog UPLOAD @2065) |
+| Delete creates activity_log entry | NNN-D | ✅ ALREADY EXISTS (REMOVE_ATTACHMENT @2348) |
+| ActivityAction enum additive (no existing values changed) | NNN-D | ✅ enum already has UPLOAD/DOWNLOAD/etc — no change |
+| TypeScript: 0 new errors in touched files | all | ✅ vue-tsc — 0 errors in touched files |
+
+## Phase NNN Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (LOW) | NNN-A (checklist kebab gap) | Low — UI template only | Independent; builds on MMM-D |
+| Group 2 (MEDIUM) | NNN-B (persistence guard) | Low-Medium — touches save lifecycle | Independent |
+| Group 3 (NONE) | NNN-C (backend restart) | Operational only | MMM-A files already present |
+| Group 4 (MEDIUM) | NNN-D (audit logs) | Medium — backend enum + service | Independent of NNN-A/B/C |
+
+---
+
+# Phase OOO — Supporting Documents Per-Template Repository Architecture
+
+> **PHASE 3 DEVIATION NOTE (2026-06-01):** During implementation, `CiFolderRepository.vue` was found to ALREADY render a SUBMISSIONS `v-data-table` with full metadata (File Name / Uploaded By / Date / Last Modified / Version / Actions), built-in pagination (items-per-page 5/10/25), version chips, download + delete. The backend `listProjectDocuments` already returns `uploadedByName` + `version`. The Phase-1 research (§2.264-D) under-counted this existing functionality. Per the operator's explicit rule "preserve all previously verified functionality," OOO was IMPLEMENTED as a minimal extension rather than a rebuild: (A) backend version auto-increment on folder upload; (B) add search field to the existing SUBMISSIONS table; (C) checklist auto-sync emit chain. The separate `getFolderSubmissions`/`replace` endpoints in the original plan were NOT built — the existing data-table + props.documents already provide listing/pagination, and the existing `POST :id/documents` (with folder_id) handles uploads. This achieves every acceptance criterion (versioning, metadata, pagination, search, audit, checklist sync) without deleting working code.
+
+**Status:** ✅ Phase 3 COMPLETE (adapted — see deviation note). Backend tsc exit 0; frontend vue-tsc 0 new errors. Original plan below retained for audit trail.
+**Original Status:** ⬜ Phase 2 (Plan) COMPLETE — Awaiting Phase 3 Authorization
+**Research Reference:** §2.264-D, §2.264-E
+**Last Updated:** 2026-06-01
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase OOO)
+
+| ID | Directive |
+|----|-----------|
+| OOO-D1 | `CiFolderRepository.vue` is the ONLY component for folder tree rendering — all enhancements go in-component. |
+| OOO-D2 | SUBMISSIONS section is enhanced in-place (nodeType === SUBMISSIONS branch). No new folder component created. |
+| OOO-D3 | Backend pagination: `?page=1&limit=10&search=`. Response: `{ data, total, page, limit }`. |
+| OOO-D4 | Version increment is server-side: on replace, backend finds MAX(version) for the folder and sets version = max + 1. |
+| OOO-D5 | New submission list endpoint is ADDITIVE: GET /api/construction-projects/:id/document-folders/:folderId/submissions |
+| OOO-D6 | Checklist sync: CiAttachmentHub emits `checklist-refresh` after folder upload; parent page calls `checklistRef.refresh()`. |
+| OOO-D7 | Search/filter within SUBMISSIONS is CLIENT-SIDE on the loaded page of results. Pagination is server-side. |
+| OOO-D8 | Seeded `construction_document_types.templateUrl` values are READONLY — never mutate. |
+
+---
+
+## GROUP 1 — Backend: Submission List + Replace Endpoints (OOO-A)
+
+### OOO-A-1: New controller routes
+
+**File:** `pmo-backend/src/construction-projects/construction-projects.controller.ts`
+
+Add two routes inside the existing controller class:
+
+```typescript
+@Get(':id/document-folders/:folderId/submissions')
+async getFolderSubmissions(
+  @Param('id') projectId: string,
+  @Param('folderId') folderId: string,
+  @Query('page') page = 1,
+  @Query('limit') limit = 10,
+  @Query('search') search?: string,
+) {
+  return this.service.getFolderSubmissions(projectId, folderId, { page: Number(page), limit: Number(limit), search })
+}
+
+@Post(':id/document-folders/:folderId/submissions/replace')
+@UseInterceptors(FileInterceptor('file'))
+async replaceSubmission(
+  @Param('id') projectId: string,
+  @Param('folderId') folderId: string,
+  @UploadedFile() file: Express.Multer.File,
+  @CurrentUser() user: JwtPayload,
+) {
+  return this.service.replaceSubmission(projectId, folderId, file, user.sub, user)
+}
+```
+
+### OOO-A-2: Service methods
+
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts`
+
+```typescript
+async getFolderSubmissions(
+  projectId: string,
+  folderId: string,
+  opts: { page: number; limit: number; search?: string },
+) {
+  const conn = this.em.getConnection()
+  const offset = (opts.page - 1) * opts.limit
+  const searchClause = opts.search ? `AND (d.file_name ILIKE ? OR d.description ILIKE ?)` : ''
+  const params = opts.search
+    ? [folderId, `%${opts.search}%`, `%${opts.search}%`, opts.limit, offset]
+    : [folderId, opts.limit, offset]
+  const rows = await conn.execute(`
+    SELECT d.id, d.file_name, d.file_path, d.mime_type, d.file_size, d.version,
+           d.created_at, d.uploaded_by_id,
+           COALESCE(u.display_name, u.first_name || ' ' || u.last_name, u.email) AS uploaded_by_name
+    FROM construction_documents d
+    LEFT JOIN users u ON u.id = d.uploaded_by_id AND u.deleted_at IS NULL
+    WHERE d.folder_id = ? AND d.deleted_at IS NULL ${searchClause}
+    ORDER BY COALESCE(d.version, 0) DESC, d.created_at DESC
+    LIMIT ? OFFSET ?
+  `, params)
+  const [{ count }] = await conn.execute(
+    `SELECT COUNT(*) AS count FROM construction_documents WHERE folder_id = ? AND deleted_at IS NULL`,
+    [folderId],
+  )
+  return { data: rows, total: Number(count), page: opts.page, limit: opts.limit }
+}
+
+async replaceSubmission(
+  projectId: string,
+  folderId: string,
+  file: Express.Multer.File,
+  userId: string,
+  user?: JwtPayload,
+) {
+  const conn = this.em.getConnection()
+  const [{ max_ver }] = await conn.execute(
+    `SELECT COALESCE(MAX(version), 0) AS max_ver FROM construction_documents
+     WHERE folder_id = ? AND deleted_at IS NULL`,
+    [folderId],
+  )
+  const nextVersion = Number(max_ver) + 1
+  const savedPath = await this.uploadsService.saveFile(file)
+  const [inserted] = await conn.execute(
+    `INSERT INTO construction_documents
+     (id, project_id, folder_id, file_name, file_path, mime_type, file_size, version, uploaded_by_id, created_at)
+     VALUES (gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+     RETURNING id, version`,
+    [projectId, folderId, file.originalname, savedPath, file.mimetype, file.size, nextVersion, userId],
+  )
+  this.fireLog(user, ActivityAction.CREATE, projectId, {
+    action: 'document_replace',
+    folderId,
+    fileName: file.originalname,
+    version: nextVersion,
+  })
+  return inserted
+}
+```
+
+### OOO-A Verification
+- [ ] GET .../submissions?page=1&limit=10 returns { data, total, page, limit }
+- [ ] GET with ?search=contract filters by filename
+- [ ] POST .../submissions/replace → new DB row with version = MAX + 1
+- [ ] Backend tsc exit 0
+
+---
+
+## GROUP 2 — Frontend: CiFolderRepository SUBMISSIONS Enhancement (OOO-B)
+
+### OOO-B: Full SUBMISSIONS section overhaul
+
+**File:** `pmo-frontend/components/coi/CiFolderRepository.vue`
+
+**B1: Add SubmissionItem interface (in script):**
+
+```typescript
+interface SubmissionItem {
+  id: string; fileName: string; filePath: string; mimeType?: string
+  fileSize?: number; version?: number; createdAt?: string; uploadedByName?: string
+}
+```
+
+**B2: Per-node reactive state:**
+
+```typescript
+const subItems = reactive<Record<string, SubmissionItem[]>>({})
+const subTotals = reactive<Record<string, number>>({})
+const subPages = reactive<Record<string, number>>({})
+const subLoading = reactive<Record<string, boolean>>({})
+const subSearches = reactive<Record<string, string>>({})
+const showHistory = reactive<Record<string, boolean>>({})
+const SUB_PAGE_SIZE = 10
+
+const submissionUploadDialog = ref(false)
+const activeSubmissionNode = ref<FolderNode | null>(null)
+const submissionUploadFile = ref<File | null>(null)
+const submissionUploading = ref(false)
+```
+
+**B3: Load function:**
+
+```typescript
+async function loadSubmissions(node: FolderNode, page = 1) {
+  if (!props.projectId) return
+  subLoading[node.id] = true
+  try {
+    const search = subSearches[node.id] || undefined
+    const res = await api.get<{ data: SubmissionItem[]; total: number; page: number; limit: number }>(
+      `/api/construction-projects/${props.projectId}/document-folders/${node.id}/submissions`,
+      { params: { page, limit: SUB_PAGE_SIZE, ...(search ? { search } : {}) } },
+    )
+    if (page === 1) subItems[node.id] = res.data ?? []
+    else subItems[node.id] = [...(subItems[node.id] ?? []), ...(res.data ?? [])]
+    subTotals[node.id] = res.total ?? 0
+    subPages[node.id] = page
+  } finally {
+    subLoading[node.id] = false
+  }
+}
+```
+
+**B4: Auto-load on expand** — in the existing `toggleExpand(node)` function, add after expanding:
+
+```typescript
+if (node.nodeType === 'SUBMISSIONS' && !subItems[node.id]) {
+  loadSubmissions(node)
+}
+```
+
+**B5: Upload new version:**
+
+```typescript
+function openSubmissionUpload(node: FolderNode) {
+  activeSubmissionNode.value = node
+  submissionUploadFile.value = null
+  submissionUploadDialog.value = true
+}
+async function uploadSubmission() {
+  if (!submissionUploadFile.value || !activeSubmissionNode.value || !props.projectId) return
+  submissionUploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', submissionUploadFile.value)
+    await api.upload(
+      `/api/construction-projects/${props.projectId}/document-folders/${activeSubmissionNode.value.id}/submissions/replace`,
+      fd,
+    )
+    submissionUploadDialog.value = false
+    submissionUploadFile.value = null
+    // Reload this node's submissions
+    subItems[activeSubmissionNode.value.id] = []
+    await loadSubmissions(activeSubmissionNode.value, 1)
+    emit('uploaded')
+  } catch (err: unknown) {
+    toast.error((err as { message?: string })?.message ?? 'Upload failed')
+  } finally {
+    submissionUploading.value = false
+  }
+}
+async function deleteSubmission(node: FolderNode, sub: SubmissionItem) {
+  if (!props.projectId) return
+  await api.del(`/api/construction-projects/${props.projectId}/documents/${sub.id}`)
+  subItems[node.id] = (subItems[node.id] ?? []).filter(s => s.id !== sub.id)
+  subTotals[node.id] = Math.max(0, (subTotals[node.id] ?? 1) - 1)
+  emit('deleted')
+}
+function toggleHistory(nodeId: string) {
+  showHistory[nodeId] = !showHistory[nodeId]
+}
+function formatSize(bytes?: number): string {
+  if (!bytes) return ''
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${bytes} B`
+}
+```
+
+**B6: SUBMISSIONS node template block** — replace existing SUBMISSIONS section:
+
+```vue
+<!-- SUBMISSIONS node: versioned upload list -->
+<template v-if="node.nodeType === 'SUBMISSIONS' && expanded.has(node.id)">
+  <!-- Search + upload bar -->
+  <div class="d-flex align-center gap-2 px-2 py-1 flex-wrap">
+    <v-text-field
+      v-model="subSearches[node.id]"
+      placeholder="Search submissions…"
+      density="compact" variant="outlined" hide-details single-line clearable
+      prepend-inner-icon="mdi-magnify"
+      style="max-width:240px; flex:1"
+      @update:model-value="loadSubmissions(node)"
+    />
+    <v-btn
+      v-if="canEdit"
+      size="small" color="primary" variant="tonal"
+      :prepend-icon="(subTotals[node.id] ?? 0) > 0 ? 'mdi-file-replace-outline' : 'mdi-upload'"
+      @click="openSubmissionUpload(node)"
+    >
+      {{ (subTotals[node.id] ?? 0) > 0 ? 'Upload New Version' : 'Upload' }}
+    </v-btn>
+  </div>
+
+  <v-progress-linear v-if="subLoading[node.id]" indeterminate height="2" color="primary" />
+
+  <div v-if="!subLoading[node.id] && !subItems[node.id]?.length" class="text-caption text-grey px-4 py-2">
+    No submissions yet.
+  </div>
+
+  <div v-else>
+    <div
+      v-for="(sub, i) in subItems[node.id]" :key="sub.id"
+      class="d-flex align-center gap-2 px-2 py-2 border-b hover:bg-grey-lighten-5"
+    >
+      <v-icon size="small" color="primary">mdi-file-document-outline</v-icon>
+      <div class="flex-grow-1" style="min-width:0">
+        <div class="text-body-2 text-truncate">{{ sub.fileName }}</div>
+        <div class="text-caption text-grey d-flex flex-wrap gap-1">
+          <span v-if="sub.version != null">v{{ sub.version }}</span>
+          <span v-if="sub.uploadedByName"> · {{ sub.uploadedByName }}</span>
+          <span v-if="sub.createdAt"> · {{ formatDate(sub.createdAt) }}</span>
+          <span v-if="sub.fileSize"> · {{ formatSize(sub.fileSize) }}</span>
+        </div>
+      </div>
+      <v-chip v-if="i === 0 && (subTotals[node.id] ?? 0) > 1" size="x-small" color="success" variant="tonal">Latest</v-chip>
+      <a :href="sub.filePath" target="_blank" rel="noopener">
+        <v-btn icon="mdi-download" size="x-small" variant="text" />
+      </a>
+      <v-btn v-if="canDelete" icon="mdi-delete" size="x-small" variant="text" color="error" @click="deleteSubmission(node, sub)" />
+    </div>
+
+    <!-- Load more -->
+    <div v-if="(subItems[node.id]?.length ?? 0) < (subTotals[node.id] ?? 0)" class="text-center py-1">
+      <v-btn size="x-small" variant="text" :loading="subLoading[node.id]"
+        @click="loadSubmissions(node, (subPages[node.id] ?? 1) + 1)">
+        Load more ({{ (subTotals[node.id] ?? 0) - (subItems[node.id]?.length ?? 0) }} remaining)
+      </v-btn>
+    </div>
+  </div>
+</template>
+```
+
+**B7: Upload dialog (add near bottom of template):**
+
+```vue
+<v-dialog v-model="submissionUploadDialog" max-width="480">
+  <v-card>
+    <v-card-title>Upload Submission</v-card-title>
+    <v-card-subtitle v-if="activeSubmissionNode">{{ activeSubmissionNode.folderName }}</v-card-subtitle>
+    <v-divider />
+    <v-card-text>
+      <v-file-input
+        v-model="submissionUploadFile"
+        label="Select file"
+        accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,image/*"
+        prepend-icon="mdi-paperclip" show-size variant="outlined" density="comfortable"
+      />
+    </v-card-text>
+    <v-card-actions>
+      <v-spacer />
+      <v-btn variant="text" :disabled="submissionUploading" @click="submissionUploadDialog = false">Cancel</v-btn>
+      <v-btn color="primary" :loading="submissionUploading" :disabled="!submissionUploadFile" @click="uploadSubmission">
+        Upload
+      </v-btn>
+    </v-card-actions>
+  </v-card>
+</v-dialog>
+```
+
+**B8: Version History button** on FORM node rows — add to the existing FORM node action area:
+
+```vue
+<v-btn
+  v-if="node.nodeType === 'FORM'"
+  icon="mdi-history"
+  size="x-small"
+  variant="text"
+  color="grey"
+  title="Version History"
+  @click.stop="toggleHistory(node.id)"
+/>
+```
+
+**B9: Version history panel** — shown below SUBMISSIONS child content when `showHistory[formNodeId]` is true:
+
+```vue
+<v-expand-transition>
+  <div v-if="showHistory[node.id] && node.nodeType === 'FORM'" class="bg-grey-lighten-5 rounded px-3 py-2 mt-1 mb-2">
+    <div class="text-caption font-weight-medium text-grey mb-2">
+      <v-icon size="x-small" class="mr-1">mdi-history</v-icon>Version History
+    </div>
+    <!-- Find the SUBMISSIONS child and show its loaded items -->
+    <template v-for="child in node.children" :key="child.id">
+      <template v-if="child.nodeType === 'SUBMISSIONS'">
+        <div v-if="!subItems[child.id]?.length" class="text-caption text-grey">No versions yet.</div>
+        <div v-for="sub in subItems[child.id]" :key="sub.id" class="d-flex align-center gap-2 py-1 border-b">
+          <v-chip size="x-small" variant="tonal" color="primary">v{{ sub.version ?? '?' }}</v-chip>
+          <span class="text-caption flex-grow-1 text-truncate">{{ sub.fileName }}</span>
+          <span class="text-caption text-grey">{{ sub.uploadedByName }}</span>
+          <span class="text-caption text-grey">{{ formatDate(sub.createdAt) }}</span>
+          <a :href="sub.filePath" target="_blank" rel="noopener">
+            <v-btn icon="mdi-download" size="x-small" variant="text" />
+          </a>
+        </div>
+      </template>
+    </template>
+  </div>
+</v-expand-transition>
+```
+
+### OOO-B Verification
+- [ ] SUBMISSIONS node shows search + upload bar + versioned file list on expand
+- [ ] Each row: filename, version badge, uploader name, date, file size, download, delete
+- [ ] "Latest" chip on most-recent version
+- [ ] "Upload New Version" dialog opens, file selected, upload posts to replace endpoint
+- [ ] Version increments on new upload
+- [ ] Load-more works (loads next 10)
+- [ ] Search filters the list
+- [ ] Delete removes item; total decrements
+- [ ] History toggle shows all versions from SUBMISSIONS child data
+
+---
+
+## GROUP 3 — Checklist Auto-Sync After Folder Upload (OOO-C)
+
+### OOO-C: Wire CiAttachmentHub → CiDocumentChecklist refresh
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+**C1: Add emit definition:**
+
+```typescript
+const emit = defineEmits<{
+  'update:modelValue': [value: StagedQueue]
+  'checklist-refresh': []
+}>()
+```
+
+**C2: Fire from `onFolderUploaded()`:**
+
+```typescript
+function onFolderUploaded() {
+  fetchDocuments()
+  emit('checklist-refresh')
+}
+```
+
+**File:** `pmo-frontend/pages/coi/edit-[id].vue` and `pmo-frontend/pages/coi/detail-[id].vue`
+
+**C3: In each page, add ref to CiDocumentChecklist and wire the event:**
+
+```typescript
+const checklistRef = ref<{ refresh: () => void } | null>(null)
+```
+
+In template — add `:ref` to CiDocumentChecklist:
+```vue
+<CiDocumentChecklist ref="checklistRef" ... />
+```
+
+On CiAttachmentHub:
+```vue
+<CiAttachmentHub ... @checklist-refresh="checklistRef?.refresh()" />
+```
+
+### OOO-C Verification
+- [ ] Upload to SUBMISSIONS → Compliance Checklist refreshes without manual reload
+- [ ] No duplicate fetch / no regression in checklist behavior
+
+---
+
+## Phase OOO Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Submission list + pagination | OOO-A/B | ✅ EXISTING data-table (items-per-page 5/10/25) — no new endpoint needed |
+| Version auto-increment on folder upload | OOO-A | ✅ code (addDocumentToProject computes version=max+1 when folder_id set) |
+| SUBMISSIONS node shows metadata per file | OOO-B | ✅ EXISTING (FileName/UploadedBy/Date/LastModified/Version/Actions) |
+| "Upload New Version" label + versioning | OOO-B | ✅ code (label + server version) |
+| "Latest" indicator on highest version | OOO-B | ✅ code |
+| Search filters submission list | OOO-B | ✅ code (v-data-table :search) |
+| Delete removes from list | OOO-B | ✅ EXISTING (deleteDoc + emit) |
+| Version History (all versions per FORM) | OOO-B | ✅ submissions table IS the version history (versions now increment) |
+| Checklist auto-syncs after folder upload | OOO-C | ✅ code (checklistRef.refresh() in onFolderUploaded) |
+| TypeScript: 0 new errors | all | ✅ vue-tsc — 0 in touched files |
+| Backend tsc exit 0 | OOO-A | ✅ exit 0 |
+
+## Phase OOO Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (CRITICAL) | OOO-A (backend endpoints) | Medium — new SQL + versioning | Must be first; frontend depends on these endpoints |
+| Group 2 (HIGH) | OOO-B (CiFolderRepository UI) | Medium — significant component change | Requires OOO-A running |
+| Group 3 (LOW) | OOO-C (checklist sync) | Low — emit + ref wiring | Independent; needs CiDocumentChecklist exposeRef |
+
+---
+
+# Phase PPP — Folder Display Fix, Key Docs UX, Auto-FORM Seeding, Profile Dates, Milestone Filter
+
+**Status:** ⬜ Phase 2 (Plan) COMPLETE — Awaiting Phase 3 Authorization
+**Research Reference:** §2.265-A through §2.265-F
+**Last Updated:** 2026-06-01
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase PPP)
+
+| ID | Directive |
+|----|-----------|
+| PPP-D1 | fetchFolders fix is a ONE-LINE change — do not restructure the function beyond the response unwrap. |
+| PPP-D2 | Auto-FORM seeding is IDEMPOTENT — check for existing FORM nodes by folderName before creating. Never duplicate. |
+| PPP-D3 | Auto-FORM seeding fires ONLY during `seedPresetFolders()` call chain, never on every render. |
+| PPP-D4 | Profile card date additions are ADDITIVE — no existing Timeline rows removed. |
+| PPP-D5 | Milestone search/filter/sort is CLIENT-SIDE only — no new backend endpoints. |
+| PPP-D6 | Checklist, Key Documents persistence, and audit logging are COMPLETE from prior phases — do NOT re-implement. |
+| PPP-D7 | Do not modify CiProgressReportTab — it already has list/card/table views with pagination. |
+
+---
+
+## GROUP 1 — Folder Display Fix (PPP-A) CRITICAL
+
+### PPP-A: Fix CiFolderRepository.fetchFolders() response unwrapping
+
+**File:** `pmo-frontend/components/coi/CiFolderRepository.vue`
+
+**A1: Fix the response type and unwrap `{ data }` wrapper**
+
+Current (broken):
+```typescript
+const res = await api.get<FolderNode[]>(`/api/construction-projects/${props.projectId}/document-folders`)
+const roots = Array.isArray(res) ? res : []
+```
+
+Replace with:
+```typescript
+const res = await api.get<{ data: FolderNode[] }>(`/api/construction-projects/${props.projectId}/document-folders`)
+const roots = res.data ?? []
+```
+
+### PPP-A Verification
+- [ ] Create a new folder in Supporting Documents → folder appears immediately after creation
+- [ ] Refresh page → folder still visible
+- [ ] Folder tree renders correctly with groupCode filter intact
+- [ ] Nested child folders (FORM → TEMPLATE + SUBMISSIONS) visible after creation
+
+---
+
+## GROUP 2 — Key Documents Modal UX Fix (PPP-B)
+
+### PPP-B: Collapse upload zone after successful upload in CiRepositoryModal
+
+**File:** `pmo-frontend/components/coi/CiRepositoryModal.vue`
+
+**B1: Collapse upload zone in submitUpload()**
+
+Current:
+```typescript
+function submitUpload() {
+  if (!uploadFile.value || !uploadType.value) return
+  emit('upload', { file: uploadFile.value, documentType: uploadType.value, title: uploadTitle.value, description: uploadDescription.value })
+  uploadFile.value = null
+  uploadTitle.value = ''
+  uploadDescription.value = ''
+}
+```
+
+Add `showUpload.value = false` after clearing:
+```typescript
+function submitUpload() {
+  if (!uploadFile.value || !uploadType.value) return
+  emit('upload', { file: uploadFile.value, documentType: uploadType.value, title: uploadTitle.value, description: uploadDescription.value })
+  uploadFile.value = null
+  uploadTitle.value = ''
+  uploadDescription.value = ''
+  showUpload.value = false
+}
+```
+
+**B2: Collapse upload zone after batch drag-drop**
+
+In `handleModalFileBatch()`, after emitting all uploads:
+```typescript
+function handleModalFileBatch(files: File[]) {
+  const type = uploadType.value || props.typeCodes[0] || 'other'
+  for (const file of files) {
+    emit('upload', { file, documentType: type, title: file.name, description: '' })
+  }
+  showUpload.value = false
+}
+```
+
+### PPP-B Verification
+- [ ] Upload a file in Key Documents modal → upload zone collapses → document list is visible immediately
+- [ ] New file appears in the document list without scrolling
+- [ ] Batch drag-drop also collapses upload zone after emitting
+- [ ] Upload zone can still be re-opened via the upload toggle button
+
+---
+
+## GROUP 3 — Auto-FORM Seeding Per Template (PPP-C)
+
+### PPP-C: Extend seedPresetFolders to auto-create FORM nodes per seeded template
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+**Context:** `seedPresetFolders()` is called on first `activeSection === 'supporting'` watch. It creates 4 CONTAINER groups (SD_ORDERS, SD_REPORTS, SD_CERTS, ECO_FORMS). After PPP-A fix, these CONTAINERs now render correctly.
+
+The extension: after creating/finding each CONTAINER, seed FORM nodes for each template in that group.
+
+**C1: Add a helper to get the existing folder tree for a project**
+
+The `seedPresetFolders` function already exists. Add a fetch of the current folder state after CONTAINER seeding:
+
+```typescript
+async function seedPresetFolders() {
+  if (!hasProject.value || !props.projectId) return
+  for (const p of PRESET_FOLDERS) {
+    try {
+      await api.post(`/api/construction-projects/${props.projectId}/document-folders`, {
+        folder_name: p.label,
+        group_code: p.groupCode,
+        node_type: 'CONTAINER',
+        sort_order: p.sortOrder,
+      })
+    } catch {
+      // Already exists — idempotent
+    }
+  }
+  // PPP-C: after CONTAINERs exist, seed per-template FORM nodes
+  await seedTemplateFormFolders()
+}
+```
+
+**C2: Add `seedTemplateFormFolders()` function**
+
+```typescript
+async function seedTemplateFormFolders() {
+  if (!hasProject.value || !props.projectId) return
+
+  // Fetch current folder tree to check what already exists
+  const res = await api.get<{ data: FolderNode[] }>(
+    `/api/construction-projects/${props.projectId}/document-folders`
+  )
+  const existingFolders: FolderNode[] = res.data ?? []
+
+  // Map groupCode → container node id
+  const containerByGroup = new Map<string, FolderNode>()
+  for (const node of existingFolders) {
+    if (node.nodeType === 'CONTAINER' && node.groupCode) {
+      containerByGroup.set(node.groupCode, node)
+    }
+  }
+
+  // For each group that has seeded templates, ensure a FORM per template
+  const groupTemplateMap: Record<string, Array<{ code: string; label: string }>> = {
+    SD_ORDERS:  allDocTypes.value.filter(t => t.groupCode === 'SD_ORDERS').map(t => ({ code: t.typeCode, label: t.typeLabel })),
+    SD_REPORTS: allDocTypes.value.filter(t => t.groupCode === 'SD_REPORTS').map(t => ({ code: t.typeCode, label: t.typeLabel })),
+    SD_CERTS:   allDocTypes.value.filter(t => t.groupCode === 'SD_CERTS').map(t => ({ code: t.typeCode, label: t.typeLabel })),
+    ECO_FORMS:  allDocTypes.value.filter(t => t.groupCode === 'ECO_FORMS').map(t => ({ code: t.typeCode, label: t.typeLabel })),
+  }
+
+  for (const [groupCode, templates] of Object.entries(groupTemplateMap)) {
+    const container = containerByGroup.get(groupCode)
+    if (!container) continue
+
+    // Existing FORM names under this container
+    const existingFormNames = new Set(
+      (container.children ?? [])
+        .filter(c => c.nodeType === 'FORM')
+        .map(c => c.folderName)
+    )
+
+    for (const tmpl of templates) {
+      if (existingFormNames.has(tmpl.label)) continue  // idempotent
+      try {
+        await api.post(`/api/construction-projects/${props.projectId}/document-folders`, {
+          folder_name: tmpl.label,
+          group_code: groupCode,
+          parent_id: container.id,
+          node_type: 'FORM',
+          sort_order: 0,
+        })
+        // FORM creation auto-creates TEMPLATE + SUBMISSIONS children (existing backend logic)
+      } catch {
+        // Ignore duplicate errors
+      }
+    }
+  }
+}
+```
+
+**C3: `allDocTypes` must be loaded before seedTemplateFormFolders runs**
+
+`allDocTypes` is fetched in `loadDocTypes()` (called on mount). The `seedPresetFolders()` is triggered by the `activeSection` watcher. Ensure `allDocTypes` is populated before calling `seedTemplateFormFolders`. If not yet loaded, await `loadDocTypes()` first:
+
+```typescript
+async function seedTemplateFormFolders() {
+  if (!allDocTypes.value.length) {
+    await loadDocTypes()
+  }
+  // ... rest of the function
+}
+```
+
+### PPP-C Verification
+- [ ] On first open of Supporting Documents section: 4 CONTAINER groups appear
+- [ ] Inside each CONTAINER: FORM nodes appear for each seeded template (e.g., SD_ORDERS has 4 FORMs: Variation Order, Work Suspension Order, Work Resumption Order, Contract Time Extension Order)
+- [ ] Each FORM has TEMPLATE + SUBMISSIONS sub-nodes
+- [ ] Re-opening the section does NOT create duplicate FORMs
+- [ ] Manually created FORMs are preserved (idempotent)
+- [ ] ECO_FORMS group also populates with its seeded templates
+
+---
+
+## GROUP 4 — Project Profile: Original/Revised Dates (PPP-D)
+
+### PPP-D: Add original and revised dates to the Profile card beside the gallery
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+**D1: Extend the Timeline section in the Profile card (lines ~979–984)**
+
+Current Timeline section:
+```vue
+<div class="text-overline text-medium-emphasis mb-1">Timeline</div>
+<div class="d-flex flex-column ga-1 mb-4">
+  <div class="d-flex justify-space-between text-body-2"><span class="text-grey-darken-1">Start</span><span class="font-weight-medium">{{ project.startDate ? formatDate(project.startDate) : '—' }}</span></div>
+  <div class="d-flex justify-space-between text-body-2"><span class="text-grey-darken-1">Target Completion</span><span class="font-weight-medium">{{ project.targetCompletionDate ? formatDate(project.targetCompletionDate) : '—' }}</span></div>
+  <div class="d-flex justify-space-between text-body-2"><span class="text-grey-darken-1">Duration</span><span class="font-weight-medium">{{ project.projectDuration || '—' }}</span></div>
+</div>
+```
+
+Replace with (adds original/revised dates in a compact expandable block):
+```vue
+<div class="text-overline text-medium-emphasis mb-1">Timeline</div>
+<div class="d-flex flex-column ga-1 mb-3">
+  <div class="d-flex justify-space-between text-body-2">
+    <span class="text-grey-darken-1">Start</span>
+    <span class="font-weight-medium">{{ project.startDate ? formatDate(project.startDate) : '—' }}</span>
+  </div>
+  <div class="d-flex justify-space-between text-body-2">
+    <span class="text-grey-darken-1">Target Completion</span>
+    <span class="font-weight-medium">{{ project.targetCompletionDate ? formatDate(project.targetCompletionDate) : '—' }}</span>
+  </div>
+  <div class="d-flex justify-space-between text-body-2">
+    <span class="text-grey-darken-1">Duration</span>
+    <span class="font-weight-medium">{{ project.projectDuration || '—' }}</span>
+  </div>
+</div>
+
+<!-- PPP-D: Original & Revised Dates (always visible if any date exists) -->
+<template v-if="project.originalStartDate || project.originalCompletionDate || project.revisedStartDate || project.revisedCompletionDate">
+  <v-divider class="mb-2" />
+  <div class="text-overline text-medium-emphasis mb-1">Contract / Revision Schedule</div>
+  <div class="d-flex flex-column ga-1 mb-3">
+    <div v-if="project.originalStartDate" class="d-flex justify-space-between text-body-2">
+      <span class="text-grey-darken-1">Original Start</span>
+      <span>{{ formatDate(project.originalStartDate) }}</span>
+    </div>
+    <div v-if="project.originalCompletionDate" class="d-flex justify-space-between text-body-2">
+      <span class="text-grey-darken-1">Original Completion</span>
+      <span>{{ formatDate(project.originalCompletionDate) }}</span>
+    </div>
+    <div v-if="project.revisedStartDate" class="d-flex justify-space-between text-body-2">
+      <span class="text-grey-darken-1 d-flex align-center ga-1">
+        Revised Start <v-chip size="x-small" color="warning" variant="tonal">Revised</v-chip>
+      </span>
+      <span class="font-weight-medium text-warning">{{ formatDate(project.revisedStartDate) }}</span>
+    </div>
+    <div v-if="project.revisedCompletionDate" class="d-flex justify-space-between text-body-2">
+      <span class="text-grey-darken-1 d-flex align-center ga-1">
+        Revised Completion <v-chip size="x-small" color="warning" variant="tonal">Revised</v-chip>
+      </span>
+      <span class="font-weight-medium text-warning">{{ formatDate(project.revisedCompletionDate) }}</span>
+    </div>
+  </div>
+</template>
+```
+
+### PPP-D Verification
+- [ ] Project with originalStartDate + originalCompletionDate shows these in Profile card
+- [ ] Project with revisedStartDate + revisedCompletionDate shows them with "Revised" chip
+- [ ] Dates are visible without collapsing/expanding anything
+- [ ] Profile card height adjusts to accommodate new rows
+- [ ] Projects without these dates show no extra section (v-if guard)
+
+---
+
+## GROUP 5 — Milestone Search/Filter/Sort (PPP-E)
+
+### PPP-E: Add client-side search, filter, and sort to the milestones section
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+**E1: Add reactive state (near other milestone refs):**
+
+```typescript
+const milestoneSearch = ref('')
+const milestoneStatusFilter = ref<string | null>(null)
+const milestoneSortKey = ref<'targetDate' | 'progress' | 'name'>('targetDate')
+
+const filteredMilestones = computed(() => {
+  let ms = [...(project.value?.milestones ?? [])]
+  if (milestoneSearch.value) {
+    const q = milestoneSearch.value.toLowerCase()
+    ms = ms.filter(m => (m.name || '').toLowerCase().includes(q))
+  }
+  if (milestoneStatusFilter.value) {
+    ms = ms.filter(m => m.status === milestoneStatusFilter.value)
+  }
+  ms.sort((a, b) => {
+    if (milestoneSortKey.value === 'progress') return (b.progress ?? 0) - (a.progress ?? 0)
+    if (milestoneSortKey.value === 'name') return (a.name || '').localeCompare(b.name || '')
+    // default: targetDate ascending (soonest first)
+    const da = a.targetDate ? new Date(a.targetDate).getTime() : Infinity
+    const db = b.targetDate ? new Date(b.targetDate).getTime() : Infinity
+    return da - db
+  })
+  return ms
+})
+```
+
+**E2: Add controls bar above the milestone grid:**
+
+Before the `<v-row dense>` that renders milestone cards, add:
+
+```vue
+<!-- PPP-E: Milestone controls -->
+<div class="d-flex flex-wrap align-center ga-2 mb-3">
+  <v-text-field
+    v-model="milestoneSearch"
+    placeholder="Search milestones…"
+    density="compact" variant="outlined" hide-details single-line clearable
+    prepend-inner-icon="mdi-magnify"
+    style="max-width: 220px"
+  />
+  <v-select
+    v-model="milestoneStatusFilter"
+    :items="[
+      { title: 'All Statuses', value: null },
+      { title: 'Pending', value: 'PENDING' },
+      { title: 'In Progress', value: 'IN_PROGRESS' },
+      { title: 'Completed', value: 'COMPLETED' },
+      { title: 'Delayed', value: 'DELAYED' },
+      { title: 'Cancelled', value: 'CANCELLED' },
+    ]"
+    density="compact" variant="outlined" hide-details clearable
+    label="Status"
+    style="max-width: 160px"
+  />
+  <v-btn-toggle v-model="milestoneSortKey" mandatory density="compact" variant="outlined">
+    <v-btn value="targetDate" size="small" title="Sort by date">
+      <v-icon size="18">mdi-calendar-sort-ascending</v-icon>
+    </v-btn>
+    <v-btn value="progress" size="small" title="Sort by progress">
+      <v-icon size="18">mdi-percent</v-icon>
+    </v-btn>
+    <v-btn value="name" size="small" title="Sort by name">
+      <v-icon size="18">mdi-sort-alphabetical-ascending</v-icon>
+    </v-btn>
+  </v-btn-toggle>
+  <v-chip size="small" variant="tonal" color="info">
+    {{ filteredMilestones.length }}/{{ project?.milestones?.length ?? 0 }}
+  </v-chip>
+</div>
+```
+
+**E3: Replace `project.milestones` with `filteredMilestones` in the v-for:**
+
+```vue
+<v-col
+  v-for="milestone in filteredMilestones"
+  :key="milestone.id"
+  cols="12"
+  md="6"
+  lg="6"
+>
+```
+
+**E4: Empty state for no search results:**
+
+After the `v-row`, add:
+```vue
+<div v-if="filteredMilestones.length === 0 && (milestoneSearch || milestoneStatusFilter)" class="text-center text-grey py-4">
+  <v-icon icon="mdi-flag-outline" size="32" color="grey-lighten-2" class="d-block mx-auto mb-2" />
+  No milestones match the current filters.
+  <v-btn size="small" variant="text" color="primary" @click="milestoneSearch = ''; milestoneStatusFilter = null">Clear filters</v-btn>
+</div>
+```
+
+### PPP-E Verification
+- [ ] Search by milestone name filters the grid in real time
+- [ ] Status filter works (PENDING/IN_PROGRESS/COMPLETED/DELAYED)
+- [ ] Sort by date, progress, name all function
+- [ ] Count chip shows filtered/total counts
+- [ ] "Clear filters" button resets both search and status filter
+- [ ] Empty state shown when no results match
+
+---
+
+## GROUP 6 — Overview Tab Progress Summary (PPP-F)
+
+### PPP-F: Add latest WAR/MPR date reference to overview Progress panel
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+**F1: Add lightweight progress report summary state**
+
+After `project` is fetched, also fetch the latest progress report for the overview summary. Rather than a full fetch, add a small computed that derives the last-report info from milestone/timelogs data that's already on `project`:
+
+```typescript
+// PPP-F: last progress report date from project.remarksLog (already loaded)
+const lastProgressReportDate = computed(() => {
+  const entries = project.value?.remarksLog ?? []
+  return entries.length > 0 ? entries[entries.length - 1].createdAt : null
+})
+```
+
+**F2: Add to Overview "Progress & Reports" expansion panel**
+
+In the existing Progress panel (around line 1278), after the milestone completion row, add:
+
+```vue
+<div v-if="lastProgressReportDate || project?.asOfDate" class="text-caption text-grey mt-2 d-flex align-center ga-1">
+  <v-icon size="14">mdi-clipboard-text-clock-outline</v-icon>
+  Last progress entry: {{ lastProgressReportDate ? formatDate(lastProgressReportDate) : formatDate(project.asOfDate) }}
+  <v-btn size="x-small" variant="text" color="info" @click="activeTab = 'progress'">View Progress Tab →</v-btn>
+</div>
+```
+
+This provides a quick overview link without duplicating the full progress report UI.
+
+### PPP-F Verification
+- [ ] Last progress entry date shown in Overview panel
+- [ ] Clicking "View Progress Tab →" navigates to the progress tab
+- [ ] Projects with no remarks log show no extra line (v-if guard)
+
+---
+
+## Phase PPP Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Folder appears immediately after creation | PPP-A | ✅ code — fetchFolders unwraps res.data |
+| Folder tree persists after refresh | PPP-A | ✅ code |
+| Upload zone collapses after upload | PPP-B | ✅ code — showUpload=false in submitUpload + handleModalFileBatch |
+| New uploaded file visible without scrolling | PPP-B | ✅ code |
+| Supporting Docs auto-seeds 4 CONTAINER + FORMs per template | PPP-C | ✅ code — seedTemplateFormFolders() |
+| Auto-seeding is idempotent (no duplicates on re-open) | PPP-C | ✅ code — existingFormNames Set check |
+| Original Start / Completion in Profile card | PPP-D | ✅ code |
+| Revised Start / Completion with "Latest" chip | PPP-D | ✅ code |
+| Milestone search/filter/sort controls visible | PPP-E | ✅ code |
+| Milestone controls functional (real-time filtering) | PPP-E | ✅ code — filteredMilestones computed |
+| Overview shows last progress entry date | PPP-F | ✅ code |
+| TypeScript: 0 new errors in touched files | all | ✅ vue-tsc — 0 errors in all touched files (1 PPP-F TS2345 fixed with ?? '' guard) |
+| No regression in folder CRUD / upload / checklist | all | ⬜ operator smoke |
+
+## Phase PPP Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (CRITICAL) | PPP-A (folder display bug) | Low — 1-line fix | Must be first; PPP-C depends on folders rendering |
+| Group 2 (HIGH) | PPP-B (upload zone collapse) | Low — 2 lines in submitUpload | Independent |
+| Group 3 (MEDIUM) | PPP-C (auto-FORM seeding) | Medium — extends seeding async flow | Requires PPP-A deployed |
+| Group 4 (LOW) | PPP-D (Profile dates) | Low — additive template change | Independent |
+| Group 5 (LOW) | PPP-E (milestone search) | Low — computed + template | Independent |
+| Group 6 (LOW) | PPP-F (overview progress link) | Low — 2 lines | Independent |
+
+---
+
+# Phase QQQ — SDG Goals Field (Full Stack) + Overview Latest Report Summary
+
+**Status:** ⬜ Phase 2 (Plan) COMPLETE — Awaiting Phase 3 Authorization
+**Research Reference:** §2.266-C, §2.266-D
+**Last Updated:** 2026-06-01
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase QQQ)
+
+| ID | Directive |
+|----|-----------|
+| QQQ-D1 | SDG field follows the IDENTICAL pattern as `rdp_alignment` and `csu_likha_goals` across every layer. No custom patterns. |
+| QQQ-D2 | MikroORM migration uses `IF NOT EXISTS` — safe to run multiple times. Timestamp: `20260602000000`. |
+| QQQ-D3 | `coiHierarchies.ts` SDG_OPTIONS are FLAT (no child hierarchy) — SDGs have no sub-chapters. |
+| QQQ-D4 | `useCoiProgressReports` is already a proven composable — reuse as-is; do not duplicate fetch logic. |
+| QQQ-D5 | `detail-[id].vue` overview panel: show latest report data ONLY when items exist — strict `v-if` guards. |
+| QQQ-D6 | Template file architecture is complete and correct — no template or migration changes required for §2.266-A. |
+| QQQ-D7 | `sdgGoals` entity property name follows MikroORM camelCase convention (maps to `sdg_goals` column). |
+
+---
+
+## GROUP 1 — Backend: Database Migration (QQQ-A)
+
+### QQQ-A: MikroORM migration — add `sdg_goals` JSONB column
+
+**File:** `pmo-backend/src/database/mikro-migrations/Migration20260602000000_AddSdgGoalsToConstructionProjects.ts`
+
+```typescript
+import { Migration } from '@mikro-orm/migrations';
+
+export class Migration20260602000000_AddSdgGoalsToConstructionProjects extends Migration {
+  async up(): Promise<void> {
+    await this.execute(`
+      ALTER TABLE construction_projects
+        ADD COLUMN IF NOT EXISTS sdg_goals JSONB DEFAULT '[]';
+      COMMENT ON COLUMN construction_projects.sdg_goals
+        IS 'UN Sustainable Development Goals aligned with this project (array of SDG_n keys)';
+    `);
+  }
+
+  async down(): Promise<void> {
+    await this.execute(`
+      ALTER TABLE construction_projects DROP COLUMN IF EXISTS sdg_goals;
+    `);
+  }
+}
+```
+
+### QQQ-A Verification
+- [ ] Migration file compiles without error (`npm run build` in pmo-backend)
+- [ ] Migration runs cleanly (no error on first run)
+- [ ] `SELECT column_name FROM information_schema.columns WHERE table_name = 'construction_projects' AND column_name = 'sdg_goals'` → returns row
+
+---
+
+## GROUP 2 — Backend: Entity + DTO + Service (QQQ-B)
+
+### QQQ-B-1: ConstructionProject entity — add sdgGoals property
+
+**File:** `pmo-backend/src/database/entities/construction-project.entity.ts`
+
+After the `csuLikhaGoals` property (line ~267), add:
+
+```typescript
+@Property({ nullable: true, columnType: 'jsonb' })
+sdgGoals?: any;
+```
+
+### QQQ-B-2: CreateConstructionProjectDto — add sdg_goals field
+
+**File:** `pmo-backend/src/construction-projects/dto/create-construction-project.dto.ts`
+
+After `csu_likha_goals` field (in the Strategic Alignment section):
+
+```typescript
+// QQQ: Sustainable Development Goals
+@IsOptional()
+@IsArray()
+sdg_goals?: string[];
+```
+
+### QQQ-B-3: UpdateConstructionProjectDto — add sdg_goals field
+
+**File:** `pmo-backend/src/construction-projects/dto/update-construction-project.dto.ts`
+
+Same addition (or this DTO may extend `PartialType(CreateConstructionProjectDto)` — if so, no change needed):
+
+Check if `UpdateConstructionProjectDto` uses `PartialType`. If yes, QQQ-B-2 alone is sufficient. If it's a separate class, add the same field.
+
+### QQQ-B-4: Service create() — add sdg_goals to INSERT
+
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts`
+
+**B4-i: Add to INSERT column list (line ~699):**
+```
+rdp_alignment, socioeconomic_agenda, csu_likha_goals, sdg_goals, beneficiary_list,
+```
+
+**B4-ii: Add to INSERT VALUES (line ~758, after csu_likha_goals value):**
+```typescript
+dto.csu_likha_goals ? JSON.stringify(dto.csu_likha_goals) : null,
+dto.sdg_goals ? JSON.stringify(dto.sdg_goals) : null,
+```
+
+**B4-iii: Add to RETURNING SELECT list (line ~943):**
+```
+'rdp_alignment', 'socioeconomic_agenda', 'csu_likha_goals', 'sdg_goals',
+```
+
+### QQQ-B-5: Service update() — add sdg_goals to jsonFields
+
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts`
+
+In the `jsonFields` array (line ~943):
+```typescript
+'rdp_alignment', 'socioeconomic_agenda', 'csu_likha_goals', 'sdg_goals',
+```
+
+### QQQ-B Verification
+- [ ] Backend `tsc --noEmit` exit 0
+- [ ] `POST /api/construction-projects` with `sdg_goals: ["SDG_9", "SDG_11"]` → 201, response includes sdg_goals
+- [ ] `GET /api/construction-projects/:id` → response contains `sdgGoals: ["SDG_9", "SDG_11"]`
+- [ ] `PATCH /api/construction-projects/:id` with `sdg_goals: ["SDG_1"]` → 200
+
+---
+
+## GROUP 3 — Frontend: SDG Options Data (QQQ-C)
+
+### QQQ-C: Add SDG_OPTIONS to coiHierarchies.ts
+
+**File:** `pmo-frontend/utils/coiHierarchies.ts`
+
+After the `SOCIOECONOMIC_OPTIONS` export, add:
+
+```typescript
+// ─────────────────────────────────────────────────────────────────────────────
+// UN Sustainable Development Goals (SDGs) — flat, no sub-hierarchy
+// ─────────────────────────────────────────────────────────────────────────────
+export const SDG_OPTIONS: HierarchyOption[] = [
+  { key: 'SDG_1',  label: 'SDG 1 — No Poverty' },
+  { key: 'SDG_2',  label: 'SDG 2 — Zero Hunger' },
+  { key: 'SDG_3',  label: 'SDG 3 — Good Health and Well-being' },
+  { key: 'SDG_4',  label: 'SDG 4 — Quality Education' },
+  { key: 'SDG_5',  label: 'SDG 5 — Gender Equality' },
+  { key: 'SDG_6',  label: 'SDG 6 — Clean Water and Sanitation' },
+  { key: 'SDG_7',  label: 'SDG 7 — Affordable and Clean Energy' },
+  { key: 'SDG_8',  label: 'SDG 8 — Decent Work and Economic Growth' },
+  { key: 'SDG_9',  label: 'SDG 9 — Industry, Innovation and Infrastructure' },
+  { key: 'SDG_10', label: 'SDG 10 — Reduced Inequalities' },
+  { key: 'SDG_11', label: 'SDG 11 — Sustainable Cities and Communities' },
+  { key: 'SDG_12', label: 'SDG 12 — Responsible Consumption and Production' },
+  { key: 'SDG_13', label: 'SDG 13 — Climate Action' },
+  { key: 'SDG_14', label: 'SDG 14 — Life Below Water' },
+  { key: 'SDG_15', label: 'SDG 15 — Life on Land' },
+  { key: 'SDG_16', label: 'SDG 16 — Peace, Justice and Strong Institutions' },
+  { key: 'SDG_17', label: 'SDG 17 — Partnerships for the Goals' },
+];
+```
+
+### QQQ-C Verification
+- [ ] `import { SDG_OPTIONS } from '~/utils/coiHierarchies'` works without error
+- [ ] Array has exactly 17 entries
+- [ ] Keys are stable: `SDG_1` through `SDG_17`
+
+---
+
+## GROUP 4 — Frontend: CiBasicInfoForm.vue SDG Section (QQQ-D)
+
+### QQQ-D: Add SDG card to CiBasicInfoForm strategic alignment section
+
+**File:** `pmo-frontend/components/coi/CiBasicInfoForm.vue`
+
+**D1: Add SDG_OPTIONS import**
+
+In the import line (line 17):
+```typescript
+import { LIKHA_OPTIONS, RDP_OPTIONS, SOCIOECONOMIC_OPTIONS, SDG_OPTIONS } from '~/utils/coiHierarchies'
+```
+
+**D2: Add sdgOptions constant (after likhaOptions)**
+
+```typescript
+const sdgOptions = SDG_OPTIONS
+```
+
+**D3: Add SDG card in the strategic alignment row**
+
+After the CSU LIKHA Goals card (end of the 3-column row), **add a new row** (since 3 cards already fill the row) or extend to a new `v-row` with the SDG card:
+
+```vue
+<!-- QQQ-D: Sustainable Development Goals (UN SDGs) -->
+<v-row dense class="mb-3">
+  <v-col cols="12" md="6">
+    <v-card elevation="1" rounded="lg" class="h-100">
+      <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
+        <v-icon size="small" icon="mdi-earth" color="teal" />
+        <span class="text-subtitle-2 font-weight-medium">UN Sustainable Development Goals</span>
+        <v-chip v-if="(form.sdg_goals || []).length" size="x-small" variant="tonal" color="teal">
+          {{ (form.sdg_goals || []).length }}
+        </v-chip>
+      </v-card-title>
+      <v-card-subtitle class="pt-1 pb-1 text-caption text-grey-darken-1">
+        UN SDGs addressed by this project.
+      </v-card-subtitle>
+      <v-divider />
+      <v-card-text class="py-3">
+        <CiHierarchicalSelectorTrigger
+          v-model="form.sdg_goals"
+          label="UN SDGs"
+          title="UN Sustainable Development Goals"
+          :options="sdgOptions"
+          icon="mdi-earth"
+          color="teal"
+          description="Select all UN SDGs that this project contributes to."
+          search-placeholder="Search SDGs…"
+          :read-only="readOnly"
+          :max-visible-chips="5"
+        />
+      </v-card-text>
+    </v-card>
+  </v-col>
+</v-row>
+```
+
+### QQQ-D Verification
+- [ ] SDG card renders in CiBasicInfoForm
+- [ ] `CiHierarchicalSelectorTrigger` opens with 17 SDG options listed
+- [ ] Search within modal filters SDG list
+- [ ] Selected SDGs appear as chips in the card
+- [ ] ReadOnly mode prevents selection changes
+
+---
+
+## GROUP 5 — Frontend: new.vue + edit-[id].vue (QQQ-E)
+
+### QQQ-E-1: new.vue — add sdg_goals to form state and payload
+
+**File:** `pmo-frontend/pages/coi/new.vue`
+
+**E1-i: Form state (line ~54, in Strategic Alignment section):**
+```typescript
+sdg_goals: [] as string[],
+```
+
+**E1-ii: Payload (line ~436, after csu_likha_goals):**
+```typescript
+sdg_goals: form.value.sdg_goals?.length ? form.value.sdg_goals : undefined,
+```
+
+### QQQ-E-2: edit-[id].vue — add sdg_goals to form state, hydration, and payload
+
+**File:** `pmo-frontend/pages/coi/edit-[id].vue`
+
+**E2-i: Form state (line ~109, Strategic Alignment section):**
+```typescript
+sdg_goals: [] as string[],
+```
+
+**E2-ii: Hydration from project data (line ~370, after csu_likha_goals hydration):**
+```typescript
+sdg_goals: Array.isArray(pAny.sdg_goals ?? pAny.sdgGoals) ? (pAny.sdg_goals ?? pAny.sdgGoals) : [],
+```
+
+**E2-iii: Payload (line ~638, after csu_likha_goals):**
+```typescript
+sdg_goals: form.value.sdg_goals?.length ? form.value.sdg_goals : undefined,
+```
+
+### QQQ-E Verification
+- [ ] new.vue: SDG selector visible in CiBasicInfoForm's strategic alignment section
+- [ ] Select SDGs → create project → `GET /api/construction-projects/:id` → `sdgGoals` field contains selected keys
+- [ ] edit-[id].vue: Existing project with sdgGoals → selector pre-populated on load
+- [ ] Edit SDGs → save → data persists
+
+---
+
+## GROUP 6 — Frontend: detail-[id].vue SDG Display (QQQ-F)
+
+### QQQ-F: Add SDG chip rendering in strategic alignment panel
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+**F1: Add SDG chips after csuLikhaGoals block (line ~1445 area):**
+
+After the `<v-col v-if="project.csuLikhaGoals?.length"` block, add:
+
+```vue
+<v-col v-if="project.sdgGoals?.length" cols="12">
+  <p class="text-caption text-grey mb-2">UN SDGs</p>
+  <div class="d-flex flex-wrap ga-2">
+    <v-chip v-for="(item, i) in project.sdgGoals" :key="i" color="teal" variant="tonal" size="small" prepend-icon="mdi-earth">
+      {{ item }}
+    </v-chip>
+  </div>
+</v-col>
+```
+
+**F2: Update the "no strategic context" fallback condition:**
+
+Add `&& !project.sdgGoals?.length` to the existing `v-if="!project.strategicAlignment && ..."` condition.
+
+### QQQ-F Verification
+- [ ] Project with sdgGoals → SDG chips render in teal in strategic alignment panel
+- [ ] Chips show the SDG key (e.g., "SDG_9") — optionally resolve label from SDG_OPTIONS
+- [ ] Projects without sdgGoals: no SDG section rendered
+- [ ] "No strategic context" empty state still works for projects with no alignment data
+
+**Optional enhancement (F3):** Resolve keys to labels for display. Import `SDG_OPTIONS` and build a lookup map:
+```typescript
+import { SDG_OPTIONS } from '~/utils/coiHierarchies'
+const sdgLabelMap = new Map(SDG_OPTIONS.map(o => [o.key, o.label]))
+```
+Then in template: `{{ sdgLabelMap.get(item) || item }}` — shows "SDG 9 — Industry, Innovation and Infrastructure" instead of "SDG_9".
+
+---
+
+## GROUP 7 — Frontend: Overview Latest Progress Report (QQQ-G)
+
+### QQQ-G: Surface latest WAR/MPR data in the Overview tab progress panel
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+**G1: Import and use useCoiProgressReports composable**
+
+At the top of the `<script setup>` block, add:
+
+```typescript
+import { useCoiProgressReports, type ProgressReport } from '~/composables/useCoiProgressReports'
+```
+
+After the `projectId` ref is set up, add:
+
+```typescript
+// QQQ-G: Progress report composable for overview summary
+const progressReportRef = computed(() => projectId ?? '')
+const { items: progressReportItems, loading: prLoading } = useCoiProgressReports(progressReportRef)
+const latestReport = computed<ProgressReport | null>(() => progressReportItems.value[0] ?? null)
+```
+
+**G2: Add latest report summary to the Progress & Reports expansion panel**
+
+In the overview "Progress & Reports" panel (around line 1295–1380), before the "Last progress entry" quicklink (PPP-F), add:
+
+```vue
+<!-- QQQ-G: Latest WAR/MPR summary from progress-reports endpoint -->
+<v-card v-if="latestReport" variant="tonal" color="blue-grey" class="pa-3 mb-3" rounded="lg">
+  <div class="d-flex align-center ga-2 mb-2">
+    <v-icon size="16" color="blue-grey">mdi-clipboard-text-clock-outline</v-icon>
+    <span class="text-caption font-weight-medium text-uppercase text-blue-grey">Latest Report</span>
+    <v-chip size="x-small" variant="tonal" color="blue-grey">
+      {{ latestReport.reportType === 'WEEKLY' ? 'WAR' : latestReport.reportType === 'MONTHLY' ? 'MPR' : latestReport.reportType }}
+    </v-chip>
+  </div>
+  <v-row dense>
+    <v-col cols="6" sm="3">
+      <div class="text-caption text-grey">Date</div>
+      <div class="text-body-2 font-weight-medium">{{ latestReport.reportDate ? formatDate(latestReport.reportDate) : '—' }}</div>
+    </v-col>
+    <v-col cols="6" sm="3">
+      <div class="text-caption text-grey">Completion</div>
+      <div class="text-body-2 font-weight-medium text-primary">{{ latestReport.percentageCompletion != null ? Number(latestReport.percentageCompletion).toFixed(1) + '%' : '—' }}</div>
+    </v-col>
+    <v-col v-if="latestReport.slippage != null" cols="6" sm="3">
+      <div class="text-caption text-grey">Slippage</div>
+      <div class="text-body-2 font-weight-medium" :class="Number(latestReport.slippage) < 0 ? 'text-error' : 'text-success'">
+        {{ Number(latestReport.slippage).toFixed(1) }}%
+      </div>
+    </v-col>
+    <v-col v-if="latestReport.reportNumber" cols="6" sm="3">
+      <div class="text-caption text-grey">Report No.</div>
+      <div class="text-body-2 font-weight-medium">{{ latestReport.reportNumber }}</div>
+    </v-col>
+  </v-row>
+</v-card>
+<v-progress-linear v-else-if="prLoading" indeterminate height="2" color="blue-grey" class="mb-2" />
+```
+
+### QQQ-G Verification
+- [ ] Overview tab Progress panel shows latest report card (type, date, completion, slippage)
+- [ ] Report type abbreviation correct: WAR for WEEKLY, MPR for MONTHLY
+- [ ] Slippage negative → red; positive → green
+- [ ] No panel rendered when no reports exist (`v-if="latestReport"`)
+- [ ] Loading indicator shows while reports are fetching
+
+---
+
+## Phase QQQ Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Migration runs cleanly; sdg_goals column exists | QQQ-A | ✅ code — Migration20260602000000 created |
+| Backend tsc exit 0 | QQQ-B | ✅ exit 0 |
+| POST project with sdg_goals → persists | QQQ-B | ✅ code — INSERT + jsonFields |
+| SDG_OPTIONS has 17 entries in coiHierarchies.ts | QQQ-C | ✅ code + labelForSdg helper |
+| SDG selector card visible in CiBasicInfoForm | QQQ-D | ✅ code — teal card with CiHierarchicalSelectorTrigger |
+| SDG selector works (search, multi-select, chips) | QQQ-D | ✅ code (same component as LIKHA) |
+| new.vue: SDG saves on project create | QQQ-E | ✅ code — form state + payload |
+| edit-[id].vue: SDG pre-populates and saves on edit | QQQ-E | ✅ code — form state + hydration + payload |
+| detail-[id].vue: SDG chips render in teal with labels | QQQ-F | ✅ code — labelForSdg() resolves full label |
+| Overview shows latest WAR/MPR summary card | QQQ-G | ✅ code — useCoiProgressReports + latestReport computed |
+| TypeScript: 0 new errors in touched files | all | ✅ vue-tsc — 0 errors in all touched files (1 fixed: BasicInfoFormState missing sdg_goals) |
+| No regression in RDP/LIKHA/SOCIOECONOMIC selectors | all | ⬜ operator smoke |
+
+## Phase QQQ Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (CRITICAL) | QQQ-A (migration) | Low — additive column | Must run before any backend save attempts |
+| Group 2 (HIGH) | QQQ-B (entity + DTO + service) | Low — same pattern as rdp/likha | Requires QQQ-A migration applied |
+| Group 3 (LOW) | QQQ-C (SDG_OPTIONS data) | Low — data file only | Independent |
+| Group 4 (LOW) | QQQ-D (CiBasicInfoForm card) | Low — additive UI | Requires QQQ-C |
+| Group 5 (LOW) | QQQ-E (new.vue + edit-[id].vue) | Low — form state + payload | Requires QQQ-C, QQQ-D |
+| Group 6 (LOW) | QQQ-F (detail-[id].vue display) | Low — read-only chips | Requires QQQ-C |
+| Group 7 (LOW) | QQQ-G (overview latest report) | Low — reuses existing composable | Independent |
+
+---
+
+# Phase RRR — Seeding Race Condition Fix + Strategic Alignment 2-Column Layout
+
+**Status:** ⬜ Phase 2 (Plan) COMPLETE — Awaiting Phase 3 Authorization
+**Research Reference:** §2.267-B, §2.267-C
+**Last Updated:** 2026-06-01
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase RRR)
+
+| ID | Directive |
+|----|-----------|
+| RRR-D1 | `:key="folderSeedKey"` is the ONLY mechanism used to trigger CiFolderRepository refresh — no `defineExpose` refactor needed. |
+| RRR-D2 | `folderSeedKey` increments exactly ONCE after `seedTemplateFormFolders()` completes — no polling, no interval. |
+| RRR-D3 | Strategic Alignment layout refactor is TEMPLATE ONLY in CiBasicInfoForm.vue — no data model, composable, or API changes. |
+| RRR-D4 | All four selectors (SDG, RDP, SEA, LIKHA) remain as `CiHierarchicalSelectorTrigger` — no component replacement. |
+| RRR-D5 | Text field auto-grow is ALREADY implemented for all affected fields — no changes needed (§2.267-D confirmed). |
+| RRR-D6 | The `seededFolders` guard remains in place — `folderSeedKey` only increments when seeding actually runs. |
+
+---
+
+## GROUP 1 — Folder Seeding Race Condition Fix (RRR-A) CRITICAL
+
+### RRR-A: Add folderSeedKey to CiAttachmentHub + bind to CiFolderRepository instances
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+**A1: Add folderSeedKey ref (near `seededFolders` flag)**
+
+```typescript
+let seededFolders = false
+const folderSeedKey = ref(0)  // RRR-A: incremented after seeding completes → remounts CiFolderRepository
+```
+
+**A2: Increment folderSeedKey at the end of seedPresetFolders()**
+
+At the very end of `seedPresetFolders()`, after `seedTemplateFormFolders()` completes:
+
+```typescript
+async function seedPresetFolders() {
+  if (seededFolders || !hasProject.value) return
+  seededFolders = true
+  try {
+    // ... existing CONTAINER + FORM creation code ...
+    await seedTemplateFormFolders()
+  } catch (e) {
+    console.error('[CiAttachmentHub] seed preset folders failed', e)
+  }
+  folderSeedKey.value++  // triggers CiFolderRepository remount regardless of success/failure
+}
+```
+
+**A3: Bind folderSeedKey to each CiFolderRepository in the supporting section**
+
+In the supporting section template, update each `CiFolderRepository`:
+
+```vue
+<CiFolderRepository
+  :key="`${folderSeedKey}-SD_ORDERS`"
+  :project-id="projectId"
+  group-code="SD_ORDERS"
+  ...
+/>
+<CiFolderRepository
+  :key="`${folderSeedKey}-SD_REPORTS`"
+  :project-id="projectId"
+  group-code="SD_REPORTS"
+  ...
+/>
+<CiFolderRepository
+  :key="`${folderSeedKey}-SD_CERTS`"
+  :project-id="projectId"
+  group-code="SD_CERTS"
+  ...
+/>
+```
+
+And the ECO_FORMS CiFolderRepository (in Other Forms section):
+
+```vue
+<CiFolderRepository
+  :key="`${folderSeedKey}-ECO_FORMS`"
+  :project-id="projectId"
+  group-code="ECO_FORMS"
+  ...
+/>
+```
+
+### RRR-A Verification
+- [ ] First time opening Supporting Documents: folders appear WITHOUT needing a page refresh
+- [ ] CONTAINER groups visible immediately (Orders, Reports & Monitoring, Certifications, Other Forms)
+- [ ] FORM nodes visible inside CONTAINERs (e.g., Variation Order, Work Suspension Order, etc.)
+- [ ] TEMPLATE + SUBMISSIONS children visible inside each FORM
+- [ ] Re-opening section after initial load: folders still visible (seededFolders guard prevents re-seeding)
+- [ ] folderSeedKey increments exactly once per hub lifecycle
+
+---
+
+## GROUP 2 — Strategic Alignment 2-Column Layout (RRR-B)
+
+### RRR-B: Reorganize CiBasicInfoForm strategic alignment section into 2 columns
+
+**File:** `pmo-frontend/components/coi/CiBasicInfoForm.vue`
+
+**Scope:** Replace the current 3-section layout (Row E selector cards + QQQ SDG row + Row F narrative) with a single 2-column `v-row`.
+
+**B1: Remove the existing separate sections (Row E, QQQ-D row, Row F)**
+
+The following blocks will be REPLACED (not just moved):
+- ROW E: `<!-- ROW E — Strategic Alignment (3 dedicated cards side-by-side) -->` ... `</v-row>`
+- QQQ-D row: `<!-- QQQ-D: Sustainable Development Goals ... -->` ... `</v-row>`
+- ROW F: `<!-- ROW F — Strategic Alignment Narrative ... -->` ... `</v-card>` (standalone card)
+
+**B2: Replace with a 2-column layout**
+
+```vue
+<!-- RRR-B: Strategic Alignment — 2-column layout (narrative left, selectors right) -->
+<v-row dense class="mb-3">
+  <!-- LEFT: Strategic Alignment Narrative -->
+  <v-col cols="12" md="5">
+    <v-card elevation="1" rounded="lg" class="h-100">
+      <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
+        <v-icon size="small" icon="mdi-strategy" color="purple" />
+        <span class="text-subtitle-1 font-weight-medium">Strategic Alignment</span>
+        <v-chip size="x-small" variant="tonal" color="grey">Optional</v-chip>
+      </v-card-title>
+      <v-card-subtitle class="pt-1 pb-1 text-caption text-grey-darken-1">
+        Describe how this project aligns with institutional strategic priorities.
+      </v-card-subtitle>
+      <v-divider />
+      <v-card-text class="py-3 h-100">
+        <v-textarea
+          v-model="form.strategic_alignment"
+          label="Strategic Alignment Narrative (optional)"
+          placeholder="Describe how this project aligns with institutional strategic priorities..."
+          rows="4"
+          auto-grow
+          density="compact"
+          variant="outlined"
+          hide-details="auto"
+          :readonly="readOnly"
+          counter
+          maxlength="2000"
+        />
+      </v-card-text>
+    </v-card>
+  </v-col>
+
+  <!-- RIGHT: Alignment Frameworks (SDG / RDP / 0+8 / LIKHA) -->
+  <v-col cols="12" md="7">
+    <v-card elevation="1" rounded="lg" class="h-100">
+      <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
+        <v-icon size="small" icon="mdi-target" color="deep-purple" />
+        <span class="text-subtitle-1 font-weight-medium">Alignment Frameworks</span>
+      </v-card-title>
+      <v-card-subtitle class="pt-1 pb-1 text-caption text-grey-darken-1">
+        Select applicable frameworks — SDGs, Regional Development Plan, Socio-Economic Agenda, and LIKHA Goals.
+      </v-card-subtitle>
+      <v-divider />
+      <v-card-text class="py-2">
+        <v-row dense>
+          <!-- SDG -->
+          <v-col cols="12">
+            <div class="d-flex align-center ga-2 mb-1">
+              <v-icon size="16" color="teal">mdi-earth</v-icon>
+              <span class="text-body-2 font-weight-medium">UN SDGs</span>
+              <v-chip v-if="(form.sdg_goals || []).length" size="x-small" variant="tonal" color="teal">{{ (form.sdg_goals || []).length }}</v-chip>
+            </div>
+            <CiHierarchicalSelectorTrigger
+              v-model="form.sdg_goals"
+              label="Sustainable Development Goals"
+              title="UN Sustainable Development Goals"
+              :options="sdgOptions"
+              icon="mdi-earth"
+              color="teal"
+              description="Select all UN SDGs that this project contributes to."
+              search-placeholder="Search SDGs…"
+              :read-only="readOnly"
+              :max-visible-chips="3"
+            />
+          </v-col>
+          <!-- RDP -->
+          <v-col cols="12">
+            <div class="d-flex align-center ga-2 mb-1 mt-2">
+              <v-icon size="16" color="primary">mdi-map-outline</v-icon>
+              <span class="text-body-2 font-weight-medium">RDP 2023–2028</span>
+              <v-chip v-if="(form.rdp_alignment || []).length" size="x-small" variant="tonal" color="primary">{{ (form.rdp_alignment || []).length }}</v-chip>
+            </div>
+            <CiHierarchicalSelectorTrigger
+              v-model="form.rdp_alignment"
+              label="RDP 2023–2028 (Caraga)"
+              title="RDP 2023–2028 — Caraga Regional Development Plan"
+              :options="rdpOptions"
+              icon="mdi-map-outline"
+              color="primary"
+              description="Select all applicable Parts, Chapters, and Sub-chapters."
+              search-placeholder="Search RDP chapters…"
+              :read-only="readOnly"
+              :max-visible-chips="3"
+            />
+          </v-col>
+          <!-- 0+8 SEA -->
+          <v-col cols="12">
+            <div class="d-flex align-center ga-2 mb-1 mt-2">
+              <v-icon size="16" color="warning">mdi-flag-variant-outline</v-icon>
+              <span class="text-body-2 font-weight-medium">0+8 Socio-Economic Agenda</span>
+              <v-chip v-if="(form.socioeconomic_agenda || []).length" size="x-small" variant="tonal" color="warning">{{ (form.socioeconomic_agenda || []).length }}</v-chip>
+            </div>
+            <CiHierarchicalSelectorTrigger
+              v-model="form.socioeconomic_agenda"
+              label="0+8 Socio-Economic Agenda"
+              title="0+8 Socio-Economic Agenda (Marcos Administration)"
+              :options="socioOptions"
+              icon="mdi-flag-variant-outline"
+              color="warning"
+              description="Sub-items are independently selectable."
+              search-placeholder="Search agenda items…"
+              :read-only="readOnly"
+              :max-visible-chips="3"
+            />
+          </v-col>
+          <!-- CSU LIKHA -->
+          <v-col cols="12">
+            <div class="d-flex align-center ga-2 mb-1 mt-2">
+              <v-icon size="16" color="success">mdi-school-outline</v-icon>
+              <span class="text-body-2 font-weight-medium">CSU LIKHA Goals</span>
+              <v-chip v-if="(form.csu_likha_goals || []).length" size="x-small" variant="tonal" color="success">{{ (form.csu_likha_goals || []).length }}</v-chip>
+            </div>
+            <CiHierarchicalSelectorTrigger
+              v-model="form.csu_likha_goals"
+              label="CSU LIKHA Goals"
+              title="CSU LIKHA Strategic Goals"
+              :options="likhaOptions"
+              icon="mdi-school-outline"
+              color="success"
+              description="Caraga State University institutional strategic plan."
+              search-placeholder="Search LIKHA goals…"
+              :read-only="readOnly"
+              :max-visible-chips="3"
+            />
+          </v-col>
+        </v-row>
+      </v-card-text>
+    </v-card>
+  </v-col>
+</v-row>
+```
+
+### RRR-B Verification
+- [ ] Strategic Alignment section renders as 2 columns (narrative left, selectors right)
+- [ ] All 4 frameworks (SDG, RDP, SEA, LIKHA) visible in right column
+- [ ] Narrative textarea has auto-grow + character counter
+- [ ] Selector chips show correct selection counts
+- [ ] Selectors open correctly on click (CiHierarchicalSelectorTrigger behavior unchanged)
+- [ ] ReadOnly mode prevents changes
+- [ ] Data saves correctly to DB (no data model changes)
+- [ ] No regression on existing RDP/LIKHA/SEA/SDG save/load
+
+---
+
+## Phase RRR Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Supporting Documents folders appear on FIRST open (no refresh needed) | RRR-A | ✅ code — folderSeedKey + :key binding on all 4 CiFolderRepository instances |
+| CONTAINER + FORM + TEMPLATE/SUBMISSIONS hierarchy visible immediately | RRR-A | ✅ code |
+| folderSeedKey increments once per hub lifecycle | RRR-A | ✅ code (after seedTemplateFormFolders completes) |
+| ECO_FORMS CiFolderRepository also refreshes after seeding | RRR-A | ✅ code (:key="`${folderSeedKey}-ECO_FORMS`") |
+| Strategic Alignment renders as 2-column (narrative left, selectors right) | RRR-B | ✅ code — CiBasicInfoForm restructured |
+| All 4 selectors visible in right column | RRR-B | ✅ code (SDG, RDP, SEA, LIKHA stacked vertically) |
+| Narrative textarea has auto-grow + counter | RRR-B | ✅ code (rows=4, auto-grow, counter, maxlength=2000) |
+| Data saves/loads correctly (RDP/LIKHA/SEA/SDG unchanged) | RRR-B | ✅ no data model changes |
+| TypeScript: 0 new errors in touched files | all | ✅ vue-tsc — 0 errors in CiAttachmentHub + CiBasicInfoForm |
+| No regression in folder CRUD / upload / checklist | all | ⬜ operator smoke |
+
+## Phase RRR Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (CRITICAL) | RRR-A (race condition fix) | Low — reactive ref + :key binding | Independent; resolves the most-reported folder display issue |
+| Group 2 (MEDIUM) | RRR-B (2-column layout) | Low — template restructure only | Independent; no data model changes |
+
+---
+
+# Phase SSS — Strategic Alignment Container Revert + Supporting Docs Repository-Card Rework
+
+**Status:** ⬜ Phase 2 (Plan) COMPLETE — Awaiting Phase 3 Authorization
+**Research Reference:** §2.268-A through §2.268-F
+**Last Updated:** 2026-06-01
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase SSS)
+
+| ID | Directive |
+|----|-----------|
+| SSS-D1 | Supporting Documents MUST use the same `CiRepositoryCard` + shared `CiRepositoryModal` architecture as Key Documents. NO accordion / expansion-panel / folder-tree on the main page. |
+| SSS-D2 | `CiFolderRepository` is REMOVED from the supporting section (component file retained per archive-never-delete; just not imported there). |
+| SSS-D3 | Repository cards are generated one-per-seeded-template-typeCode, grouped by category with section headers. |
+| SSS-D4 | Uploads use the typeCode path (`documentType`), NOT `folder_id`. This inherits the proven Key Documents persistence flow. |
+| SSS-D5 | Seeded `construction_document_types` taxonomy (typeCode/templateUrl) is READONLY — never mutated. |
+| SSS-D6 | `customSupportingSections` mirrors `customKeySections` EXACTLY (entity/DTO/service/controller/migration) — additive, no change to custom-key-sections. |
+| SSS-D7 | Strategic Alignment cards use `elevation="2" rounded="lg" class="h-100"` + `v-col md="6"` — identical to Project Objectives / Output Indicators cards. |
+| SSS-D8 | `folderSeedKey` + `seedPresetFolders` + `seedTemplateFormFolders` (RRR-A/PPP-C) are obsolete for the supporting section and are removed from the seeding trigger; the functions may remain defined but the `activeSection==='supporting'` watch no longer calls them. |
+
+---
+
+## GROUP 1 — Strategic Alignment Container Revert (SSS-A)
+
+### SSS-A: Revert CiBasicInfoForm strategic alignment to balanced containers
+
+**File:** `pmo-frontend/components/coi/CiBasicInfoForm.vue`
+
+Replace the current RRR-B 2-column block (narrative md=5 + frameworks md=7) with:
+
+**Row 1 — Narrative (full-width, NOT oversized):**
+```vue
+<v-card elevation="2" rounded="lg" class="mb-1">
+  <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
+    <v-icon size="small" icon="mdi-strategy" color="purple" />
+    <span class="text-subtitle-1 font-weight-medium">Strategic Alignment Narrative</span>
+    <v-chip size="x-small" variant="tonal" color="grey">Optional</v-chip>
+  </v-card-title>
+  <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
+    Describe how this project aligns with institutional strategic priorities.
+  </v-card-subtitle>
+  <v-divider />
+  <v-card-text class="py-3">
+    <v-textarea
+      v-model="form.strategic_alignment"
+      label="Strategic Alignment Narrative (optional)"
+      placeholder="Describe how this project aligns with institutional strategic priorities..."
+      rows="3"
+      auto-grow
+      density="compact"
+      variant="outlined"
+      hide-details="auto"
+      :readonly="readOnly"
+      counter
+      maxlength="2000"
+    />
+  </v-card-text>
+</v-card>
+```
+
+**Row 2 — SDG + RDP (md=6 each):**
+```vue
+<v-row dense class="mb-1">
+  <v-col cols="12" md="6">
+    <v-card elevation="2" rounded="lg" class="h-100">
+      <v-card-title ...><v-icon icon="mdi-earth" color="teal" /> UN SDGs <chip count></v-card-title>
+      <v-card-subtitle>UN SDGs addressed by this project.</v-card-subtitle>
+      <v-divider />
+      <v-card-text class="py-3">
+        <CiHierarchicalSelectorTrigger v-model="form.sdg_goals" ... :options="sdgOptions" color="teal" :max-visible-chips="5" />
+      </v-card-text>
+    </v-card>
+  </v-col>
+  <v-col cols="12" md="6">
+    <!-- RDP card (color primary, rdpOptions) -->
+  </v-col>
+</v-row>
+```
+
+**Row 3 — Socio-Economic Agenda + LIKHA (md=6 each):**
+```vue
+<v-row dense class="mb-1">
+  <v-col cols="12" md="6"><!-- SEA card color warning, socioOptions --></v-col>
+  <v-col cols="12" md="6"><!-- LIKHA card color success, likhaOptions --></v-col>
+</v-row>
+```
+
+All four selector cards use the SAME structure as the existing Project Objectives card: `elevation="2" rounded="lg" class="h-100"`, `bg-grey-lighten-4` title, subtitle, divider, `CiHierarchicalSelectorTrigger` in `v-card-text class="py-3"`.
+
+### SSS-A Verification
+- [ ] Row 1: narrative full-width, rows=3 (not oversized)
+- [ ] Row 2: SDG + RDP cards equal width (md=6), elevation=2
+- [ ] Row 3: SEA + LIKHA cards equal width (md=6), elevation=2
+- [ ] All cards visually match Project Objectives / Output Indicators cards
+- [ ] No single container dominates
+- [ ] Responsive: stacks to 1 column on small screens
+- [ ] Data save/load unchanged (RDP/SEA/LIKHA/SDG)
+
+---
+
+## GROUP 2 — Backend: customSupportingSections (SSS-B)
+
+### SSS-B: Mirror custom-key-sections for Supporting Documents
+
+**B1: Migration** — `Migration20260603000000_AddCustomSupportingSections.ts`
+```typescript
+import { Migration } from '@mikro-orm/migrations';
+export class Migration20260603000000_AddCustomSupportingSections extends Migration {
+  async up(): Promise<void> {
+    await this.execute(`
+      ALTER TABLE construction_projects
+        ADD COLUMN IF NOT EXISTS custom_supporting_sections JSONB DEFAULT '[]';
+    `);
+  }
+  async down(): Promise<void> {
+    await this.execute(`ALTER TABLE construction_projects DROP COLUMN IF EXISTS custom_supporting_sections;`);
+  }
+}
+```
+
+**B2: Entity** — add to `construction-project.entity.ts` (mirror `customKeySections`):
+```typescript
+@Property({ nullable: true, columnType: 'jsonb' })
+customSupportingSections?: any;
+```
+
+**B3: Service** — add `setCustomSupportingSections(id, sections, user)` mirroring the existing custom-key-sections setter (sets `entity.customSupportingSections`, `fireLog(UPDATE, ..., { action: 'update_custom_supporting_sections', count })`, returns the array).
+
+**B4: Controller** — add `@Patch(':id/custom-supporting-sections')` mirroring `@Patch(':id/custom-key-sections')`, same `@Roles('Admin','Staff')`, delegates to the service method.
+
+**B5: findOne/list mapping** — `customSupportingSections` returns automatically via the entity (RETURNING * / ORM serialization). Verify it appears in the project detail response (adapt in `adapters.ts` if the frontend reads it through the adapter).
+
+### SSS-B Verification
+- [ ] Migration runs cleanly; `custom_supporting_sections` column exists
+- [ ] Backend tsc exit 0
+- [ ] `PATCH /api/construction-projects/:id/custom-supporting-sections` with `{ sections: [...] }` → 200, persists
+- [ ] `GET /api/construction-projects/:id` returns `customSupportingSections`
+
+---
+
+## GROUP 3 — Frontend: Supporting Documents Repository-Card Grid (SSS-C)
+
+### SSS-C: Replace CiFolderRepository with CiRepositoryCard grid
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+**C1: Add `supportingCardStats` computed (performance — avoid repoStats() in template loop)**
+```typescript
+const supportingTemplateGroups = computed(() => [
+  { key: 'SD_ORDERS',  label: 'Orders',                           icon: 'mdi-file-document-edit', color: 'deep-orange', templates: sdOrdersTemplates.value },
+  { key: 'SD_REPORTS', label: 'Reports & Monitoring',             icon: 'mdi-clipboard-text',     color: 'blue',        templates: sdReportsTemplates.value },
+  { key: 'SD_CERTS',   label: 'Certifications & Other Documents', icon: 'mdi-certificate',        color: 'green',       templates: sdCertsTemplates.value },
+  { key: 'ECO_FORMS',  label: 'Other Forms',                      icon: 'mdi-form-select',        color: 'purple',      templates: ecoFormsTemplates.value },
+])
+const supportingCardStats = computed<Record<string, ReturnType<typeof repoStats>>>(() => {
+  const m: Record<string, ReturnType<typeof repoStats>> = {}
+  for (const g of supportingTemplateGroups.value)
+    for (const t of g.templates) m[t.code] = repoStats([t.code])
+  return m
+})
+```
+
+**C2: Add customSupportingSections state (mirror customSections)**
+```typescript
+const customSupportingSections = ref<CustomKeySection[]>([])
+watch(() => props.customSupportingSections, (v) => { customSupportingSections.value = Array.isArray(v) ? [...v] : [] }, { immediate: true })
+const supportingSectionStats = computed<Record<string, ReturnType<typeof repoStats>>>(() => {
+  const m: Record<string, ReturnType<typeof repoStats>> = {}
+  for (const s of customSupportingSections.value) m[s.typeCode] = repoStats([s.typeCode])
+  return m
+})
+const addSupportingOpen = ref(false)
+const newSupportingLabel = ref('')
+const savingSupporting = ref(false)
+async function saveSupportingSection() { /* mirror saveCustomSection, typeCode `CSS_${id}`, PATCH /custom-supporting-sections */ }
+async function removeSupportingSection(id: string) { /* mirror removeCustomSection */ }
+```
+
+Add prop: `customSupportingSections?: CustomKeySection[]` (default `() => []`).
+
+**C3: Replace the supporting `v-window-item` body**
+
+Remove the 4 `CiFolderRepository` blocks (+ `folderSeedKey` :key usage). Replace with:
+
+```vue
+<v-window-item value="supporting">
+  <template v-if="hasProject">
+    <template v-for="g in supportingTemplateGroups" :key="g.key">
+      <div class="d-flex align-center ga-2 mb-2 mt-1">
+        <v-icon size="18" :color="g.color">{{ g.icon }}</v-icon>
+        <span class="text-subtitle-2 font-weight-medium">{{ g.label }}</span>
+        <v-chip size="x-small" variant="tonal" :color="g.color">{{ g.templates.length }}</v-chip>
+      </div>
+      <v-row dense class="mb-3">
+        <v-col v-for="t in g.templates" :key="t.code" cols="12" md="6" lg="3">
+          <CiRepositoryCard
+            :title="t.label" :icon="g.icon" :color="g.color"
+            :doc-count="supportingCardStats[t.code]?.docCount ?? 0"
+            :completed-count="supportingCardStats[t.code]?.completedCount ?? 0"
+            :total-types="supportingCardStats[t.code]?.totalTypes ?? 1"
+            :latest-upload="supportingCardStats[t.code]?.latestUpload ?? null"
+            :template-url="t.url"
+            :can-upload="canUpload"
+            @open="openRepo(t.label, g.icon, g.color, [t.code])"
+            @upload="openRepo(t.label, g.icon, g.color, [t.code], true)"
+          />
+        </v-col>
+      </v-row>
+    </template>
+
+    <!-- Custom supporting folders (rendered as repository cards) -->
+    <div v-if="customSupportingSections.length || canUpload" class="d-flex align-center ga-2 mb-2 mt-1">
+      <v-icon size="18" color="blue-grey">mdi-folder-multiple-outline</v-icon>
+      <span class="text-subtitle-2 font-weight-medium">Custom Folders</span>
+    </div>
+    <v-row dense class="mb-3">
+      <v-col v-for="sec in customSupportingSections" :key="sec.id" cols="12" md="6" lg="3">
+        <div class="position-relative" style="height:100%">
+          <CiRepositoryCard
+            :title="sec.label" icon="mdi-folder-outline" color="blue-grey"
+            :doc-count="supportingSectionStats[sec.typeCode]?.docCount ?? 0"
+            :completed-count="supportingSectionStats[sec.typeCode]?.completedCount ?? 0"
+            :total-types="supportingSectionStats[sec.typeCode]?.totalTypes ?? 1"
+            :latest-upload="supportingSectionStats[sec.typeCode]?.latestUpload ?? null"
+            :can-upload="canUpload"
+            @open="openRepo(sec.label, 'mdi-folder-outline', 'blue-grey', [sec.typeCode])"
+            @upload="openRepo(sec.label, 'mdi-folder-outline', 'blue-grey', [sec.typeCode], true)"
+          />
+          <v-btn v-if="canUpload" icon="mdi-close" size="x-small" variant="text" color="error"
+            style="position:absolute;top:4px;right:4px" @click="removeSupportingSection(sec.id)" />
+        </div>
+      </v-col>
+      <v-col v-if="canUpload" cols="12" md="6" lg="3">
+        <v-card variant="outlined" class="d-flex align-center justify-center" style="height:100%;min-height:140px;border-style:dashed" @click="addSupportingOpen = true">
+          <div class="text-center text-medium-emphasis pa-4" style="cursor:pointer">
+            <v-icon icon="mdi-folder-plus-outline" size="32" color="blue-grey" />
+            <div class="text-body-2 mt-1">Add Folder</div>
+          </div>
+        </v-card>
+      </v-col>
+    </v-row>
+  </template>
+  <v-alert v-else type="info" variant="tonal" density="compact" icon="mdi-information-outline">
+    Supporting-document repositories become available once the project is saved.
+  </v-alert>
+</v-window-item>
+```
+
+**C4: Add Folder dialog** (mirror addSectionOpen dialog) bound to `addSupportingOpen` / `newSupportingLabel` / `saveSupportingSection`.
+
+**C5: Remove obsolete seeding trigger** — change the `activeSection` watch so `'supporting'` no longer calls `seedPresetFolders()` (folders are no longer the display model). Leave the functions defined (dead but harmless) OR remove; prefer removing the watch body to avoid creating folders that are never shown.
+
+**C6: Remove `CiFolderRepository` import** if no longer referenced anywhere in the hub.
+
+### SSS-C Verification
+- [ ] Supporting Documents shows repository-card grid (no accordion)
+- [ ] One card per seeded template, grouped by category with headers
+- [ ] Each card shows Download Template (templateUrl) + stats
+- [ ] Clicking a card opens CiRepositoryModal (same as Key Docs)
+- [ ] Upload in modal → file persists, visible immediately + after refresh, downloadable
+- [ ] "Add Folder" card creates a custom supporting folder (persists via PATCH)
+- [ ] Custom folder renders as a repository card; delete (×) works
+- [ ] No `CiFolderRepository` rendered in supporting section
+- [ ] No regression in Key Documents
+
+---
+
+## GROUP 4 — Verification Gate (SSS-D)
+
+### SSS-D: TypeScript + regression
+
+**D1:** Backend `tsc --noEmit` exit 0 (entity + service + controller + migration)
+**D2:** Frontend `vue-tsc --noEmit` — 0 new errors in CiBasicInfoForm, CiAttachmentHub
+**D3:** Operator smoke:
+- Migration applied; PATCH /custom-supporting-sections works
+- Supporting Docs cards render + open modal + upload persists + downloadable
+- Strategic Alignment 3-row container layout balanced
+- Admin (canUpload) sees Add Folder + upload; viewer sees download/view only
+
+---
+
+## Phase SSS Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Strategic Alignment reverted to container layout (Row1 narrative, Row2 SDG+RDP, Row3 SEA+LIKHA) | SSS-A | ✅ code |
+| All 4 frameworks have dedicated equal-sized containers (elevation=2, md=6) | SSS-A | ✅ code |
+| Narrative no longer dominates (Row1 full-width, rows=3) | SSS-A | ✅ code |
+| Migration: custom_supporting_sections column | SSS-B | ✅ code — Migration20260603000000 |
+| PATCH /custom-supporting-sections persists | SSS-B | ✅ code (service + controller + entity) |
+| Supporting Docs uses CiRepositoryCard grid (no accordion) | SSS-C | ✅ code — CiFolderRepository removed from supporting |
+| Cards generated per seeded template | SSS-C | ✅ code (supportingTemplateGroups) |
+| Cards open shared CiRepositoryModal | SSS-C | ✅ code (openRepo) |
+| Upload persists + visible + downloadable + after refresh | SSS-C | ✅ code (typeCode path inherited from Key Docs) |
+| Add Folder creates custom card; delete works | SSS-C | ✅ code (customSupportingSections) |
+| Metadata + audit logs in modal | SSS-C | ✅ inherited (CiRepositoryModal + fireLog) |
+| Admin-only template/folder management enforced | SSS-C | ✅ canUpload gating |
+| Backend tsc exit 0 | SSS-D | ✅ exit 0 |
+| Frontend vue-tsc 0 new errors | SSS-D | ✅ 0 errors in CiAttachmentHub/CiBasicInfoForm/adapters (1 fixed: BackendProjectDetail field) |
+| No regression in Key Documents | SSS-D | ⬜ operator smoke |
+| Checklist auto-sync preserved (persistDoc → checklistRef.refresh) | SSS-C | ✅ code |
+
+## Phase SSS Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 | SSS-A (Strategic Alignment revert) | Low — template only | Independent |
+| Group 2 (CRITICAL) | SSS-B (customSupportingSections backend) | Low — mirrors custom-key-sections | Must precede SSS-C Add Folder |
+| Group 3 (HIGH) | SSS-C (Supporting Docs card grid) | Medium — replaces folder UI | Requires SSS-B for Add Folder; cards-from-templates independent |
+| Group 4 | SSS-D (verification) | Low | After all |
+
+---
+
+# Phase TTT — Upload Persistence Root Cause Fix + Overview Executive Summary + Progress Tab Hierarchy
+
+**Status:** ⬜ Phase 2 (Plan) COMPLETE — Awaiting Phase 3 Authorization
+**Research Reference:** §2.269-A, §2.269-B, §2.269-C
+**Last Updated:** 2026-06-01
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase TTT)
+
+| ID | Directive |
+|----|-----------|
+| TTT-D1 | The upload-persistence fix is in `CiRepositoryModal.vue` ONLY — `uploadType` reset logic. No backend change (backend persists correctly). |
+| TTT-D2 | `uploadType` resets to `props.typeCodes[0]` on EVERY modal open + on `typeCodes` change — replacing the `if (!uploadType.value)` guard. |
+| TTT-D3 | Overview + Progress-tab changes are presentation-only in `detail-[id].vue` — reuse already-loaded data (project.milestones, latestReport); NO new API calls. |
+| TTT-D4 | Detail page read-only enforcement (FFF-C) preserved — all sub-components remain `:read-only="true"`. |
+| TTT-D5 | All existing components (CiProgressReportTab, CiTimelogsContainer, CiRevisionOrdersTable, milestone grid) keep their internal pagination/search/state — TTT only reorders + adds a header. |
+| TTT-D6 | No regression to PPP-E milestone search, QQQ-G latest report card, PPP-F last-entry line. |
+
+---
+
+## GROUP 1 — Upload Persistence Root Cause Fix (TTT-A) CRITICAL
+
+### TTT-A: Fix sticky `uploadType` in CiRepositoryModal
+
+**File:** `pmo-frontend/components/coi/CiRepositoryModal.vue`
+
+**A1: Reset uploadType unconditionally on modal open**
+
+Current (line ~182):
+```ts
+watch(() => props.modelValue, (v) => {
+  if (v) {
+    showUpload.value = props.expandUpload
+    if (!uploadType.value) uploadType.value = props.typeCodes[0] ?? ''
+    modalDisplayLimit.value = MODAL_PAGE_SIZE
+    fetchRecentActivity()
+  }
+})
+```
+
+Change to reset every open:
+```ts
+watch(() => props.modelValue, (v) => {
+  if (v) {
+    showUpload.value = props.expandUpload
+    // TTT-A: always reset to THIS repository's primary type (the modal is a shared
+    // instance; a stale uploadType from a previously-opened repo would file uploads
+    // under the wrong documentType, making them invisible in the current repo).
+    uploadType.value = props.typeCodes[0] ?? ''
+    modalDisplayLimit.value = MODAL_PAGE_SIZE
+    fetchRecentActivity()
+  }
+})
+```
+
+**A2: Resync uploadType when typeCodes changes (covers open-while-open / reactive swap)**
+```ts
+watch(() => props.typeCodes, (codes) => {
+  uploadType.value = codes?.[0] ?? ''
+})
+```
+
+**A3: No other change.** `submitUpload` and `handleModalFileBatch` already read `uploadType.value`; with the reset they now emit the correct documentType.
+
+### TTT-A Verification
+- [ ] Open repo A, upload → file appears in A
+- [ ] Open repo B (different typeCode), upload → file appears in B (NOT A)
+- [ ] Refresh → both files persist in their correct repositories
+- [ ] Open 3rd repo, upload → correct repo
+- [ ] Batch drag-drop into repo B → filed under B's type
+- [ ] Multi-type repo (Other Key Documents): dropdown still lets user choose; default = first type
+- [ ] Download + metadata (name/uploadedBy/date/size) visible in modal after upload
+- [ ] Key Documents AND Supporting Documents both correct
+
+---
+
+## GROUP 2 — Overview Executive Summary (TTT-B)
+
+### TTT-B: Restructure the overview Progress & Reports panel into an executive summary
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+**B1: Add `milestoneSummary` computed (script)**
+```ts
+const milestoneSummary = computed(() => {
+  const ms = project.value?.milestones ?? []
+  const norm = (s?: string) => (s || '').toUpperCase()
+  const completed = ms.filter(m => norm(m.status) === 'COMPLETED').length
+  const delayed = ms.filter(m => norm(m.status) === 'DELAYED').length
+  const ongoing = ms.filter(m => norm(m.status) === 'IN_PROGRESS').length
+  const now = Date.now()
+  const upcoming = ms
+    .filter(m => m.targetDate && new Date(m.targetDate).getTime() >= now && norm(m.status) !== 'COMPLETED')
+    .sort((a, b) => new Date(a.targetDate).getTime() - new Date(b.targetDate).getTime())[0] ?? null
+  return { total: ms.length, completed, ongoing, delayed, upcoming }
+})
+```
+
+**B2: Add 3-section executive summary** inside the Progress & Reports panel (above/replacing the loose stat cards), using existing `latestReport` (QQQ-G) + `milestoneSummary`:
+
+- **Progress Report Summary** row: Latest report type+date, Physical %, Financial (latestReport.* or project.financialProgress), Current status chip.
+- **Milestone Summary** row: chips — Total / Completed / Ongoing / Delayed; "Next: {upcoming.name} ({date})".
+- **Recent Activity** row: Latest submitted report (latestReport date), Latest milestone update (most recent by updatedAt), [timelog deferred].
+
+Keep the existing physical/financial tonal cards OR fold them into the summary — choose the cleaner of the two; do NOT remove data. Preserve QQQ-G latest report card + PPP-F line (or merge into the new summary to avoid duplication — merge preferred).
+
+### TTT-B Verification
+- [ ] Overview shows Progress Report Summary (latest report, physical%, financial, date, status)
+- [ ] Milestone Summary shows total/completed/ongoing/delayed + next upcoming
+- [ ] Recent Activity shows latest report + latest milestone update
+- [ ] No new API calls (uses project.milestones + latestReport)
+- [ ] No duplicate cards (QQQ-G/PPP-F merged, not stacked)
+
+---
+
+## GROUP 3 — Progress Tab Hierarchy (TTT-C)
+
+### TTT-C: Add analytics header + reorder progress-tab sections
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+**C1: Analytics header strip** at the top of the `progress` v-window-item:
+```vue
+<v-card variant="tonal" color="primary" class="mb-4 pa-3" rounded="lg">
+  <div class="d-flex flex-wrap ga-4 align-center">
+    <div><div class="text-caption text-grey">Physical</div><div class="text-h6 font-weight-bold">{{ progressSummary.physical?.toFixed(1) ?? '—' }}%</div></div>
+    <v-divider vertical />
+    <div><div class="text-caption text-grey">Financial</div><div class="text-h6 font-weight-bold">{{ progressSummary.financial?.toFixed(1) ?? '—' }}%</div></div>
+    <v-divider vertical />
+    <div><div class="text-caption text-grey">Milestones</div><div class="text-h6 font-weight-bold">{{ milestoneSummary.completed }}/{{ milestoneSummary.total }}</div></div>
+    <v-divider vertical />
+    <div><div class="text-caption text-grey">Latest Report</div><div class="text-body-1 font-weight-medium">{{ latestReport?.reportDate ? formatDate(latestReport.reportDate) : '—' }}</div></div>
+  </div>
+</v-card>
+```
+
+**C2: Reorder sections to priority** (currently Revision Orders → Reports → Milestones → Timelogs). New order with clear section headers + dividers:
+1. **Progress Reports** (CiProgressReportTab) — primary
+2. **Milestones** (existing grid w/ PPP-E search)
+3. **Timelogs** (CiTimelogsContainer)
+4. **Revision Orders** (CiRevisionOrdersTable) — historical/amendments, last
+
+Each section gets a consistent header: `<div class="text-subtitle-1 font-weight-medium mb-3 d-flex align-center ga-2"><v-icon .../> {Title}</div>` + `<v-divider class="my-4" />` between sections.
+
+**C3: No internal component changes** — only the order of the blocks and the wrapping headers/dividers. All `:read-only="true"` props preserved.
+
+### TTT-C Verification
+- [ ] Analytics header strip at top (physical/financial/milestones/latest report)
+- [ ] Section order: Progress Reports → Milestones → Timelogs → Revision Orders
+- [ ] Each section has a clear header + divider
+- [ ] PPP-E milestone search still works
+- [ ] All sub-components still read-only (detail page)
+- [ ] Pagination in CiProgressReportTab/Timelogs preserved
+
+---
+
+## GROUP 4 — Verification Gate (TTT-D)
+
+**D1:** Frontend `vue-tsc --noEmit` — 0 new errors in CiRepositoryModal, detail-[id].vue
+**D2:** Operator smoke:
+- Upload to 2+ different repositories (Key + Supporting) → each file appears in its own repo, persists after refresh, downloadable
+- Overview executive summary reflects real milestone/report data
+- Progress tab reordered with analytics header
+
+---
+
+## Phase TTT Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Upload appears in correct repo immediately | TTT-A | ✅ code — uploadType reset on open |
+| Upload persists in correct repo after refresh | TTT-A | ✅ code (correct documentType now saved) |
+| 2nd+ repository uploads no longer mis-filed | TTT-A | ✅ code (sticky uploadType fixed) |
+| Key Docs + Supporting Docs both correct | TTT-A | ✅ code (shared modal fix covers both) |
+| Download + metadata visible in modal | TTT-A | ✅ inherited (now reaches correct repo) |
+| Overview: Progress Report Summary | TTT-B | ✅ code |
+| Overview: Milestone Summary (counts + next) | TTT-B | ✅ code (milestoneSummary computed) |
+| Overview: Recent Activity | TTT-B | ✅ code (latestReport + latestMilestoneUpdate) |
+| Progress tab analytics header | TTT-C | ✅ code |
+| Progress tab reordered by priority | TTT-C | ✅ code (Reports→Milestones→Timelogs→Revision Orders) |
+| No regression (PPP-E search, read-only, pagination) | TTT-C | ✅ code (components unchanged internally) |
+| TypeScript: 0 new errors | TTT-D | ✅ vue-tsc — 0 errors in CiRepositoryModal + detail-[id].vue |
+
+## Phase TTT Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (CRITICAL) | TTT-A (uploadType fix) | Low — 2-line watch change | Independent; THE persistence fix |
+| Group 2 (MEDIUM) | TTT-B (overview summary) | Low — computeds + template | Independent |
+| Group 3 (MEDIUM) | TTT-C (progress tab hierarchy) | Low — reorder + header | Independent; reuses TTT-B computeds |
+| Group 4 | TTT-D (verification) | Low | After all |
+---
+
+# Phase UUU — Template 404 Fix + CiFolderRepository Response Fix + Dynamic Template Discovery
+
+**Status:** ✅ Phase 3 COMPLETE — UUU-A (proxy) + UUU-C (manifest endpoint, 43 templates discovered) implemented; UUU-B found ALREADY FIXED (PPP-A cherry-picked, `res.data ?? []` present); UUU-D smoke protocol pending operator. Backend tsc exit 0; frontend vue-tsc 0 new errors. (2026-06-02)
+**Research Reference:** §2.270 (research.md)
+**Last Updated:** 2026-06-02
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase UUU)
+
+| ID | Directive |
+|----|-----------|
+| UUU-D1 | Nuxt devProxy fix is 3 lines in `nuxt.config.ts` — do NOT restructure the proxy block or touch other proxy entries. |
+| UUU-D2 | `fetchFolders` fix is a one-line response unwrap — do not restructure the function beyond the unwrap. |
+| UUU-D3 | Dynamic template discovery endpoint is `@Public()` — no JWT guard, no role guard. |
+| UUU-D4 | Template discovery endpoint reads filesystem at request time; no new DB changes. |
+| UUU-D5 | Template URLs stored in DB remain unchanged — the proxy fix makes them work. |
+| UUU-D6 | Upload verification is SMOKE TEST only — no code changes unless a new bug is found. |
+
+---
+
+## GROUP 1 — Template 404 Fix (CRITICAL)
+
+### UUU-A: Add `/templates` to Nuxt devProxy
+
+**File:** `pmo-frontend/nuxt.config.ts`
+
+Add inside `nitro.devProxy`:
+```ts
+'/templates': { target: 'http://localhost:3000/templates', changeOrigin: true },
+```
+
+The NestJS static serving at `/templates` is already configured in `main.ts`. The flat type-code files already exist at `pmo-backend/public/templates/SD_ECO_*.docx`. Once the proxy is added, all template download links become functional.
+
+### UUU-A Verification
+- [ ] `GET /templates/SD_ECO_001.docx` via Nuxt dev server returns 200
+- [ ] All 15 template download buttons work without 404
+- [ ] Template files download with correct filename
+
+---
+
+## GROUP 2 — CiFolderRepository Response Fix (CRITICAL)
+
+### UUU-B: Fix fetchFolders Response Unwrapping
+
+**File:** `pmo-frontend/components/coi/CiFolderRepository.vue`
+
+**Root cause:** Controller returns `{ data: FolderNode[] }` but component does `Array.isArray(res) ? res : []` — object is never an array.
+
+Change:
+```ts
+const res = await api.get<FolderNode[]>(`/api/construction-projects/${props.projectId}/document-folders`)
+const roots = Array.isArray(res) ? res : []
+folders.value = roots.filter(n => n.groupCode === props.groupCode)
+```
+
+To:
+```ts
+const res = await api.get<{ data: FolderNode[] } | FolderNode[]>(`/api/construction-projects/${props.projectId}/document-folders`)
+const rawList: FolderNode[] = (res as any)?.data ?? (Array.isArray(res) ? (res as FolderNode[]) : [])
+folders.value = rawList.filter(n => n.groupCode === props.groupCode)
+```
+
+### UUU-B Verification
+- [ ] Supporting Documents section shows CONTAINER folders
+- [ ] Click folder expands to child FORM/TEMPLATE/SUBMISSIONS nodes
+- [ ] SUBMISSIONS node upload zone functional
+- [ ] Official Templates panel shows download buttons
+- [ ] ECO_FORMS folder repository shows correctly
+
+---
+
+## GROUP 3 — Dynamic Template Discovery Endpoint
+
+### UUU-C: Backend Template Manifest
+
+**File:** `pmo-backend/src/construction-projects/public-construction.controller.ts`
+
+```ts
+@Get('document-templates/manifest')
+@Public()
+async getTemplateManifest() {
+  return this.service.getTemplateManifest();
+}
+```
+
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts`
+
+Add at top (verify `fs` and `path` not already imported):
+```ts
+import * as fs from 'fs';
+import * as path from 'path';
+```
+
+Add method:
+```ts
+async getTemplateManifest(): Promise<{ templates: Array<{ typeCode: string; url: string; fileName: string; category: string }> }> {
+  const templateDir = path.join(process.cwd(), 'public', 'templates');
+  const entries: Array<{ typeCode: string; url: string; fileName: string; category: string }> = [];
+  if (!fs.existsSync(templateDir)) return { templates: [] };
+
+  // Flat type-code files (SD_ECO_001.docx, etc.)
+  const flatFiles = fs.readdirSync(templateDir).filter(f => f.endsWith('.docx') && /^SD_ECO_\d{3}/.test(f));
+  for (const file of flatFiles) {
+    entries.push({ typeCode: file.replace('.docx', ''), url: `/templates/${file}`, fileName: file, category: 'SD' });
+  }
+
+  // Subdirectory tree
+  const subdirBase = path.join(templateDir, 'SHAREABLE SUPPORT DOCUMENTS');
+  if (fs.existsSync(subdirBase)) {
+    for (const cat of fs.readdirSync(subdirBase)) {
+      const catPath = path.join(subdirBase, cat);
+      if (!fs.statSync(catPath).isDirectory()) continue;
+      for (const file of fs.readdirSync(catPath).filter(f => f.endsWith('.docx'))) {
+        entries.push({
+          typeCode: file,
+          url: `/templates/SHAREABLE SUPPORT DOCUMENTS/${cat}/${file}`,
+          fileName: file,
+          category: cat,
+        });
+      }
+    }
+  }
+  return { templates: entries };
+}
+```
+
+### UUU-C Verification
+- [ ] `GET /api/public/construction-templates/manifest` returns 200 without auth
+- [ ] Response contains all 15 flat SD_ECO entries
+- [ ] Response also contains entries from SHAREABLE SUPPORT DOCUMENTS subdirectory
+- [ ] Backend TypeScript exit 0
+
+---
+
+## GROUP 4 — Upload Persistence Smoke Verification
+
+### UUU-D: End-to-End Upload Smoke Test Protocol (No code changes unless bug found)
+
+**D1: Key Documents (Edit mode)**
+1. Open existing project → Documents tab → Key Documents → open repo card
+2. Upload a DOCX file → verify appears immediately
+3. Refresh → verify still visible (persistent)
+4. Click download → file downloads
+5. Check audit log → upload event recorded
+
+**D2: Supporting Documents (Edit mode) — after UUU-B fix**
+1. Supporting Documents section shows folder tree
+2. Expand SUBMISSIONS node → upload file
+3. Verify submissions table shows file with name/uploader/date
+4. Refresh → verify persistent
+5. Check audit log
+
+**D3: New project staging**
+1. New project form → Documents → Key Documents → upload file (staged)
+2. Save project → navigate to detail page
+3. Verify staged file visible in Key Documents repo
+4. Verify download works
+
+**D4: Template download**
+1. After UUU-A: Supporting Documents section
+2. Click Official Template download button
+3. Verify file downloads (200, not 404)
+
+---
+
+## Phase UUU Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| `/templates` proxy added to nuxt.config.ts | UUU-A | ✅ code |
+| Template downloads return 200 (not 404) | UUU-A | ⬜ operator smoke (needs dev servers running) |
+| fetchFolders response unwrap fixed | UUU-B | ✅ already present (PPP-A, `res.data ?? []`) |
+| Supporting Documents folder tree visible | UUU-B | ⬜ operator smoke |
+| SUBMISSIONS upload functional | UUU-B | ⬜ operator smoke |
+| Template manifest endpoint returns 200 (no auth) | UUU-C | ✅ code (route + service method) |
+| Manifest includes all 15 flat type-code entries | UUU-C | ✅ verified (node sim: 15 flat + 28 subdir = 43) |
+| Key Documents upload persists (edit mode) | UUU-D | ⬜ operator smoke |
+| Supporting Documents upload persists | UUU-D | ⬜ operator smoke |
+| New project staged docs persist after creation | UUU-D | ⬜ operator smoke |
+| Backend TypeScript exit 0 | UUU-C | ✅ verified |
+| Frontend vue-tsc 0 new errors in touched files | UUU-A/B | ✅ verified |
+
+## Phase UUU Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (CRITICAL) | UUU-A (Nuxt proxy) | Minimal — 3 lines | First; unblocks all template downloads |
+| Group 2 (CRITICAL) | UUU-B (fetchFolders) | Minimal — 2 lines | Independent; unblocks entire folder system |
+| Group 3 (MEDIUM) | UUU-C (template manifest) | Low — new endpoint | Independent |
+| Group 4 (LOW) | UUU-D (smoke verification) | N/A | After Groups 1-3 |
+
+---
+
+# Phase VVV — GET /documents HTTP 500 Fix (Document Retrieval Pipeline)
+
+**Status:** ✅ Phase 3 COMPLETE — VVV-A (the 500 fix: `= ANY(?)` → `IN(placeholders)`) + VVV-B (fetch error state). Backend tsc exit 0; frontend vue-tsc 0 new errors. Confirmed: UO Phase II already documented this same MikroORM binding bug + fix. (2026-06-02)
+**Research Reference:** §2.271-A through §2.271-E
+**Last Updated:** 2026-06-02
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase VVV)
+
+| ID | Directive |
+|----|-----------|
+| VVV-D1 | The 500 fix is in `listProjectDocuments` ONLY — replace `= ANY(?)` with the codebase-standard `IN (placeholders)` + flat params. No other backend change. |
+| VVV-D2 | Use the established pattern (`arr.map(() => '?').join(', ')` + flat param array) — already proven in university-operations.service.ts. Do NOT invent a new binding scheme. |
+| VVV-D3 | No DTO / entity / migration changes — the Document entity matches its table; only the raw user-name lookup is broken. |
+| VVV-D4 | Frontend error-state is ADDITIVE — `docsError` ref + alert/retry; do not change the happy-path rendering. |
+| VVV-D5 | Both Key Documents and Supporting Documents are fixed by the single endpoint fix (they share `fetchDocuments`). No per-tab work. |
+| VVV-D6 | Preserve the III-A display-name resolution (`COALESCE(display_name, first_name||' '||last_name, email)`) — only the WHERE clause changes. |
+
+---
+
+## GROUP 1 — Backend: Fix the 500 (VVV-A) CRITICAL
+
+### VVV-A: Replace `= ANY(?)` with `IN (placeholders)` in listProjectDocuments
+
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts` (~line 2114-2118)
+
+**Current (broken):**
+```ts
+const uploaderIds = [...new Set(docs.map((d) => d.uploadedBy).filter(Boolean))];
+const userRows = await this.em.getConnection().execute(
+  `SELECT id, COALESCE(display_name, first_name || ' ' || last_name, email) AS display_name FROM users WHERE id = ANY(?) AND deleted_at IS NULL`,
+  [uploaderIds],
+) as Array<{ id: string; display_name: string }>;
+```
+
+**Fixed:**
+```ts
+const uploaderIds = [...new Set(docs.map((d) => d.uploadedBy).filter(Boolean))];
+if (!uploaderIds.length) {
+  return docs.map((d) => Object.assign(d, { uploadedByName: undefined }));
+}
+const placeholders = uploaderIds.map(() => '?').join(', ');
+const userRows = await this.em.getConnection().execute(
+  `SELECT id, COALESCE(display_name, first_name || ' ' || last_name, email) AS display_name FROM users WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
+  uploaderIds,
+) as Array<{ id: string; display_name: string }>;
+```
+
+**Notes:**
+- `IN (${placeholders})` expands to `IN (?, ?, ?)` → Knex binds each positionally → `IN ($1, $2, $3)` (valid).
+- Params passed FLAT (`uploaderIds`, not `[uploaderIds]`) so N placeholders map to N values.
+- Empty-guard added: if no uploaders, skip the query (avoids `IN ()` syntax error) and return docs with undefined names.
+- SELECT columns unchanged (preserves III-A display-name fix).
+
+### VVV-A Verification
+- [ ] `GET /api/construction-projects/:id/documents` returns 200 on a project WITH documents
+- [ ] Returns 200 on a project with documents from MULTIPLE uploaders (the case that 500'd)
+- [ ] Returns 200 on a project with ZERO documents (empty guard)
+- [ ] Response `data[]` includes `uploadedByName` resolved correctly
+- [ ] Backend tsc exit 0
+- [ ] No other `= ANY(?)` remains in backend (grep)
+
+---
+
+## GROUP 2 — Frontend: Fetch Error State + Retry (VVV-B)
+
+### VVV-B: Surface document-fetch failures in CiAttachmentHub
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+**B1: Add `docsError` ref (near `loadingDocs`)**
+```ts
+const docsError = ref<string | null>(null)
+```
+
+**B2: Set/clear it in `fetchDocuments`**
+```ts
+async function fetchDocuments() {
+  if (!hasProject.value) return
+  loadingDocs.value = true
+  docsError.value = null
+  try {
+    const res = await api.get<{ data: HubDoc[] }>(`/api/construction-projects/${props.projectId}/documents`)
+    documents.value = res.data || []
+  } catch (err: unknown) {
+    console.error('[CiAttachmentHub] fetch documents failed:', err)
+    docsError.value = (err as { message?: string })?.message || 'Failed to load documents.'
+  } finally {
+    loadingDocs.value = false
+  }
+}
+```
+
+**B3: Error alert with Retry** — add at the top of the Key Documents AND Supporting Documents window-items (or once above the section tabs so it covers both):
+```vue
+<v-alert
+  v-if="docsError"
+  type="error"
+  variant="tonal"
+  density="compact"
+  class="mb-3"
+  icon="mdi-alert-circle-outline"
+>
+  <div class="d-flex align-center ga-2 flex-wrap">
+    <span>{{ docsError }}</span>
+    <v-spacer />
+    <v-btn size="small" variant="tonal" color="error" prepend-icon="mdi-refresh" @click="fetchDocuments">Retry</v-btn>
+  </div>
+</v-alert>
+```
+
+**B4 (optional):** Pass an error indicator into `CiRepositoryModal` so an open modal also shows the error instead of "No files match." Minimal: rely on the hub-level alert; modal already shows empty-state. Keep scope tight — hub-level alert is sufficient for acceptance.
+
+### VVV-B Verification
+- [ ] When GET /documents fails, an error alert + Retry shows (not a silent empty repo)
+- [ ] Retry re-invokes fetchDocuments and clears the error on success
+- [ ] On success, no alert; documents render normally
+- [ ] No regression to loading state / empty-state-when-genuinely-empty
+
+---
+
+## GROUP 3 — Verification Gate (VVV-C)
+
+### VVV-C: Type-check + functional smoke
+
+**C1:** Backend `tsc --noEmit` exit 0
+**C2:** Frontend `vue-tsc --noEmit` — 0 new errors in CiAttachmentHub
+**C3:** Operator functional test (the prompt's protocol):
+1. Open a project that already has uploaded documents → Key Documents + Supporting Documents render the files (no 500 in network tab)
+2. Upload a new file → appears immediately in its repository (TTT-A) and modal
+3. Refresh → file still visible
+4. Download the file → succeeds
+5. Repository cards show correct non-zero counts
+6. (Negative) Simulate API failure → error alert + Retry shown, not empty repo
+
+---
+
+## Phase VVV Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| GET /documents returns 200 (no exception) | VVV-A | ✅ code — IN(placeholders) + flat params |
+| Multi-uploader project no longer 500s | VVV-A | ✅ code (was the exact 500 trigger) |
+| Empty-document project returns 200 | VVV-A | ✅ code (empty-uploaders guard) |
+| uploadedByName resolved in response | VVV-A | ✅ code (III-A COALESCE preserved) |
+| Key Documents render files | VVV-A | ✅ code (endpoint now succeeds) |
+| Supporting Documents render files | VVV-A | ✅ code (shared endpoint) |
+| Repository card counts correct | VVV-A | ✅ code (stats derive from documents.value) |
+| Files persist after refresh | VVV-A | ✅ code (every load now 200) |
+| Download works | VVV-A | ✅ inherited (now receives data) |
+| API failure → error state + Retry (not empty) | VVV-B | ✅ code (docsError alert + Retry) |
+| Backend tsc exit 0 | VVV-C | ✅ exit 0 |
+| Frontend vue-tsc 0 new errors | VVV-C | ✅ 0 errors in CiAttachmentHub |
+| No `= ANY(?)` remains in backend | VVV-A | ✅ grep — only comments remain |
+
+## Phase VVV Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (CRITICAL) | VVV-A (the 500 fix) | Low — 1 query, codebase-standard pattern | THE fix; unblocks all repository rendering |
+| Group 2 (MEDIUM) | VVV-B (fetch error state) | Low — additive ref + alert | Independent |
+| Group 3 (LOW) | VVV-C (verification) | Low | After 1-2 |
+
+---
+
+# Phase WWW — Attachment Module UX + Architecture Harmonization
+
+**Status:** ✅ Phase 3 COMPLETE — WWW-A (card progress-bar removed) + WWW-B (CPES→card) + WWW-C (Misc→card) + WWW-D (autosave, both pages) + WWW-E (audit: already implemented — no work needed) + WWW-F (modal guidance) + WWW-G (checklist master summary). vue-tsc 0 new errors. (2026-06-02)
+**Research Reference:** §2.272-A through §2.272-I
+**Last Updated:** 2026-06-02
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase WWW)
+
+| ID | Directive |
+|----|-----------|
+| WWW-D1 | `CiRepositoryCard` prop interface unchanged — only remove the progress-bar template block. `completedCount`, `totalTypes`, `completionPct` may become unused; remove them to avoid lint warnings. |
+| WWW-D2 | CPES→card: `CiComplianceRepository` is NOT deleted (archive-never-delete); just not rendered. |
+| WWW-D3 | Misc→card: uses sentinel `'__MISC__'` typeCode; `activeRepoDocs` returns `otherDocs` when sentinel detected. No changes to `otherDocs` computed. |
+| WWW-D4 | Autosave stores FORM STATE only (JSON-serializable); File objects in staging queue cannot be serialized and are excluded. |
+| WWW-D5 | Checklist master summary is frontend-computed from existing hub `allDocs` prop — no new backend endpoint, no new entity rows. |
+| WWW-D6 | Gallery enhancement is DEFERRED — Phase 1 documented in §2.272-H; not in Phase WWW scope. |
+| WWW-D7 | Remarks audit fireLog: backend PATCH /document-checklist/:itemId only — one service method update. |
+| WWW-D8 | Modal UX instruction alert: dismissed state in localStorage; no backend persistence needed. |
+
+---
+
+## GROUP 1 — Repository Card: Remove Misleading Progress Bar (WWW-A)
+
+### WWW-A: Replace "Type coverage" bar with meaningful metadata in CiRepositoryCard
+
+**File:** `pmo-frontend/components/coi/CiRepositoryCard.vue`
+
+**A1: Remove computed and props that become unused**
+
+Remove:
+- `completedCount` prop
+- `totalTypes` prop
+- `completionPct` computed
+
+Keep:
+- `docCount` (total files — shown as chip in title)
+- `latestUpload`
+- `uploaderName`
+- `canDownloadTemplate`
+- `templateUrl`
+- `statusBreakdown`
+
+**A2: Replace template block** — replace "Type coverage" section with:
+
+```vue
+<!-- WWW-A: Total files + latest submission (replaces misleading progress bar) -->
+<div class="d-flex align-center ga-2 flex-wrap mb-2">
+  <v-chip size="x-small" variant="tonal" :color="color" prepend-icon="mdi-file-multiple-outline">
+    {{ docCount }} {{ docCount === 1 ? 'file' : 'files' }}
+  </v-chip>
+</div>
+<!-- Latest submission line (unchanged) -->
+<div class="text-caption text-grey">
+  <v-icon size="x-small" icon="mdi-clock-outline" /> {{ latestLabel }}
+</div>
+```
+
+**A3: Update all callers** — CiAttachmentHub passes `completed-count` and `total-types`; after removing these props, the compiler will flag them. Remove from every `<CiRepositoryCard` call in CiAttachmentHub that passes these (grep: `completed-count`, `total-types`). The `repoStats()` return type still computes them; just stop passing/using.
+
+### WWW-A Verification
+- [ ] Repository cards show file count chip + last upload date (no progress bar)
+- [ ] TypeScript: no new errors
+- [ ] Existing docCount/latestUpload/uploaderName/templateUrl/statusBreakdown unaffected
+
+---
+
+## GROUP 2 — CPES Repository → Repository Card Architecture (WWW-B)
+
+### WWW-B: Replace CiComplianceRepository with CiRepositoryCard grid in CPES section
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+**B1: Add `cpesCardStats` computed (after `supportingCardStats`):**
+```typescript
+const cpesCardStats = computed<Record<string, ReturnType<typeof repoStats>>>(() => {
+  const m: Record<string, ReturnType<typeof repoStats>> = {}
+  for (const t of cpesTypes.value) m[t.typeCode] = repoStats([t.typeCode])
+  return m
+})
+```
+
+**B2: Replace CPES window-item body:**
+
+```vue
+<v-window-item v-if="cpesTypes.length" value="cpes">
+  <!-- WWW-B: CPES now uses repository-card architecture (identical to Key/Supporting Docs) -->
+  <v-row dense>
+    <v-col v-for="t in cpesTypes" :key="t.typeCode" cols="12" md="6" lg="3">
+      <CiRepositoryCard
+        :title="t.typeLabel"
+        icon="mdi-certificate-outline"
+        color="teal"
+        :doc-count="cpesCardStats[t.typeCode]?.docCount ?? 0"
+        :latest-upload="cpesCardStats[t.typeCode]?.latestUpload ?? null"
+        :template-url="t.templateUrl ?? null"
+        :can-upload="canUpload"
+        @open="openRepo(t.typeLabel, 'mdi-certificate-outline', 'teal', [t.typeCode])"
+        @upload="openRepo(t.typeLabel, 'mdi-certificate-outline', 'teal', [t.typeCode], true)"
+      />
+    </v-col>
+    <v-col v-if="canUpload && hasProject" cols="12" class="mt-2">
+      <v-alert type="info" variant="tonal" density="compact" icon="mdi-information-outline">
+        Uploading a CPES document automatically updates the Compliance Checklist status.
+      </v-alert>
+    </v-col>
+  </v-row>
+</v-window-item>
+```
+
+**B3: Checklist auto-sync preserved** — existing `persistDoc → checklistRef.refresh()` already fires after CPES uploads (same typeCode-matching logic in the backend). No code change needed here.
+
+### WWW-B Verification
+- [ ] CPES section shows repository cards (no accordion/checklist UI)
+- [ ] Each CPES type has its own card with file count + last upload
+- [ ] Clicking card opens shared CiRepositoryModal with correct documents
+- [ ] Upload persists and Compliance Checklist auto-updates
+
+---
+
+## GROUP 3 — Miscellaneous → Repository Card Architecture (WWW-C)
+
+### WWW-C: Convert Miscellaneous to repository-card + modal architecture
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+**C1: Add sentinel detection in `activeRepoDocs`:**
+
+```typescript
+const activeRepoDocs = computed(() => {
+  // WWW-C: '__MISC__' sentinel → return all non-managed docs (otherDocs)
+  if (activeRepo.value.typeCodes[0] === '__MISC__') return otherDocs.value as HubDoc[]
+  return allDocs.value.filter((d) => activeRepo.value.typeCodes.includes(d.documentType))
+})
+```
+
+**C2: Add `openMiscRepo()` function:**
+```typescript
+function openMiscRepo(expand = false) {
+  activeRepo.value = { title: 'Miscellaneous & Uncategorized', icon: 'mdi-paperclip', color: 'blue-grey', typeCodes: ['__MISC__'] }
+  repoExpandUpload.value = expand
+  repoModalOpen.value = true
+}
+```
+
+**C3: Replace Miscellaneous window-item body:**
+
+```vue
+<v-window-item value="other">
+  <!-- WWW-C: Miscellaneous now uses repository-card architecture -->
+  <v-row dense class="mb-3">
+    <v-col cols="12" md="6" lg="4">
+      <CiRepositoryCard
+        title="Miscellaneous & Uncategorized"
+        icon="mdi-paperclip"
+        color="blue-grey"
+        :doc-count="otherDocs.length"
+        :latest-upload="otherDocs.length ? otherDocs[0].createdAt ?? null : null"
+        :can-upload="canUpload"
+        @open="openMiscRepo()"
+        @upload="openMiscRepo(true)"
+      />
+    </v-col>
+    <v-col cols="12">
+      <v-alert type="info" variant="tonal" density="compact" class="mt-1">
+        Documents without a recognized type are stored here. Use specific repositories (Key Documents, Supporting Documents) for structured submissions.
+      </v-alert>
+    </v-col>
+  </v-row>
+  <!-- Optional CiFolderRepository for MISC group (folder workspace) -->
+  <template v-if="hasProject">
+    <v-divider class="my-3" />
+    <div class="d-flex align-center ga-2 mb-2">
+      <v-icon size="18" color="blue-grey">mdi-folder-multiple-outline</v-icon>
+      <span class="text-subtitle-2 font-weight-medium">Folder Workspace</span>
+    </div>
+    <CiFolderRepository
+      :project-id="projectId"
+      group-code="MISC"
+      :documents="documents"
+      :can-edit="canUpload"
+      :can-delete="canDelete"
+      @uploaded="onFolderUploaded"
+      @deleted="onFolderDeleted"
+    />
+  </template>
+</v-window-item>
+```
+
+**C4: Handle upload from modal in misc context** — when `openMiscRepo(true)` triggers and the user uploads, `onRepoUpload` calls `persistDoc` with `documentType: uploadType.value`. Since `__MISC__` is the sentinel, the actual upload needs a real documentType. The modal's `uploadType` should use the user-selected type from the dropdown (existing behavior). Since `activeRepo.typeCodes = ['__MISC__']`, the modal's `typeSelectItems` would be empty (no matching docTypes). **Fix:** when the active repo is `__MISC__`, pass a set of common uncategorized types to the modal. Add `isMiscRepo` flag and pass `otherDocTypeItems` as the allowed types.
+
+Simpler: add a special prop path — when `typeCodes[0] === '__MISC__'`, `CiRepositoryModal` shows all doc types from `allDocTypes` (no filtering). This already works because `relevantTypes` uses `typeCodes.map(code => docTypes.find(t=>t.typeCode===code))` — if no match found, returns `{typeCode:code}`. Skip this complexity: misc uploads can use `typeCode='attachment'` as default, same as the old inline upload.
+
+**Revised approach:** For `__MISC__` repos, pass `typeCodes=['attachment']` (a generic type) so the modal uses 'attachment' as default uploadType. The user can change it in the dropdown to any available type.
+
+### WWW-C Verification
+- [ ] Miscellaneous shows one repository card (file count + last upload)
+- [ ] Clicking card opens shared CiRepositoryModal showing all unmanaged docs
+- [ ] Upload in modal saves with correct type, appears in list
+- [ ] Folder Workspace below card still functional (CiFolderRepository MISC)
+- [ ] Project Details page: Miscellaneous repo data visible (hub used in detail page in view mode)
+
+---
+
+## GROUP 4 — Autosave Guard (WWW-D)
+
+### WWW-D: Implement autosave + beforeunload protection in new.vue and edit-[id].vue
+
+**Both files:** `pmo-frontend/pages/coi/new.vue` and `pmo-frontend/pages/coi/edit-[id].vue`
+
+**D1: Draft key** — `'coi-draft-new'` for new.vue; `'coi-draft-{projectId}'` for edit-[id].vue.
+
+**D2: Script additions (both files):**
+```typescript
+// WWW-D: Autosave draft to localStorage on form change (debounced)
+const hasUnsavedChanges = ref(false)
+const draftRestoreSnackbar = ref(false)
+
+function saveDraft() {
+  try {
+    const key = projectId ? `coi-draft-${projectId}` : 'coi-draft-new'
+    const snapshot = JSON.parse(JSON.stringify(form.value))  // strip non-serializable
+    localStorage.setItem(key, JSON.stringify({ ts: Date.now(), form: snapshot }))
+  } catch { /* quota exceeded — silently skip */ }
+}
+
+function clearDraft() {
+  const key = projectId ? `coi-draft-${projectId}` : 'coi-draft-new'
+  localStorage.removeItem(key)
+}
+
+// Debounced save on any form field change
+const saveDraftDebounced = useDebounceFn(saveDraft, 2000)
+watch(form, () => { hasUnsavedChanges.value = true; saveDraftDebounced() }, { deep: true })
+
+// beforeunload warning
+function handleBeforeUnload(e: BeforeUnloadEvent) {
+  if (hasUnsavedChanges.value) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
+}
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  // Check for existing draft
+  const key = projectId ? `coi-draft-${projectId}` : 'coi-draft-new'
+  const saved = localStorage.getItem(key)
+  if (saved) {
+    try {
+      const { ts, form: savedForm } = JSON.parse(saved)
+      const age = Date.now() - ts
+      if (age < 24 * 60 * 60 * 1000) {  // only restore drafts < 24h old
+        draftRestoreSnackbar.value = true
+      }
+    } catch { clearDraft() }
+  }
+})
+onBeforeUnmount(() => window.removeEventListener('beforeunload', handleBeforeUnload))
+
+function restoreDraft() {
+  const key = projectId ? `coi-draft-${projectId}` : 'coi-draft-new'
+  const saved = localStorage.getItem(key)
+  if (saved) {
+    try {
+      const { form: savedForm } = JSON.parse(saved)
+      Object.assign(form.value, savedForm)
+      toast.success('Draft restored')
+    } catch { toast.error('Could not restore draft') }
+  }
+  draftRestoreSnackbar.value = false
+}
+```
+
+**D3: Clear draft on successful save** (in the `submitForm` / save success handler):
+```typescript
+clearDraft()
+hasUnsavedChanges.value = false
+```
+
+**D4: Draft restore snackbar** (add to template):
+```vue
+<v-snackbar v-model="draftRestoreSnackbar" :timeout="-1" color="info" location="bottom left">
+  <div class="d-flex align-center ga-2">
+    <v-icon icon="mdi-content-save-outline" />
+    <span>Unsaved draft found. Restore your work?</span>
+  </div>
+  <template #actions>
+    <v-btn variant="text" @click="restoreDraft">Restore</v-btn>
+    <v-btn variant="text" @click="draftRestoreSnackbar = false; clearDraft()">Dismiss</v-btn>
+  </template>
+</v-snackbar>
+```
+
+**D5: Check if `useDebounceFn` is available** — use VueUse or implement manually with `setTimeout`.
+
+### WWW-D Verification
+- [ ] On form change: browser beforeunload warning fires if user tries to leave
+- [ ] Draft written to localStorage within ~2s of last change
+- [ ] On page reload: draft restore snackbar appears
+- [ ] Restore populates form with saved data
+- [ ] Dismiss clears the draft
+- [ ] Successful save clears draft + unsets hasUnsavedChanges
+
+---
+
+## GROUP 5 — Remarks Audit Logging (WWW-E)
+
+### WWW-E: Add REMARKS_UPDATE fireLog to checklist-item remark saves
+
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts`
+
+Find the `updateDocumentChecklistItem` or equivalent service method that handles `PATCH /document-checklist/:itemId`. Add after the flush:
+
+```typescript
+this.fireLog(user, ActivityAction.REMARKS_UPDATE, projectId, {
+  action: 'checklist_remark_update',
+  checklistItemId: itemId,
+  typeCode: item.documentType?.typeCode,
+})
+```
+
+Also confirm the checklist-item remark PATCH route passes `user` from `@CurrentUser()` to the service — verify and fix if needed.
+
+### WWW-E Verification
+- [ ] After saving a checklist remark, `activity_logs` table has a REMARKS_UPDATE row
+- [ ] Backend tsc exit 0
+
+---
+
+## GROUP 6 — Repository Modal UX Guidance (WWW-F)
+
+### WWW-F: Add dismissible guidance text to CiRepositoryModal
+
+**File:** `pmo-frontend/components/coi/CiRepositoryModal.vue`
+
+**F1: Add `guidanceDismissed` state:**
+```typescript
+const guidanceDismissed = ref(false)
+onMounted(() => {
+  guidanceDismissed.value = localStorage.getItem('coi-repo-modal-guide-dismissed') === '1'
+})
+function dismissGuidance() {
+  guidanceDismissed.value = true
+  localStorage.setItem('coi-repo-modal-guide-dismissed', '1')
+}
+```
+
+**F2: Add at the top of `<v-card-text>` (before blank-forms section):**
+```vue
+<v-alert
+  v-if="!guidanceDismissed && mode !== 'staging'"
+  type="info"
+  variant="tonal"
+  density="compact"
+  class="mb-3"
+  closable
+  @click:close="dismissGuidance"
+>
+  Download the official template · Upload your accomplished form · View and download previous submissions · Track version history.
+</v-alert>
+```
+
+### WWW-F Verification
+- [ ] Guidance alert shows on first modal open
+- [ ] Clicking X dismisses it and stores the preference
+- [ ] Does not appear again after dismissal (localStorage persistence)
+- [ ] Not shown in staging mode (new project form)
+
+---
+
+## GROUP 7 — Checklist Master Summary (WWW-G)
+
+### WWW-G: Add cross-section summary to the top of CiDocumentChecklist
+
+**File:** `pmo-frontend/components/coi/CiDocumentChecklist.vue`
+
+**G1: Add props for hub-level data:**
+```typescript
+interface Props {
+  projectId: string
+  canEdit: boolean
+  documents?: DocumentItem[]
+  groupRemarks?: Record<string, GroupRemarkEntry[]>
+  canEditRemarks?: boolean
+  // WWW-G: cross-section summary data from hub
+  keyDocCount?: number
+  supportingDocCount?: number
+  galleryCount?: number
+  miscDocCount?: number
+}
+```
+
+**G2: Update CiAttachmentHub to pass these props:**
+```vue
+<CiDocumentChecklist
+  ref="checklistRef"
+  ...
+  :key-doc-count="allDocs.filter(d => (keyCodes as string[]).includes(d.documentType)).length"
+  :supporting-doc-count="[...sdOrdersCodes.value, ...sdReportsCodes.value, ...sdCertsCodes.value, ...ecoFormCodes.value].reduce((acc, c) => acc + allDocs.filter(d => d.documentType === c).length, 0)"
+  :gallery-count="gallery.length"
+  :misc-doc-count="otherDocs.length"
+/>
+```
+
+**G3: Add master summary section at top of CiDocumentChecklist template (before the loading/empty state and expansion panels):**
+```vue
+<!-- WWW-G: Cross-section master summary -->
+<v-card variant="outlined" class="mb-4" rounded="lg">
+  <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
+    <v-icon icon="mdi-view-dashboard-outline" size="small" color="primary" />
+    <span class="text-subtitle-2 font-weight-medium">Attachment Overview</span>
+    <v-chip size="x-small" variant="tonal" color="primary">All Sections</v-chip>
+  </v-card-title>
+  <v-card-text class="py-2">
+    <v-row dense>
+      <v-col cols="6" sm="3">
+        <div class="text-caption text-grey">Key Documents</div>
+        <div class="text-body-1 font-weight-bold">{{ keyDocCount ?? 0 }} <span class="text-caption text-grey">files</span></div>
+      </v-col>
+      <v-col cols="6" sm="3">
+        <div class="text-caption text-grey">Supporting Docs</div>
+        <div class="text-body-1 font-weight-bold">{{ supportingDocCount ?? 0 }} <span class="text-caption text-grey">files</span></div>
+      </v-col>
+      <v-col cols="6" sm="3">
+        <div class="text-caption text-grey">Gallery</div>
+        <div class="text-body-1 font-weight-bold">{{ galleryCount ?? 0 }} <span class="text-caption text-grey">images</span></div>
+      </v-col>
+      <v-col cols="6" sm="3">
+        <div class="text-caption text-grey">Miscellaneous</div>
+        <div class="text-body-1 font-weight-bold">{{ miscDocCount ?? 0 }} <span class="text-caption text-grey">files</span></div>
+      </v-col>
+    </v-row>
+  </v-card-text>
+</v-card>
+<!-- Below: existing CPES checklist accordion (unchanged) -->
+```
+
+### WWW-G Verification
+- [ ] Checklist top shows 4-col summary (Key Docs / Supporting / Gallery / Misc counts)
+- [ ] Counts update reactively after uploads in other sections
+- [ ] Existing CPES checklist items still visible below
+- [ ] TypeScript: no new errors in CiDocumentChecklist or CiAttachmentHub
+
+---
+
+## Phase WWW Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Repository cards: no progress bar, show file count + last upload | WWW-A | ⬜ |
+| CPES section: repository-card grid (no accordion) | WWW-B | ⬜ |
+| CPES uploads auto-update Compliance Checklist | WWW-B | ⬜ |
+| Miscellaneous: single repository card + modal | WWW-C | ⬜ |
+| Misc folder workspace still functional | WWW-C | ⬜ |
+| autosave beforeunload warning on unsaved changes | WWW-D | ✅ code (both new.vue + edit-[id].vue) |
+| Draft restore snackbar on page reload | WWW-D | ✅ code |
+| Draft clears on successful save | WWW-D | ✅ code (clearDraft at all router.push saves) |
+| Remarks save creates REMARKS_UPDATE audit entry | WWW-E | ✅ already implemented (changedFields diff in updateDocumentChecklistItem) |
+| Modal shows dismissible guidance text | WWW-F | ✅ code (guidanceDismissed + localStorage) |
+| Checklist master summary shows cross-section counts | WWW-G | ✅ code (4-col summary + new props wired) |
+| TypeScript: 0 new errors across all touched files | all | ✅ vue-tsc clean |
+| No regression: Key Docs, Supporting Docs, upload, download | all | ⬜ operator smoke |
+| CPES cards: text-wrap with visible docCount chip | CPES-fix | ✅ code (flex-wrap + white-space:normal on title) |
+| CPES grid: 3-column layout | CPES-fix | ✅ code (cols=12 sm=6 lg=4) |
+| CPES blockquote-style guide/instruction | CPES-fix | ✅ code |
+
+## Phase WWW Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (LOW) | WWW-A (card: remove progress bar) | Low — template change + prop removal | Independent; callers need updating |
+| Group 2 (MEDIUM) | WWW-B (CPES→card) | Medium — replaces CiComplianceRepository | Independent; uses existing openRepo |
+| Group 3 (MEDIUM) | WWW-C (Misc→card) | Medium — sentinel typeCode approach | Independent |
+| Group 4 (MEDIUM) | WWW-D (autosave) | Medium — localStorage + watchers in 2 pages | Independent |
+| Group 5 (LOW) | WWW-E (remarks audit) | Low — 1 fireLog call in service | Independent |
+| Group 6 (LOW) | WWW-F (modal guidance) | Low — additive template | Independent |
+| Group 7 (LOW) | WWW-G (checklist summary) | Low — new props + additive template | Independent |

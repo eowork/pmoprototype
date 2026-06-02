@@ -215,6 +215,32 @@ export function labelForLikha(key: string): string { return _likhaIndex.get(key)
 export function labelForRdp(key: string): string   { return _rdpIndex.get(key)   || key; }
 export function labelForSea(key: string): string   { return _seaIndex.get(key)   || key; }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// UN Sustainable Development Goals — flat, no sub-hierarchy (QQQ)
+// ─────────────────────────────────────────────────────────────────────────────
+export const SDG_OPTIONS: HierarchyOption[] = [
+  { key: 'SDG_1',  label: 'SDG 1 — No Poverty' },
+  { key: 'SDG_2',  label: 'SDG 2 — Zero Hunger' },
+  { key: 'SDG_3',  label: 'SDG 3 — Good Health and Well-being' },
+  { key: 'SDG_4',  label: 'SDG 4 — Quality Education' },
+  { key: 'SDG_5',  label: 'SDG 5 — Gender Equality' },
+  { key: 'SDG_6',  label: 'SDG 6 — Clean Water and Sanitation' },
+  { key: 'SDG_7',  label: 'SDG 7 — Affordable and Clean Energy' },
+  { key: 'SDG_8',  label: 'SDG 8 — Decent Work and Economic Growth' },
+  { key: 'SDG_9',  label: 'SDG 9 — Industry, Innovation and Infrastructure' },
+  { key: 'SDG_10', label: 'SDG 10 — Reduced Inequalities' },
+  { key: 'SDG_11', label: 'SDG 11 — Sustainable Cities and Communities' },
+  { key: 'SDG_12', label: 'SDG 12 — Responsible Consumption and Production' },
+  { key: 'SDG_13', label: 'SDG 13 — Climate Action' },
+  { key: 'SDG_14', label: 'SDG 14 — Life Below Water' },
+  { key: 'SDG_15', label: 'SDG 15 — Life on Land' },
+  { key: 'SDG_16', label: 'SDG 16 — Peace, Justice and Strong Institutions' },
+  { key: 'SDG_17', label: 'SDG 17 — Partnerships for the Goals' },
+];
+
+const _sdgIndex = new Map(SDG_OPTIONS.map(o => [o.key, o.label]));
+export function labelForSdg(key: string): string { return _sdgIndex.get(key) || key; }
+
 /** Returns only leaf-level (independently selectable) keys from a hierarchy. */
 export function leafKeysOf(opts: HierarchyOption[]): string[] {
   const out: string[] = [];

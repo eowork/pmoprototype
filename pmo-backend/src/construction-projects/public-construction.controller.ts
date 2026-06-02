@@ -9,6 +9,18 @@ import { Public } from '../auth/decorators';
 export class PublicConstructionController {
   constructor(private readonly service: ConstructionProjectsService) {}
 
+  // UUU-C: Dynamic template manifest. Declared BEFORE the ':id' routes so the
+  // static two-segment path is matched without colliding with the UUID param route.
+  @Public()
+  @Get('document-templates/manifest')
+  @ApiOperation({
+    summary:
+      'Discover available document templates by scanning the templates directory (public, no auth)',
+  })
+  getTemplateManifest() {
+    return this.service.getTemplateManifest();
+  }
+
   @Public()
   @Get()
   @ApiOperation({

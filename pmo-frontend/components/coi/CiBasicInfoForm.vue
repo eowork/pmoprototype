@@ -14,7 +14,7 @@
  * Beneficiary aggregate count removed per ECO directive 2026-05-21.
  */
 import type { BasicInfoFormState } from '~/utils/coiFormState'
-import { LIKHA_OPTIONS, RDP_OPTIONS, SOCIOECONOMIC_OPTIONS } from '~/utils/coiHierarchies'
+import { LIKHA_OPTIONS, RDP_OPTIONS, SOCIOECONOMIC_OPTIONS, SDG_OPTIONS } from '~/utils/coiHierarchies'
 // NC fix (2026-05-21): Explicit imports — Nuxt default auto-import path-prefixes
 // nested-dir components (components/coi/Foo.vue → <CoiFoo>), so the filename-only
 // tags in this template would silently fail to render without these imports.
@@ -40,6 +40,7 @@ const props = withDefaults(defineProps<{
 const rdpOptions   = RDP_OPTIONS
 const socioOptions = SOCIOECONOMIC_OPTIONS
 const likhaOptions = LIKHA_OPTIONS
+const sdgOptions   = SDG_OPTIONS
 
 // ── Static Option Lists ──────────────────────────────────────────────────────
 const campusOptions = [
@@ -519,23 +520,74 @@ function removeCustomFundingSource(i: number) {
   </v-row>
 
   <!-- ══════════════════════════════════════════════════════════════════════
-       ROW E — Strategic Alignment (3 dedicated cards side-by-side)
-       OC (2026-05-21): Split from single 3-column row into 3 cards with
-       per-card title, subtitle, chip preview, and "Edit Selections" button.
-       Chip truncation handled by CiHierarchicalSelectorTrigger maxVisibleChips.
+       ROW E — Strategic Alignment (SSS-A: balanced container layout)
+       Row 1: Narrative (full width)  |  Row 2: SDG + RDP  |  Row 3: SEA + LIKHA
        ══════════════════════════════════════════════════════════════════════ -->
+  <!-- Row 1: Narrative -->
+  <v-card elevation="2" rounded="lg" class="mb-1">
+    <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
+      <v-icon size="small" icon="mdi-strategy" color="purple" />
+      <span class="text-subtitle-1 font-weight-medium">Strategic Alignment Narrative</span>
+      <v-chip size="x-small" variant="tonal" color="grey">Optional</v-chip>
+    </v-card-title>
+    <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
+      Describe how this project aligns with institutional strategic priorities — used in strategic dashboard rollups.
+    </v-card-subtitle>
+    <v-divider />
+    <v-card-text class="py-3">
+      <v-textarea
+        v-model="form.strategic_alignment"
+        label="Strategic Alignment Narrative (optional)"
+        placeholder="Describe how this project aligns with institutional strategic priorities..."
+        rows="3"
+        auto-grow
+        density="compact"
+        variant="outlined"
+        hide-details="auto"
+        :readonly="readOnly"
+        counter
+        maxlength="2000"
+      />
+    </v-card-text>
+  </v-card>
+
+  <!-- Row 2: SDG + RDP -->
   <v-row dense class="mb-1">
-    <!-- RDP 2023–2028 Card -->
-    <v-col cols="12" md="4">
-      <v-card elevation="1" rounded="lg" class="h-100">
+    <v-col cols="12" md="6">
+      <v-card elevation="2" rounded="lg" class="h-100">
+        <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
+          <v-icon size="small" icon="mdi-earth" color="teal" />
+          <span class="text-subtitle-1 font-weight-medium">UN SDGs</span>
+          <v-chip v-if="(form.sdg_goals || []).length" size="x-small" variant="tonal" color="teal">{{ (form.sdg_goals || []).length }}</v-chip>
+        </v-card-title>
+        <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
+          UN Sustainable Development Goals addressed by this project.
+        </v-card-subtitle>
+        <v-divider />
+        <v-card-text class="py-3">
+          <CiHierarchicalSelectorTrigger
+            v-model="form.sdg_goals"
+            label="Sustainable Development Goals"
+            title="UN Sustainable Development Goals"
+            :options="sdgOptions"
+            icon="mdi-earth"
+            color="teal"
+            description="Select all UN SDGs that this project contributes to."
+            search-placeholder="Search SDGs…"
+            :read-only="readOnly"
+            :max-visible-chips="5"
+          />
+        </v-card-text>
+      </v-card>
+    </v-col>
+    <v-col cols="12" md="6">
+      <v-card elevation="2" rounded="lg" class="h-100">
         <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
           <v-icon size="small" icon="mdi-map-outline" color="primary" />
-          <span class="text-subtitle-2 font-weight-medium">RDP 2023–2028</span>
-          <v-chip v-if="(form.rdp_alignment || []).length" size="x-small" variant="tonal" color="primary">
-            {{ (form.rdp_alignment || []).length }}
-          </v-chip>
+          <span class="text-subtitle-1 font-weight-medium">RDP 2023–2028</span>
+          <v-chip v-if="(form.rdp_alignment || []).length" size="x-small" variant="tonal" color="primary">{{ (form.rdp_alignment || []).length }}</v-chip>
         </v-card-title>
-        <v-card-subtitle class="pt-1 pb-1 text-caption text-grey-darken-1">
+        <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
           Caraga Regional Development Plan chapters and sub-chapters.
         </v-card-subtitle>
         <v-divider />
@@ -555,19 +607,19 @@ function removeCustomFundingSource(i: number) {
         </v-card-text>
       </v-card>
     </v-col>
+  </v-row>
 
-    <!-- 0+8 Socio-Economic Agenda Card -->
-    <v-col cols="12" md="4">
-      <v-card elevation="1" rounded="lg" class="h-100">
+  <!-- Row 3: Socio-Economic Agenda + LIKHA -->
+  <v-row dense class="mb-1">
+    <v-col cols="12" md="6">
+      <v-card elevation="2" rounded="lg" class="h-100">
         <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
           <v-icon size="small" icon="mdi-flag-variant-outline" color="warning" />
-          <span class="text-subtitle-2 font-weight-medium">0+8 Agenda</span>
-          <v-chip v-if="(form.socioeconomic_agenda || []).length" size="x-small" variant="tonal" color="warning">
-            {{ (form.socioeconomic_agenda || []).length }}
-          </v-chip>
+          <span class="text-subtitle-1 font-weight-medium">0+8 Socio-Economic Agenda</span>
+          <v-chip v-if="(form.socioeconomic_agenda || []).length" size="x-small" variant="tonal" color="warning">{{ (form.socioeconomic_agenda || []).length }}</v-chip>
         </v-card-title>
-        <v-card-subtitle class="pt-1 pb-1 text-caption text-grey-darken-1">
-          Socio-Economic Agenda priorities.
+        <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
+          Socio-Economic Agenda priorities (sub-items independently selectable).
         </v-card-subtitle>
         <v-divider />
         <v-card-text class="py-3">
@@ -586,19 +638,15 @@ function removeCustomFundingSource(i: number) {
         </v-card-text>
       </v-card>
     </v-col>
-
-    <!-- CSU LIKHA Goals Card -->
-    <v-col cols="12" md="4">
-      <v-card elevation="1" rounded="lg" class="h-100">
+    <v-col cols="12" md="6">
+      <v-card elevation="2" rounded="lg" class="h-100">
         <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
           <v-icon size="small" icon="mdi-school-outline" color="success" />
-          <span class="text-subtitle-2 font-weight-medium">CSU LIKHA Goals</span>
-          <v-chip v-if="(form.csu_likha_goals || []).length" size="x-small" variant="tonal" color="success">
-            {{ (form.csu_likha_goals || []).length }}
-          </v-chip>
+          <span class="text-subtitle-1 font-weight-medium">CSU LIKHA Goals</span>
+          <v-chip v-if="(form.csu_likha_goals || []).length" size="x-small" variant="tonal" color="success">{{ (form.csu_likha_goals || []).length }}</v-chip>
         </v-card-title>
-        <v-card-subtitle class="pt-1 pb-1 text-caption text-grey-darken-1">
-          CSU institutional strategic plan goals.
+        <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
+          Caraga State University institutional strategic plan goals.
         </v-card-subtitle>
         <v-divider />
         <v-card-text class="py-3">
@@ -618,32 +666,6 @@ function removeCustomFundingSource(i: number) {
       </v-card>
     </v-col>
   </v-row>
-
-  <!-- ROW F — Strategic Alignment Narrative (OC-C: extracted to own card) -->
-  <v-card elevation="1" rounded="lg" class="mb-3 mt-1">
-    <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
-      <v-icon size="small" icon="mdi-strategy" color="purple" />
-      <span class="text-subtitle-1 font-weight-medium">Strategic Alignment Narrative</span>
-      <v-chip size="x-small" variant="tonal" color="grey">Optional</v-chip>
-    </v-card-title>
-    <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
-      Describe how this project aligns with institutional strategic priorities — used in strategic dashboard rollups.
-    </v-card-subtitle>
-    <v-divider />
-    <v-card-text class="py-3">
-      <v-textarea
-        v-model="form.strategic_alignment"
-        label="Strategic Alignment Narrative (optional)"
-        placeholder="Describe how this project aligns with institutional strategic priorities..."
-        rows="2"
-        auto-grow
-        density="compact"
-        variant="outlined"
-        hide-details="auto"
-        :readonly="readOnly"
-      />
-    </v-card-text>
-  </v-card>
 
   <!-- ══════════════════════════════════════════════════════════════════════
        ROW G — Output / Outcome Indicators (OD: 2 dedicated cards)

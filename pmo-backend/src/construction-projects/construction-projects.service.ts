@@ -9,6 +9,8 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { createReadStream } from 'fs';
+import * as fs from 'fs';
+import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { InjectRepository } from '@mikro-orm/nestjs';
 import { EntityRepository, EntityManager } from '@mikro-orm/core';
@@ -368,6 +370,8 @@ export class ConstructionProjectsService {
               cp.physical_progress, cp.financial_progress, cp.contract_amount,
               cp.contractor_id, cp.funding_source_id, cp.publication_status, cp.created_at,
               cp.submitted_by, cp.submitted_at,
+              cp.original_start_date, cp.revised_start_date,
+              cp.original_completion_date, cp.revised_completion_date,
               submitter.first_name || ' ' || submitter.last_name as submitted_by_name,
               (SELECT COALESCE(json_agg(json_build_object(
                   'id', u.id,
@@ -530,7 +534,11 @@ export class ConstructionProjectsService {
       ),
       conn.execute(
         `SELECT COUNT(*) as total, COALESCE(SUM(contract_amount),0) as total_contract_value,
-                COALESCE(AVG(physical_progress),0) as avg_progress
+                COALESCE(AVG(physical_progress),0) as avg_progress,
+                COUNT(*) FILTER (
+                  WHERE status = 'ONGOING'
+                    AND physical_progress::numeric < target_physical_progress::numeric
+                ) as delayed_count
          FROM construction_projects WHERE deleted_at IS NULL`,
       ),
     ]);
@@ -538,6 +546,7 @@ export class ConstructionProjectsService {
       total: parseInt(aggRow[0].total, 10),
       total_contract_value: parseFloat(aggRow[0].total_contract_value),
       avg_progress: parseFloat(aggRow[0].avg_progress),
+      delayed_count: parseInt(aggRow[0].delayed_count, 10),
       by_status: statusRows.map((r) => ({
         status: r.status,
         count: parseInt(r.count, 10),
@@ -689,10 +698,10 @@ export class ConstructionProjectsService {
             co_implementing_agency, attached_agency,
             original_start_date, revised_start_date, original_completion_date, revised_completion_date, revised_project_duration,
             as_of_date, cost_incurred_to_date,
-            rdp_alignment, socioeconomic_agenda, csu_likha_goals, beneficiary_list,
+            rdp_alignment, socioeconomic_agenda, csu_likha_goals, sdg_goals, beneficiary_list,
             funding_source_type, additional_funding_sources,
             remarks_log, personnel_groups)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`,
           [
             projectId,
@@ -751,6 +760,7 @@ export class ConstructionProjectsService {
             dto.rdp_alignment ? JSON.stringify(dto.rdp_alignment) : null,
             dto.socioeconomic_agenda ? JSON.stringify(dto.socioeconomic_agenda) : null,
             dto.csu_likha_goals ? JSON.stringify(dto.csu_likha_goals) : null,
+            dto.sdg_goals ? JSON.stringify(dto.sdg_goals) : null,
             dto.beneficiary_list ? JSON.stringify(dto.beneficiary_list) : null,
             dto.funding_source_type ?? null,
             dto.additional_funding_sources ? JSON.stringify(dto.additional_funding_sources) : null,
@@ -933,7 +943,7 @@ export class ConstructionProjectsService {
       'incident_log', 'risk_register', 'escalation_records',
       'document_checklist_remarks',
       // MC: new JSONB fields
-      'rdp_alignment', 'socioeconomic_agenda', 'csu_likha_goals',
+      'rdp_alignment', 'socioeconomic_agenda', 'csu_likha_goals', 'sdg_goals',
       'beneficiary_list', 'additional_funding_sources',
       'remarks_log', 'personnel_groups',
     ];
@@ -1829,6 +1839,24 @@ export class ConstructionProjectsService {
     return entity.customKeySections;
   }
 
+  // SSS-B: per-project custom Supporting Document repository folders
+  async updateCustomSupportingSections(
+    projectId: string,
+    sections: Array<{ id: string; label: string; typeCode: string }>,
+    user?: JwtPayload,
+  ): Promise<Array<{ id: string; label: string; typeCode: string }>> {
+    const entity = await this.cpRepo.findOne({ id: projectId });
+    if (!entity) throw new NotFoundException(`Project ${projectId} not found`);
+    entity.customSupportingSections = Array.isArray(sections) ? sections : [];
+    await this.em.flush();
+    this.fireLog(user, ActivityAction.UPDATE, projectId, {
+      section: 'SUPPORTING_DOCUMENTS',
+      action: 'update_custom_supporting_sections',
+      count: entity.customSupportingSections.length,
+    });
+    return entity.customSupportingSections;
+  }
+
   // NI (2026-05-21): Financials methods removed; data flows through
   // construction_progress_reports instead. Table archived via migration 030000.
 
@@ -2011,6 +2039,18 @@ export class ConstructionProjectsService {
       mimeType = 'application/x-google-drive-link';
     }
 
+    // OOO-A: version auto-increment for folder submissions. Each new upload into a
+    // SUBMISSIONS/folder node gets version = (current max in folder) + 1, so the
+    // submissions table doubles as version history. Non-folder uploads stay at v1.
+    let version = 1;
+    if (dto.folder_id) {
+      const latest = await this.documentRepo.findOne(
+        { folderId: dto.folder_id },
+        { orderBy: { version: 'desc' } },
+      );
+      version = (latest?.version ?? 0) + 1;
+    }
+
     const doc = this.documentRepo.create({
       documentableType: 'CONSTRUCTION_PROJECT',
       documentableId: projectId,
@@ -2023,6 +2063,7 @@ export class ConstructionProjectsService {
       category: dto.category,
       lifecycleStatus: dto.lifecycleStatus || 'ACTIVE',
       folderId: dto.folder_id ?? null,
+      version,
       uploadedBy: userId,
       createdBy: userId,
     });
@@ -2071,12 +2112,75 @@ export class ConstructionProjectsService {
     );
     if (!docs.length) return docs;
     const uploaderIds = [...new Set(docs.map((d) => d.uploadedBy).filter(Boolean))];
+    // VVV-A: MikroORM conn.execute uses Knex positional '?' placeholders, which
+    // FLATTEN an array binding. `WHERE id = ANY(?)` therefore expanded to
+    // `ANY($1, $2, ...)` (invalid SQL) → HTTP 500 whenever a project had documents.
+    // Use the codebase-standard IN(placeholders) + flat params instead.
+    if (!uploaderIds.length) {
+      return docs.map((d) => Object.assign(d, { uploadedByName: undefined }));
+    }
+    const placeholders = uploaderIds.map(() => '?').join(', ');
     const userRows = await this.em.getConnection().execute(
-      `SELECT id, COALESCE(display_name, first_name || ' ' || last_name, email) AS display_name FROM users WHERE id = ANY(?) AND deleted_at IS NULL`,
-      [uploaderIds],
+      `SELECT id, COALESCE(display_name, first_name || ' ' || last_name, email) AS display_name FROM users WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
+      uploaderIds,
     ) as Array<{ id: string; display_name: string }>;
     const nameMap = new Map(userRows.map((r) => [r.id, r.display_name]));
     return docs.map((d) => Object.assign(d, { uploadedByName: nameMap.get(d.uploadedBy) }));
+  }
+
+  // UUU-C: Dynamic template discovery. Scans the static templates directory at
+  // request time and returns a manifest of every available .docx — both the flat
+  // type-code aliases (SD_ECO_001.docx ...) served at /templates and the original
+  // files under the SHAREABLE SUPPORT DOCUMENTS subtree. No hardcoded paths.
+  async getTemplateManifest(): Promise<{
+    templates: Array<{
+      typeCode: string;
+      url: string;
+      fileName: string;
+      category: string;
+    }>;
+  }> {
+    const templateDir = path.join(process.cwd(), 'public', 'templates');
+    const entries: Array<{
+      typeCode: string;
+      url: string;
+      fileName: string;
+      category: string;
+    }> = [];
+    if (!fs.existsSync(templateDir)) return { templates: [] };
+
+    // Flat type-code files (SD_ECO_001.docx, etc.)
+    const flatFiles = fs
+      .readdirSync(templateDir)
+      .filter((f) => f.endsWith('.docx') && /^SD_ECO_\d{3}/.test(f));
+    for (const file of flatFiles) {
+      entries.push({
+        typeCode: file.replace('.docx', ''),
+        url: `/templates/${file}`,
+        fileName: file,
+        category: 'SD',
+      });
+    }
+
+    // Subdirectory tree (authoritative source folders)
+    const subdirBase = path.join(templateDir, 'SHAREABLE SUPPORT DOCUMENTS');
+    if (fs.existsSync(subdirBase)) {
+      for (const cat of fs.readdirSync(subdirBase)) {
+        const catPath = path.join(subdirBase, cat);
+        if (!fs.statSync(catPath).isDirectory()) continue;
+        for (const file of fs
+          .readdirSync(catPath)
+          .filter((f) => f.endsWith('.docx'))) {
+          entries.push({
+            typeCode: file,
+            url: `/templates/SHAREABLE SUPPORT DOCUMENTS/${cat}/${file}`,
+            fileName: file,
+            category: cat,
+          });
+        }
+      }
+    }
+    return { templates: entries };
   }
 
   async listDocumentFolders(projectId: string): Promise<any[]> {
