@@ -1,7 +1,7 @@
 ﻿# [Active Plan] PMO Dashboard — COI Module Development
 > **Governance:** ACE v2.4
-> **Phase:** JA–LU ✅ | **MA–PM ✅** | **QA–ZZ ✅** | **AAA–EEE ✅** | **FFF-A/B/C ✅ | FFF-D–G ✅** | **GGG-A–H ✅ | GGG-R ✅ | GGG-S ✅** | **HHH-A–J ✅** | **III-A–G ✅** | **MR-A ✅** | **LLL-A–I ✅** | **MMM-A–G ✅** | **NNN ✅ | OOO ✅** | **PPP ⬜** | **QQQ ⬜** | **RRR ⬜** | **SSS ⬜** | **TTT ✅ (cherry-picked)** | **UUU ✅** | **VVV ✅** | **WWW ✅**
-> **Last Updated:** 2026-06-02 (WWW Phase 3 complete: progress bar removed, CPES→card, Misc→card, autosave (new+edit), modal guidance, checklist master summary; vue-tsc clean)
+> **Phase:** JA–LU ✅ | **MA–PM ✅** | **QA–ZZ ✅** | **AAA–EEE ✅** | **FFF-A/B/C ✅ | FFF-D–G ✅** | **GGG-A–H ✅ | GGG-R ✅ | GGG-S ✅** | **HHH-A–J ✅** | **III-A–G ✅** | **MR-A ✅** | **LLL-A–I ✅** | **MMM-A–G ✅** | **NNN ✅ | OOO ✅** | **PPP ⬜** | **QQQ ⬜** | **RRR ⬜** | **SSS ⬜** | **TTT ✅ (cherry-picked)** | **UUU ✅** | **VVV ✅** | **WWW ✅** | **XXX ✅** | **YYY ✅ (complete — but missing eager + External Links section)** | **ZZZ ✅** | **AAA ✅** | **BBB ✅** | **CCC ✅**
+> **Last Updated:** 2026-06-02 (CCC: expansion grid fix, show-more/less alignment, gallery 280px + preview metadata, cost-this-period KPI; vue-tsc clean)
 > **Archive:** `docs/plan_Artifact_April_2026.md` (full history) | `docs/archive/` (pre-JA phases) | `docs/archive/plan_completed_phases_JA_to_JR_2026-05-13.md` (KL-B target)
 > **Research Reference:** `research.md` Architecture Reference + Sections 2.129–2.235
 
@@ -34471,3 +34471,1788 @@ interface Props {
 | Group 5 (LOW) | WWW-E (remarks audit) | Low — 1 fireLog call in service | Independent |
 | Group 6 (LOW) | WWW-F (modal guidance) | Low — additive template | Independent |
 | Group 7 (LOW) | WWW-G (checklist summary) | Low — new props + additive template | Independent |
+
+---
+
+# Phase XXX — Link Submission, Misc Folder Removal, Gallery Enhancement, Modal UX, Profile Headers
+
+**Status:** ✅ Phase 3 COMPLETE — XXX-A (link submit modal + hub) + XXX-B (Misc folder removed) + XXX-C (autosave timestamp, both pages) + XXX-D (modal tooltips) + XXX-E (gallery thisMonthCount + category chips + hub guide) + XXX-F (section overlines). vue-tsc 0 new errors. (2026-06-02)
+**Research Reference:** §2.273-A through §2.273-I
+**Last Updated:** 2026-06-02
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase XXX)
+
+| ID | Directive |
+|----|-----------|
+| XXX-D1 | Link submission in CiRepositoryModal: new `'link'` emit. Hub handles it via `onRepoLink` → `submitLink`. No backend changes (backend already stores links). |
+| XXX-D2 | Misc Folder Workspace: REMOVE only the `CiFolderRepository` block and its section header. External Links section stays. |
+| XXX-D3 | Autosave timestamp: `lastSavedAt` ref updated in `saveDraft()`; displayed near save button — additive only. |
+| XXX-D4 | Gallery enhancement: modal-only (month-grouping + category filter chips). No backend change, no entity change. |
+| XXX-D5 | Project Profile section headers: additive chip/label above each row group in CiBasicInfoForm — NO restructuring of fields, save logic, or existing layout. |
+| XXX-D6 | CPES status field: DEFERRED — not accessible from hub without a new checklist fetch. |
+| XXX-D7 | All changes preserve FFF-C read-only enforcement on detail page. |
+
+---
+
+## GROUP 1 — Link Submission in CiRepositoryModal (XXX-A) CRITICAL
+
+### XXX-A: Add "Submit Link" form to CiRepositoryModal and wire to hub
+
+**File:** `pmo-frontend/components/coi/CiRepositoryModal.vue`
+
+**A1: Add link form state (alongside upload state):**
+```typescript
+const showLinkForm = ref(false)
+const linkUrl = ref('')
+const linkTitle = ref('')
+const linkDescription = ref('')
+const URL_RE = /^https?:\/\/.+/i
+
+function submitLink() {
+  if (!linkUrl.value || !URL_RE.test(linkUrl.value)) {
+    toast.error('Must be a valid URL starting with https://')
+    return
+  }
+  emit('link', { url: linkUrl.value, title: linkTitle.value || linkUrl.value, description: linkDescription.value })
+  linkUrl.value = ''
+  linkTitle.value = ''
+  linkDescription.value = ''
+  showLinkForm.value = false
+}
+```
+
+**A2: Add `'link'` to emit definition:**
+```typescript
+const emit = defineEmits<{
+  'update:modelValue': [value: boolean]
+  upload: [payload: { file: File; documentType: string; title: string; description: string }]
+  delete: [docId: string]
+  'remove-staged': [tempId: string]
+  link: [payload: { url: string; title: string; description: string }]  // XXX-A new
+}>()
+```
+
+**A3: Add "Submit Link" toggle button** in the search/filter/sort row (beside the upload toggle):
+```vue
+<v-btn
+  v-if="canUpload && mode !== 'view'"
+  :color="color" variant="tonal" size="small"
+  :icon="showLinkForm ? 'mdi-chevron-up' : 'mdi-link-plus'"
+  @click="showLinkForm = !showLinkForm; if (showLinkForm) showUpload = false"
+  title="Submit Link"
+/>
+```
+
+**A4: Add link form panel** (after the upload panel, before staged documents):
+```vue
+<v-expand-transition>
+  <v-card v-if="showLinkForm && canUpload && mode !== 'view'" variant="tonal" color="blue-grey" class="mb-4">
+    <v-card-title class="d-flex align-center ga-2 text-body-2 py-2 px-3">
+      <v-icon icon="mdi-link-plus" size="small" />
+      Submit External Link
+    </v-card-title>
+    <v-card-text class="py-2">
+      <v-row dense>
+        <v-col cols="12">
+          <v-text-field
+            v-model="linkUrl"
+            label="URL *"
+            placeholder="https://drive.google.com/..."
+            prepend-inner-icon="mdi-link"
+            variant="outlined"
+            density="compact"
+            hide-details="auto"
+            :rules="[(v: string) => !v || URL_RE.test(v) || 'Must be a valid https:// URL']"
+          />
+        </v-col>
+        <v-col cols="12" sm="6">
+          <v-text-field v-model="linkTitle" label="Title (optional)" variant="outlined" density="compact" hide-details />
+        </v-col>
+        <v-col cols="12" sm="6">
+          <v-text-field v-model="linkDescription" label="Description (optional)" variant="outlined" density="compact" hide-details />
+        </v-col>
+        <v-col cols="12" class="d-flex justify-end">
+          <v-btn color="blue-grey" :disabled="!linkUrl || !URL_RE.test(linkUrl)" prepend-icon="mdi-link-plus" @click="submitLink">
+            {{ mode === 'staging' ? 'Stage Link' : 'Submit Link' }}
+          </v-btn>
+        </v-col>
+      </v-row>
+    </v-card-text>
+  </v-card>
+</v-expand-transition>
+```
+
+**A5: Distinguish link entries in the document list:**
+
+Change the prepend icon logic to also handle generic external links:
+```vue
+<template #prepend>
+  <v-icon
+    :icon="doc.mimeType === 'application/x-google-drive-link' ? 'mdi-google-drive'
+          : doc.mimeType === 'application/x-external-link' ? 'mdi-link-variant'
+          : 'mdi-file-document'"
+    :color="doc.mimeType?.includes('link') ? 'info' : color"
+    size="small"
+  />
+</template>
+```
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+**A6: Add `onRepoLink()` handler and wire to shared modal:**
+```typescript
+function onRepoLink(payload: { url: string; title: string; description: string }) {
+  if (isStaging.value) {
+    emitStaged({ links: [...(props.modelValue?.links ?? []), { url: payload.url, title: payload.title, description: payload.description }] })
+    return
+  }
+  // Non-staging: POST directly
+  const isGDrive = /drive\.google\.com|docs\.google\.com/i.test(payload.url)
+  api.post(`/api/construction-projects/${props.projectId}/documents`, {
+    documentType: activeRepo.value.typeCodes[0] ?? 'link',
+    externalLink: payload.url,
+    title: payload.title || undefined,
+    description: payload.description || undefined,
+  }).then(() => {
+    toast.success('Link submitted')
+    fetchDocuments()
+    checklistRef.value?.refresh()
+  }).catch((err: unknown) => {
+    toast.error((err as { message?: string })?.message || 'Failed to submit link')
+  })
+}
+```
+
+**A7: Add `@link="onRepoLink"` to the shared CiRepositoryModal instance:**
+```vue
+<CiRepositoryModal
+  ...
+  @upload="onRepoUpload"
+  @link="onRepoLink"
+  @delete="deleteDocument"
+  @remove-staged="removeStaged"
+/>
+```
+
+**A8: isLinkDoc update** — extend to cover generic external links:
+```typescript
+const isLink = (d: HubDoc) =>
+  d.mimeType === 'application/x-google-drive-link' ||
+  d.mimeType === 'application/x-external-link' ||
+  d.documentType === 'link'
+```
+
+### XXX-A Verification
+- [ ] "Submit Link" toggle appears beside upload toggle in modal (non-view mode)
+- [ ] Link form shows URL + Title + Description fields
+- [ ] URL validation fires if not https://
+- [ ] Submitting a link → POST to backend → appears in modal document list
+- [ ] Link entries show `mdi-link-variant` or `mdi-google-drive` icon (not file icon)
+- [ ] In staging mode (new.vue): link staged, submitted after project create
+- [ ] Download button for link opens URL in new tab (not triggers download)
+- [ ] Key Docs AND Supporting Docs repos both support link submission
+
+---
+
+## GROUP 2 — Misc Folder Workspace Removal (XXX-B)
+
+### XXX-B: Remove CiFolderRepository from Miscellaneous section
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+Remove the entire folder workspace block:
+```
+<!-- Folder workspace for MISC group -->
+<template v-if="hasProject">
+  <v-divider class="my-3" />
+  <div class="d-flex align-center ga-2 mb-2">
+    <v-icon size="18" color="blue-grey">mdi-folder-multiple-outline</v-icon>
+    <span class="text-subtitle-2 font-weight-medium">Folder Workspace</span>
+  </div>
+  <CiFolderRepository ... />
+</template>
+```
+
+Keep: repository card, info alert, external links section.
+
+### XXX-B Verification
+- [ ] Miscellaneous section: only CiRepositoryCard + info alert + external links (no folder tree)
+- [ ] No regression to CiFolderRepository for other sections (Supporting Docs, CPES still use their respective implementations)
+
+---
+
+## GROUP 3 — Autosave Timestamp Indicator (XXX-C)
+
+### XXX-C: Add "Last saved / Unsaved changes" indicator to new.vue and edit-[id].vue
+
+**Both files:** `pmo-frontend/pages/coi/new.vue` and `pmo-frontend/pages/coi/edit-[id].vue`
+
+**C1: Track lastSavedAt in saveDraft()**
+```typescript
+const lastSavedAt = ref<number | null>(null)
+
+function saveDraft() {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ ts: Date.now(), form: JSON.parse(JSON.stringify(form.value)) }))
+    lastSavedAt.value = Date.now()
+  } catch { /* quota exceeded */ }
+}
+```
+
+**C2: Human-readable elapsed computed**
+```typescript
+// Poll every 30s for "X seconds ago" display
+const lastSavedLabel = computed(() => {
+  if (!lastSavedAt.value) return null
+  const diff = Math.floor((Date.now() - lastSavedAt.value) / 1000)
+  if (diff < 10) return 'just now'
+  if (diff < 60) return `${diff}s ago`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  return `${Math.floor(diff / 3600)}h ago`
+})
+```
+
+**C3: Add status line near the Save button in template** (existing save button row):
+```vue
+<div class="d-flex align-center ga-2 text-caption text-grey">
+  <v-chip v-if="hasUnsavedChanges" size="x-small" color="warning" variant="tonal" prepend-icon="mdi-circle-medium">
+    Unsaved changes
+  </v-chip>
+  <span v-if="lastSavedLabel" class="d-flex align-center ga-1">
+    <v-icon size="14">mdi-content-save-check-outline</v-icon>
+    Draft saved {{ lastSavedLabel }}
+  </span>
+</div>
+```
+
+**C4: Update the label every 30 seconds** using a simple interval:
+```typescript
+let elapsedTick: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  elapsedTick = setInterval(() => { /* triggers lastSavedLabel recompute */ lastSavedAt.value = lastSavedAt.value }, 30_000)
+})
+onBeforeUnmount(() => { if (elapsedTick) clearInterval(elapsedTick) })
+```
+
+### XXX-C Verification
+- [ ] "Unsaved changes" warning chip visible after any form edit
+- [ ] "Draft saved X ago" appears after the debounced save fires (within 2–3s of a change)
+- [ ] Chip/label disappears after successful save (clearDraft + hasUnsavedChanges=false)
+
+---
+
+## GROUP 4 — Modal Action Button Tooltips (XXX-D)
+
+### XXX-D: Add tooltips to download and delete buttons in CiRepositoryModal
+
+**File:** `pmo-frontend/components/coi/CiRepositoryModal.vue`
+
+Add `title` attribute and a small gap to the action buttons:
+```vue
+<template #append>
+  <div class="d-flex align-center ga-1">
+    <v-btn variant="text" size="small" icon="mdi-download" title="Download file" @click.stop="downloadDoc(doc)" />
+    <v-btn v-if="canDelete" icon="mdi-delete" size="small" variant="text" color="error" title="Delete from repository" @click.stop="emit('delete', doc.id)" />
+  </div>
+</template>
+```
+
+### XXX-D Verification
+- [ ] Hovering download shows "Download file" tooltip
+- [ ] Hovering delete shows "Delete from repository" tooltip
+- [ ] Buttons have consistent spacing (`ga-1` between them)
+
+---
+
+## GROUP 5 — Gallery Enhancement (XXX-E)
+
+### XXX-E: Month-grouping + category filter in CiGalleryModal
+
+**File:** `pmo-frontend/components/coi/CiGalleryModal.vue`
+
+**E1: Add category filter chips above the grid:**
+```typescript
+const categoryFilter = ref<string | null>(null)
+const filteredImages = computed(() => {
+  if (!categoryFilter.value) return props.images
+  return props.images.filter(img => img.category === categoryFilter.value)
+})
+const availableCategories = computed(() => [...new Set(props.images.map(img => img.category).filter(Boolean))])
+```
+
+**E2: Group by month** for the gallery header stats (not a full timeline view — just a count chip):
+```typescript
+const thisMonthCount = computed(() => {
+  const now = new Date()
+  return props.images.filter(img => {
+    const d = img.imageTakenDate ? new Date(img.imageTakenDate) : img.uploadedAt ? new Date(img.uploadedAt) : null
+    return d && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+  }).length
+})
+```
+
+**E3: Add to template** — compact analytics row above the grid:
+```vue
+<!-- Gallery analytics + category filter -->
+<div class="d-flex flex-wrap align-center ga-2 mb-3">
+  <v-chip size="small" variant="tonal" color="primary" prepend-icon="mdi-calendar-month">
+    {{ thisMonthCount }} this month
+  </v-chip>
+  <v-divider vertical />
+  <v-chip
+    v-for="cat in availableCategories" :key="cat"
+    size="small"
+    :variant="categoryFilter === cat ? 'elevated' : 'tonal'"
+    :color="categoryFilter === cat ? 'primary' : 'grey'"
+    @click="categoryFilter = categoryFilter === cat ? null : cat"
+  >
+    {{ cat }}
+  </v-chip>
+  <v-btn v-if="categoryFilter" size="x-small" variant="text" @click="categoryFilter = null">Clear</v-btn>
+</div>
+```
+
+**E4: Update grid to use `filteredImages` instead of `props.images`** for display.
+
+**E5: Add construction documentation guide** at the top of the gallery tab in CiAttachmentHub:
+```vue
+<v-alert type="info" variant="tonal" density="compact" class="mb-3" icon="mdi-camera-outline">
+  Document site progress regularly. Photos are used for accomplishment validation, inspection evidence, and milestone verification.
+</v-alert>
+```
+
+### XXX-E Verification
+- [ ] Gallery shows "N this month" chip
+- [ ] Category filter chips appear for each distinct category in the gallery
+- [ ] Clicking a category filters the grid; Clear resets
+- [ ] Hub gallery tab shows construction documentation guide
+- [ ] Existing upload, open gallery, thumbnail strip all preserved
+
+---
+
+## GROUP 6 — Project Profile Section Headers (XXX-F)
+
+### XXX-F: Add descriptive section headings to CiBasicInfoForm
+
+**File:** `pmo-frontend/components/coi/CiBasicInfoForm.vue`
+
+Add a minimal section divider before each logical Row group. These are purely visual — no field changes.
+
+Before Row A (Project Identity) — already has a card title, skip.
+Before Row B (Location / Agencies):
+```vue
+<div class="d-flex align-center ga-2 mb-1 mt-2">
+  <v-icon size="16" color="grey-darken-1">mdi-map-marker-outline</v-icon>
+  <span class="text-overline text-grey-darken-1">Location &amp; Implementation</span>
+</div>
+```
+Before Row C (Funding / Other Attributes):
+```vue
+<div class="d-flex align-center ga-2 mb-1 mt-2">
+  <v-icon size="16" color="grey-darken-1">mdi-cash-multiple</v-icon>
+  <span class="text-overline text-grey-darken-1">Funding &amp; Project Details</span>
+</div>
+```
+Before Row D (Objectives / Beneficiaries):
+```vue
+<div class="d-flex align-center ga-2 mb-1 mt-2">
+  <v-icon size="16" color="grey-darken-1">mdi-target</v-icon>
+  <span class="text-overline text-grey-darken-1">Objectives &amp; Beneficiaries</span>
+</div>
+```
+Before Strategic Alignment (Row E area):
+```vue
+<div class="d-flex align-center ga-2 mb-1 mt-2">
+  <v-icon size="16" color="grey-darken-1">mdi-strategy</v-icon>
+  <span class="text-overline text-grey-darken-1">Strategic Alignment</span>
+</div>
+```
+
+### XXX-F Verification
+- [ ] 4 section label rows appear between major form groups
+- [ ] No field moved, save logic unchanged
+- [ ] Labels are `text-overline` (subtle, not obtrusive)
+
+---
+
+## Phase XXX Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| "Submit Link" toggle in modal (non-view) | XXX-A | ✅ |
+| Link validation + form + submit | XXX-A | ✅ |
+| Link appears in modal list with link icon | XXX-A | ✅ |
+| Link submission in staging mode | XXX-A | ✅ |
+| Misc: Folder Workspace removed | XXX-B | ✅ |
+| Misc: Only card + alert + external links | XXX-B | ✅ |
+| "Unsaved changes" chip visible after edits | XXX-C | ✅ |
+| "Draft saved X ago" visible after autosave | XXX-C | ✅ |
+| Modal download/delete buttons have tooltips | XXX-D | ✅ |
+| Gallery: category filter chips functional | XXX-E | ✅ |
+| Gallery: "N this month" stat visible | XXX-E | ✅ |
+| Project Profile: 4 section overline labels | XXX-F | ✅ |
+| TypeScript: 0 new errors | all | ✅ |
+| No regression to existing upload/modal behavior | all | ✅ |
+
+## Phase XXX Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (CRITICAL) | XXX-A (link submission) | Medium — new emit + hub handler | Core new feature; test staging + edit mode |
+| Group 2 (LOW) | XXX-B (Misc folder removal) | Low — remove template block | Independent |
+| Group 3 (LOW) | XXX-C (autosave timestamp) | Low — additive ref + display | Depends on WWW-D being present |
+| Group 4 (LOW) | XXX-D (modal tooltips) | Low — attr additions | Independent |
+| Group 5 (LOW) | XXX-E (gallery enhancement) | Low — modal-only computed | Independent; requires CiGalleryModal read |
+| Group 6 (LOW) | XXX-F (section headers) | Low — additive template labels | Independent |
+
+---
+
+# Phase YYY — Link Submission Fix + Compliance Checklist Sync Engine
+**Status:** ✅ Phase 3 COMPLETE — YYY-A (DTO GDrive restriction removed) + YYY-B (service mimeType detection) + YYY-C (checklist auto-sync, NOT_SUBMITTED filter removed) + YYY-D (frontend payload fix + toast) + YYY-E (REVISED status). vue-tsc 0 new errors. (2026-06-02)
+
+---
+
+## Phase YYY Context
+
+**Triggered by:** Verification of Phase XXX (partial implementation of Insert Link + checklist sync).
+**Scope:** Backend DTO fix + service logic fix + frontend payload fix + checklist REVISED status.
+**No new endpoints required.** All fixes are within existing architecture.
+
+---
+
+## Phase YYY Directive Table
+
+| # | Directive | Scope | Risk |
+|---|---|---|---|
+| YYY-D1 | Remove `@Matches()` Google Drive restriction from `UploadDocumentDto.externalLink` | Backend | Low |
+| YYY-D2 | Accept any valid HTTPS URL for `externalLink` (keep `@IsUrl()`) | Backend | Low |
+| YYY-D3 | In `addDocumentToProject()`, detect GDrive vs generic URL, assign correct mimeType | Backend | Low |
+| YYY-D4 | Remove `mimeType` from `onRepoLink()` POST payload in `CiAttachmentHub.vue` | Frontend | Low |
+| YYY-D5 | Add `toast.success()` + `toast.error()` to `onRepoLink()` | Frontend | Low |
+| YYY-D6 | Remove `submissionStatus: 'NOT_SUBMITTED'` filter from auto-link block | Backend | Medium |
+| YYY-D7 | Auto-link updates ANY checklist item (not just NOT_SUBMITTED); always updates `linkedDocumentId` + `submittedAt` + `submittedBy` + increments `currentVersion` | Backend | Medium |
+| YYY-D8 | Set `submissionStatus = 'SUBMITTED'` on first upload; set `submissionStatus = 'SUBMITTED'` on re-upload (version bumped = visible indicator) | Backend | Low |
+| YYY-D9 | Add `REVISED` to `submissionStatus` type union in `CiDocumentChecklist.vue` interface | Frontend | Low |
+| YYY-D10 | Add `REVISED` entry to `statusOptions` array with color `teal` | Frontend | Low |
+| YYY-D11 | In auto-link block: if `checklistItem.submissionStatus !== 'NOT_SUBMITTED'` → set `'SUBMITTED'` (latest; version field shows history) | Backend | Low |
+
+---
+
+## Phase YYY Implementation Groups
+
+### YYY-A (CRITICAL): Backend DTO Fix
+**File:** `pmo-backend/src/construction-projects/dto/upload-document.dto.ts`
+
+Remove the `@Matches()` Google Drive restriction from `externalLink`.
+Keep `@IsUrl({ protocols: ['http', 'https'], require_protocol: true })` for URL format validation.
+Accept any valid URL. Reject only malformed URLs.
+
+Before:
+```ts
+@IsOptional()
+@IsUrl({ protocols: ['http', 'https'], require_protocol: true })
+@Matches(/^https?:\/\/(drive|docs)\.google\.com\//i, {
+  message: 'externalLink must be a valid Google Drive URL',
+})
+externalLink?: string;
+```
+
+After:
+```ts
+@IsOptional()
+@IsUrl({ protocols: ['http', 'https'], require_protocol: true })
+externalLink?: string;
+```
+
+---
+
+### YYY-B (CRITICAL): Backend Service — mimeType Detection
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts`
+**Method:** `addDocumentToProject()`
+
+Replace line 2039 hardcoded `'application/x-google-drive-link'` with runtime detection:
+
+```ts
+// Before (line 2039):
+mimeType = 'application/x-google-drive-link';
+
+// After:
+const isGDriveLink = /drive\.google\.com|docs\.google\.com/i.test(dto.externalLink!);
+mimeType = isGDriveLink ? 'application/x-google-drive-link' : 'application/x-external-link';
+```
+
+---
+
+### YYY-C (CRITICAL): Backend Service — Checklist Auto-Sync Fix
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts`
+**Method:** `addDocumentToProject()` lines 2074-2093
+
+Remove `submissionStatus: 'NOT_SUBMITTED'` filter. Find ANY checklist item for the project+docType.
+Always update linkedDocumentId + submittedAt + submittedBy + increment currentVersion.
+Log CHECKLIST_AUTO_UPDATED for re-submissions.
+
+```ts
+// Before:
+const checklistItem = await this.docChecklistRepo.findOne({
+  projectId,
+  documentTypeId: docType.id,
+  submissionStatus: 'NOT_SUBMITTED',   // ← REMOVE THIS
+});
+if (checklistItem) {
+  checklistItem.linkedDocumentId = doc.id;
+  checklistItem.submissionStatus = 'SUBMITTED';
+  checklistItem.submittedAt = new Date();
+  checklistItem.submittedBy = userId;
+  await this.em.persistAndFlush(checklistItem);
+  this.logger.log(`CHECKLIST_AUTO_LINKED: ...`);
+}
+
+// After:
+const checklistItem = await this.docChecklistRepo.findOne({
+  projectId,
+  documentTypeId: docType.id,
+});
+if (checklistItem) {
+  const wasFirstSubmission = checklistItem.submissionStatus === 'NOT_SUBMITTED';
+  checklistItem.linkedDocumentId = doc.id;
+  checklistItem.submittedAt = new Date();
+  checklistItem.submittedBy = userId;
+  checklistItem.currentVersion = (checklistItem.currentVersion || 0) + 1;
+  checklistItem.submissionStatus = 'SUBMITTED';
+  await this.em.persistAndFlush(checklistItem);
+  this.logger.log(
+    wasFirstSubmission
+      ? `CHECKLIST_AUTO_LINKED: project=${projectId}, checklist=${checklistItem.id}, doc=${doc.id}, typeCode=${dto.documentType}`
+      : `CHECKLIST_AUTO_UPDATED: project=${projectId}, checklist=${checklistItem.id}, doc=${doc.id}, typeCode=${dto.documentType}, version=${checklistItem.currentVersion}`,
+  );
+}
+```
+
+---
+
+### YYY-D (HIGH): Frontend Hub — Remove mimeType Payload + Add Toast
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+**Function:** `onRepoLink()`
+
+1. Remove `mimeType` field from the `api.post()` body — DTO does not accept it.
+2. Add `toast.success('External link successfully added.')` after `fetchDocuments()`.
+3. Add `toast.error(...)` in catch block with message parsing.
+
+```ts
+// Before:
+api.post(`/api/construction-projects/${props.projectId}/documents`, {
+  documentType: activeRepo.value.typeCodes[0] === '__MISC__' ? 'attachment' : (activeRepo.value.typeCodes[0] ?? 'link'),
+  externalLink: payload.url,
+  title: payload.title || undefined,
+  description: payload.description || undefined,
+  mimeType: isGDrive ? 'application/x-google-drive-link' : 'application/x-external-link',  // ← REMOVE
+}).then(() => {
+  fetchDocuments()
+  checklistRef.value?.refresh()
+}).catch((err: unknown) => {
+  console.error('[CiAttachmentHub] onRepoLink failed:', err)
+})
+
+// After:
+api.post(`/api/construction-projects/${props.projectId}/documents`, {
+  documentType: activeRepo.value.typeCodes[0] === '__MISC__' ? 'attachment' : (activeRepo.value.typeCodes[0] ?? 'link'),
+  externalLink: payload.url,
+  title: payload.title || undefined,
+  description: payload.description || undefined,
+}).then(() => {
+  fetchDocuments()
+  checklistRef.value?.refresh()
+  toast.success('External link successfully added.')
+}).catch((err: unknown) => {
+  const msg = (err as { message?: string })?.message || 'Unable to save external link.'
+  toast.error(msg)
+  console.error('[CiAttachmentHub] onRepoLink failed:', err)
+})
+```
+
+Also remove the now-unused `isGDrive` variable declaration.
+
+---
+
+### YYY-E (MEDIUM): Frontend Checklist — REVISED Status Display
+**File:** `pmo-frontend/components/coi/CiDocumentChecklist.vue`
+
+1. Update `ChecklistItem.submissionStatus` type union to include `'REVISED'`.
+2. Add `REVISED` to `statusOptions` array with label "Revised" and color "teal".
+
+```ts
+// In ChecklistItem interface:
+submissionStatus: 'NOT_SUBMITTED' | 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'REVISED'
+
+// In statusOptions array, add after SUBMITTED:
+{ title: 'Revised', value: 'REVISED', color: 'teal' },
+```
+
+---
+
+## Phase YYY Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Non-GDrive URL link submission succeeds (200 OK) | YYY-A | ✅ |
+| No `mimeType should not exist` error | YYY-A + YYY-D | ✅ |
+| No `externalLink must be a valid Google Drive URL` error | YYY-A | ✅ |
+| Non-GDrive link stored as `application/x-external-link` | YYY-B | ✅ |
+| GDrive link still stored as `application/x-google-drive-link` | YYY-B | ✅ |
+| Link record appears in Repository Modal after save | YYY-D | ✅ |
+| Link opens in new tab (not download) | existing | ✅ |
+| Toast success shown after link save | YYY-D | ✅ |
+| Toast error shown on link save failure | YYY-D | ✅ |
+| Uploading a Key Doc updates checklist status to SUBMITTED | YYY-C | ✅ |
+| Re-uploading a Key Doc increments `currentVersion` | YYY-C | ✅ |
+| Re-uploading a Supporting Doc updates `linkedDocumentId` | YYY-C | ✅ |
+| Compliance Checklist tab refreshes after upload | existing | ✅ |
+| REVISED status displays with teal color | YYY-E | ✅ |
+| Existing SUBMITTED/APPROVED/REJECTED items unaffected by other doc uploads | YYY-C | ✅ |
+| TypeScript: 0 new errors | all | ✅ |
+
+---
+
+## Phase YYY Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (CRITICAL) | YYY-A + YYY-B (backend DTO + mimeType) | Low | None |
+| Group 2 (CRITICAL) | YYY-C (checklist auto-sync) | Medium | Group 1 backend changes |
+| Group 3 (HIGH) | YYY-D (frontend hub payload + toast) | Low | YYY-A must be deployed first |
+| Group 4 (MEDIUM) | YYY-E (frontend checklist REVISED status) | Low | None |
+
+---
+
+# Phase ZZZ — Checklist Eager Mount + External Links Modal Section + Backend Restart
+
+**Status:** ✅ Phase 3 COMPLETE — ZZZ-A (backend restart — operational), ZZZ-B (`eager` on checklist window-item), ZZZ-C (External Links section in modal — fileModalDocs/linkModalDocs split, copy/open/delete). vue-tsc 0 new errors. (2026-06-02)
+**Research Reference:** §2.274-B2, §2.274-C, §2.274-D
+**Last Updated:** 2026-06-02
+**Branch:** `pmo-coi`
+
+**Context:** Phase YYY is complete but missed two items: (1) the `v-window-item eager` fix that makes checklist auto-refresh work regardless of tab visit history; (2) the separate "External Links" section in CiRepositoryModal. The validation errors (mimeType/GDrive) are a backend runtime issue resolved by restart — no code change needed.
+
+---
+
+## Governance Directives (Phase ZZZ)
+
+| ID | Directive |
+|----|-----------|
+| ZZZ-D1 | `eager` is the ONLY change to the checklist v-window-item — no other checklist markup changes. |
+| ZZZ-D2 | External Links section is ADDITIVE in CiRepositoryModal — the flat list of file entries is unchanged. |
+| ZZZ-D3 | Backend restart is OPERATIONAL (not a code change) — document the restart requirement clearly. |
+| ZZZ-D4 | `filteredModalDocs` → split into `fileModalDocs` + `linkModalDocs` in the modal script. |
+| ZZZ-D5 | Copy Link uses `navigator.clipboard.writeText` — no backend involved. |
+
+---
+
+## GROUP 1 — Operational: Backend Restart (ZZZ-A)
+
+### ZZZ-A: Backend hard restart to activate YYY DTO changes
+
+**Action (operator):** Stop the running backend (`Ctrl+C`) and start fresh:
+```
+cd pmo-backend && npm run start:dev
+```
+
+**Why:** NestJS `start:dev` compiles TypeScript on startup, but running processes may hold the previous compiled module in memory. The `@Matches` Google Drive restriction and the old mimeType error are in the OLD compiled cache. A hard restart guarantees the updated DTO and service code runs.
+
+**Result:** Both 400 errors disappear:
+- `property mimeType should not exist` → gone (YYY-D already removed mimeType from frontend payload)
+- `externalLink must be a valid Google Drive URL` → gone (YYY-A already removed @Matches)
+
+### ZZZ-A Verification
+- [ ] `POST /api/construction-projects/:id/documents` with `{ documentType, externalLink: 'https://onedrive.live.com/...', title }` → 201 Created (no 400)
+- [ ] Non-Google-Drive URLs accepted
+- [ ] `mimeType` NOT in the POST body (frontend sends none) → no 400
+
+---
+
+## GROUP 2 — Checklist Eager Mount (ZZZ-B) CRITICAL
+
+### ZZZ-B: Add `eager` to checklist v-window-item
+
+**File:** `pmo-frontend/components/coi/CiAttachmentHub.vue`
+
+**Current (line ~1007):**
+```vue
+<v-window-item v-if="hasProject" value="checklist">
+```
+
+**Fix:**
+```vue
+<v-window-item v-if="hasProject" value="checklist" eager>
+```
+
+**Why `eager`:** Without it, `CiDocumentChecklist` is only mounted when the user visits the Checklist tab. `checklistRef.value` is null until that visit → `checklistRef.value?.refresh()` silently does nothing → the checklist never reflects new uploads. With `eager`, the component is mounted at hub initialization (when `hasProject`) regardless of which tab is active.
+
+### ZZZ-B Verification
+- [ ] Upload a file to CPES repository without visiting Checklist tab first
+- [ ] Checklist tab shows the updated status (SUBMITTED) without requiring a page reload or manual tab switch
+- [ ] `checklistRef.value?.refresh()` no longer silently no-ops
+
+---
+
+## GROUP 3 — External Links Section in CiRepositoryModal (ZZZ-C)
+
+### ZZZ-C: Add dedicated "External Links" section below the files list
+
+**File:** `pmo-frontend/components/coi/CiRepositoryModal.vue`
+
+**C1: Split docs into file + link computed values (in script):**
+```typescript
+const fileModalDocs = computed(() =>
+  filteredModalDocs.value.filter(d => !isLinkDoc(d))
+)
+const linkModalDocs = computed(() =>
+  filteredModalDocs.value.filter(d => isLinkDoc(d))
+)
+// Keep pagedModalDocs for files only:
+const pagedFileDocs = computed(() => fileModalDocs.value.slice(0, modalDisplayLimit.value))
+const hasMoreFileDocs = computed(() => fileModalDocs.value.length > modalDisplayLimit.value)
+```
+
+**C2: Replace the flat document list with two sections:**
+
+```vue
+<!-- FILES section -->
+<div v-if="fileModalDocs.length" class="text-overline text-medium-emphasis mb-1 mt-2">
+  <v-icon size="14">mdi-file-multiple-outline</v-icon> Files ({{ fileModalDocs.length }})
+</div>
+<div v-if="!fileModalDocs.length && !linkModalDocs.length" class="text-center text-grey py-10">
+  <v-icon icon="mdi-file-outline" size="40" color="grey-lighten-1" />
+  <div class="text-body-2 mt-2">No files match the current filters.</div>
+</div>
+<v-list v-else-if="fileModalDocs.length" density="compact">
+  <v-list-item v-for="doc in pagedFileDocs" :key="doc.id">
+    <!-- existing file item template (unchanged) -->
+    ...
+  </v-list-item>
+</v-list>
+<div v-if="hasMoreFileDocs" class="text-center mt-2">
+  <v-btn variant="text" size="small" @click="modalDisplayLimit += MODAL_PAGE_SIZE">
+    Load more ({{ fileModalDocs.length - modalDisplayLimit }} remaining)
+  </v-btn>
+</div>
+
+<!-- EXTERNAL LINKS section -->
+<template v-if="linkModalDocs.length">
+  <v-divider class="my-3" />
+  <div class="text-overline text-medium-emphasis mb-1">
+    <v-icon size="14">mdi-link-variant</v-icon> External Links ({{ linkModalDocs.length }})
+  </div>
+  <v-list density="compact">
+    <v-list-item v-for="doc in linkModalDocs" :key="doc.id">
+      <template #prepend>
+        <v-icon
+          :icon="doc.mimeType === 'application/x-google-drive-link' ? 'mdi-google-drive' : 'mdi-link-variant'"
+          color="info"
+          size="small"
+        />
+      </template>
+      <v-list-item-title>
+        <a :href="doc.filePath" target="_blank" rel="noopener" class="text-decoration-none">
+          {{ doc.fileName }}
+        </a>
+      </v-list-item-title>
+      <v-list-item-subtitle class="text-caption">
+        <span v-if="doc.uploadedByName">{{ doc.uploadedByName }}</span>
+        <span v-if="doc.createdAt"> · {{ formatDate(doc.createdAt) }}</span>
+        <span v-if="doc.description"> · {{ doc.description }}</span>
+      </v-list-item-subtitle>
+      <template #append>
+        <div class="d-flex align-center ga-1">
+          <v-btn
+            variant="text" size="small" icon="mdi-open-in-new"
+            title="Open link in new tab"
+            @click.stop="window.open(doc.filePath, '_blank', 'noopener')"
+          />
+          <v-btn
+            variant="text" size="small" icon="mdi-content-copy"
+            title="Copy link URL"
+            @click.stop="copyLink(doc.filePath)"
+          />
+          <v-btn
+            v-if="canDelete"
+            icon="mdi-delete" size="small" variant="text" color="error"
+            title="Remove link"
+            @click.stop="emit('delete', doc.id)"
+          />
+        </div>
+      </template>
+    </v-list-item>
+  </v-list>
+</template>
+```
+
+**C3: Add `copyLink` function:**
+```typescript
+async function copyLink(url: string) {
+  try {
+    await navigator.clipboard.writeText(url)
+    toast.success('Link copied to clipboard')
+  } catch {
+    toast.error('Could not copy link')
+  }
+}
+```
+
+**C4: Import `toast` (check if already imported in modal)** — add `const toast = useToast()` if not present.
+
+### ZZZ-C Verification
+- [ ] After submitting an external link, "External Links" section appears below the files list
+- [ ] Link shows title, submittedBy, date, description
+- [ ] "Open in new tab" button opens URL
+- [ ] "Copy link" button copies URL and shows toast
+- [ ] Delete removes the link entry
+- [ ] Files section unaffected (same layout as before)
+- [ ] Empty state shows when both sections are empty
+
+---
+
+## Phase ZZZ Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Backend restarted; non-GDrive URL accepted (201) | ZZZ-A | ⬜ operator |
+| No `mimeType should not exist` error | ZZZ-A | ⬜ operator |
+| No `externalLink must be a valid Google Drive URL` error | ZZZ-A | ⬜ operator |
+| Checklist v-window-item has `eager` | ZZZ-B | ✅ code |
+| Upload without visiting checklist tab → checklist still updates | ZZZ-B | ⬜ operator smoke |
+| External Links section visible in modal after link save | ZZZ-C | ✅ code |
+| Open in new tab, Copy link, Delete all work | ZZZ-C | ✅ code |
+| Files section unchanged (file entries only) | ZZZ-C | ✅ code |
+| TypeScript: 0 new errors | all | ✅ vue-tsc — 0 errors in CiAttachmentHub + CiRepositoryModal |
+
+## Phase ZZZ Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (OPERATIONAL) | ZZZ-A (backend restart) | Zero — no code change | Required for validation fix to take effect |
+| Group 2 (CRITICAL) | ZZZ-B (checklist eager) | Low — 1 attribute | Independent |
+| Group 3 (HIGH) | ZZZ-C (External Links section) | Medium — splits modal list | Independent |
+
+---
+
+# Phase AAA — Team Tab, Others Tab, Analytics Health Summary
+
+**Status:** ✅ Phase 3 COMPLETE — AAA-A (Team tab read-only personnel), AAA-B (Others tab read-only monitoring data), AAA-C (Analytics health summary row). vue-tsc 0 new errors. (2026-06-02)
+**Research Reference:** §2.275-A through §2.275-F
+**Last Updated:** 2026-06-02
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase AAA)
+
+| ID | Directive |
+|----|-----------|
+| AAA-D1 | Team and Others window-items are READ-ONLY — no add/edit/delete buttons, no CiPersonnelAccessCard CRUD component. |
+| AAA-D2 | No new API calls — all data is already in `project` (UIProjectDetail) loaded by `fetchData()`. |
+| AAA-D3 | Health summary row in Analytics tab is ADDITIVE to `CiProjectAnalyticsTab.vue` — nothing removed. |
+| AAA-D4 | All sections use `v-if` guards to hide gracefully when the data array is empty. |
+| AAA-D5 | Team tab does NOT show permissions or access-control UI — only name, role, department, contact. |
+
+---
+
+## GROUP 1 — Team Tab (AAA-A)
+
+### AAA-A: Add `v-window-item value="team"` to detail-[id].vue
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+Find the `v-window-item value="analytics"` closing tag and add the team window-item after it.
+
+**A1: Data already on `project`:**
+- `project.assignedUsers[]` → `{ id, name, email, role, department, phone, personnel_category, project_role, user_role }`
+- `project.personnelGroups.csu[]` → CsuPersonnelRow array (name, position, rank, etc.)
+- `project.personnelGroups.contractor[]` → ContractorPersonnelRow array
+- `project.personnelGroups.others[]` → OthersPersonnelRow array
+
+**A2: Add `teamSearch` ref for client-side filtering:**
+```typescript
+const teamSearch = ref('')
+const filteredAssignedUsers = computed(() => {
+  if (!teamSearch.value) return project.value?.assignedUsers ?? []
+  const q = teamSearch.value.toLowerCase()
+  return (project.value?.assignedUsers ?? []).filter((u: any) =>
+    (u.name || '').toLowerCase().includes(q) || (u.department || '').toLowerCase().includes(q)
+  )
+})
+```
+
+**A3: Template (v-window-item value="team"):**
+```vue
+<v-window-item value="team">
+  <!-- Search bar -->
+  <v-text-field
+    v-model="teamSearch"
+    placeholder="Search personnel…"
+    prepend-inner-icon="mdi-magnify"
+    density="compact" variant="outlined" hide-details single-line clearable
+    class="mb-4" style="max-width:280px"
+  />
+
+  <!-- Section 1: Assigned System Users -->
+  <v-card variant="outlined" class="mb-4" rounded="lg">
+    <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4 text-subtitle-1">
+      <v-icon icon="mdi-account-group-outline" size="small" color="primary" />
+      <span class="font-weight-medium">Assigned Personnel</span>
+      <v-chip size="x-small" variant="tonal" color="primary">{{ filteredAssignedUsers.length }}</v-chip>
+    </v-card-title>
+    <v-divider />
+    <v-card-text>
+      <div v-if="!filteredAssignedUsers.length" class="text-grey text-body-2 py-4 text-center">No assigned personnel.</div>
+      <v-row v-else dense>
+        <v-col v-for="u in filteredAssignedUsers" :key="u.id" cols="12" sm="6" md="4">
+          <v-card variant="tonal" color="primary" class="pa-3" rounded="lg">
+            <div class="d-flex align-center ga-2">
+              <v-avatar size="36" color="primary" variant="tonal">
+                <v-icon icon="mdi-account" />
+              </v-avatar>
+              <div>
+                <div class="text-body-2 font-weight-medium">{{ u.name || 'Unknown' }}</div>
+                <div class="text-caption text-grey-darken-2">{{ u.department || u.role || '—' }}</div>
+              </div>
+            </div>
+            <div class="d-flex flex-wrap ga-1 mt-2">
+              <v-chip v-if="u.user_role" size="x-small" variant="tonal" color="primary">{{ u.user_role }}</v-chip>
+              <v-chip v-if="u.project_role" size="x-small" variant="tonal" color="blue-grey">{{ u.project_role }}</v-chip>
+            </div>
+          </v-card>
+        </v-col>
+      </v-row>
+    </v-card-text>
+  </v-card>
+
+  <!-- Section 2: CSU Personnel -->
+  <v-card v-if="project?.personnelGroups?.csu?.length" variant="outlined" class="mb-4" rounded="lg">
+    <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4 text-subtitle-1">
+      <v-icon icon="mdi-school-outline" size="small" color="teal" />
+      <span class="font-weight-medium">CSU Personnel</span>
+      <v-chip size="x-small" variant="tonal" color="teal">{{ project.personnelGroups.csu.length }}</v-chip>
+    </v-card-title>
+    <v-divider />
+    <v-card-text>
+      <v-list density="compact">
+        <v-list-item v-for="(row, i) in project.personnelGroups.csu" :key="i">
+          <template #prepend><v-icon icon="mdi-account-tie" color="teal" size="small" /></template>
+          <v-list-item-title>{{ row.name || '—' }}</v-list-item-title>
+          <v-list-item-subtitle class="text-caption">
+            {{ row.position || row.designation || '—' }}
+            <span v-if="row.rank"> · {{ row.rank }}</span>
+          </v-list-item-subtitle>
+        </v-list-item>
+      </v-list>
+    </v-card-text>
+  </v-card>
+
+  <!-- Section 3: Contractor Personnel -->
+  <v-card v-if="project?.personnelGroups?.contractor?.length" variant="outlined" class="mb-4" rounded="lg">
+    <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4 text-subtitle-1">
+      <v-icon icon="mdi-hard-hat" size="small" color="warning" />
+      <span class="font-weight-medium">Contractor Personnel</span>
+      <v-chip size="x-small" variant="tonal" color="warning">{{ project.personnelGroups.contractor.length }}</v-chip>
+    </v-card-title>
+    <v-divider />
+    <v-card-text>
+      <v-list density="compact">
+        <v-list-item v-for="(row, i) in project.personnelGroups.contractor" :key="i">
+          <template #prepend><v-icon icon="mdi-account-hard-hat" color="warning" size="small" /></template>
+          <v-list-item-title>{{ row.name || row.contractorName || '—' }}</v-list-item-title>
+          <v-list-item-subtitle class="text-caption">
+            {{ row.position || row.role || '—' }}
+            <span v-if="row.company || row.firm"> · {{ row.company || row.firm }}</span>
+          </v-list-item-subtitle>
+        </v-list-item>
+      </v-list>
+    </v-card-text>
+  </v-card>
+
+  <!-- Section 4: Other Personnel -->
+  <v-card v-if="project?.personnelGroups?.others?.length" variant="outlined" class="mb-4" rounded="lg">
+    <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4 text-subtitle-1">
+      <v-icon icon="mdi-account-multiple-outline" size="small" color="secondary" />
+      <span class="font-weight-medium">Other Personnel</span>
+      <v-chip size="x-small" variant="tonal" color="secondary">{{ project.personnelGroups.others.length }}</v-chip>
+    </v-card-title>
+    <v-divider />
+    <v-card-text>
+      <v-list density="compact">
+        <v-list-item v-for="(row, i) in project.personnelGroups.others" :key="i">
+          <template #prepend><v-icon icon="mdi-account-outline" size="small" /></template>
+          <v-list-item-title>{{ row.name || '—' }}</v-list-item-title>
+          <v-list-item-subtitle class="text-caption">{{ row.organization || row.affiliation || row.role || '—' }}</v-list-item-subtitle>
+        </v-list-item>
+      </v-list>
+    </v-card-text>
+  </v-card>
+
+  <!-- Empty state -->
+  <div v-if="!project?.assignedUsers?.length && !project?.personnelGroups?.csu?.length && !project?.personnelGroups?.contractor?.length && !project?.personnelGroups?.others?.length" class="text-center text-grey py-8">
+    <v-icon size="48" color="grey-lighten-2" icon="mdi-account-group-outline" class="d-block mx-auto mb-2" />
+    No personnel records for this project.
+  </div>
+</v-window-item>
+```
+
+### AAA-A Verification
+- [ ] Team tab renders personnel cards for assignedUsers
+- [ ] CSU/Contractor/Other sections show when data exists, hidden when empty
+- [ ] Search filters assignedUsers by name/department
+- [ ] No add/edit/delete buttons visible
+- [ ] No CiPersonnelAccessCard rendered
+
+---
+
+## GROUP 2 — Others Tab (AAA-B)
+
+### AAA-B: Add `v-window-item value="others"` to detail-[id].vue
+
+**Data from `project`:**
+- `project.statusUpdates[]` → `{date, text}`
+- `project.readinessDocuments[]` → `{type, status, remarks}`
+- `project.signatories[]` → `{name, position, date}`
+- `project.incidentLog[]` → `{date, severity, description, status}`
+- `project.riskRegister[]` → `{risk, likelihood, impact, mitigation, status}`
+- `project.escalationRecords[]` → `{escalatedTo, date, issue, resolution}`
+
+**Template: `v-expansion-panels multiple` with 6 panels (hidden when empty):**
+
+```vue
+<v-window-item value="others">
+  <div v-if="!hasOthersData" class="text-center text-grey py-8">
+    <v-icon size="48" color="grey-lighten-2" icon="mdi-dots-horizontal-circle-outline" class="d-block mx-auto mb-2" />
+    No supplementary project data recorded.
+  </div>
+  <v-expansion-panels v-else variant="accordion" multiple>
+
+    <!-- Status Updates -->
+    <v-expansion-panel v-if="project?.statusUpdates?.length">
+      <v-expansion-panel-title>
+        <v-icon start size="small" icon="mdi-update" />
+        Status Updates
+        <v-chip size="x-small" variant="tonal" color="info" class="ml-2">{{ project.statusUpdates.length }}</v-chip>
+      </v-expansion-panel-title>
+      <v-expansion-panel-text>
+        <v-timeline density="compact" align="start">
+          <v-timeline-item v-for="(r, i) in project.statusUpdates" :key="i" dot-color="info" size="small">
+            <div class="text-caption text-grey">{{ r.date ? formatDate(r.date) : '—' }}</div>
+            <div class="text-body-2">{{ r.text }}</div>
+          </v-timeline-item>
+        </v-timeline>
+      </v-expansion-panel-text>
+    </v-expansion-panel>
+
+    <!-- Readiness Documents -->
+    <v-expansion-panel v-if="project?.readinessDocuments?.length">
+      <v-expansion-panel-title>
+        <v-icon start size="small" icon="mdi-file-check-outline" />
+        Readiness Documents
+        <v-chip size="x-small" variant="tonal" color="success" class="ml-2">{{ project.readinessDocuments.length }}</v-chip>
+      </v-expansion-panel-title>
+      <v-expansion-panel-text>
+        <v-table density="compact">
+          <thead><tr><th>Type</th><th>Status</th><th>Remarks</th></tr></thead>
+          <tbody>
+            <tr v-for="(r, i) in project.readinessDocuments" :key="i">
+              <td>{{ r.type }}</td>
+              <td><v-chip size="x-small" variant="tonal">{{ r.status }}</v-chip></td>
+              <td class="text-caption">{{ r.remarks || '—' }}</td>
+            </tr>
+          </tbody>
+        </v-table>
+      </v-expansion-panel-text>
+    </v-expansion-panel>
+
+    <!-- Signatories -->
+    <v-expansion-panel v-if="project?.signatories?.length">
+      <v-expansion-panel-title>
+        <v-icon start size="small" icon="mdi-pen" />
+        Signatories
+        <v-chip size="x-small" variant="tonal" color="purple" class="ml-2">{{ project.signatories.length }}</v-chip>
+      </v-expansion-panel-title>
+      <v-expansion-panel-text>
+        <v-list density="compact">
+          <v-list-item v-for="(r, i) in project.signatories" :key="i">
+            <v-list-item-title>{{ r.name }}</v-list-item-title>
+            <v-list-item-subtitle class="text-caption">{{ r.position }}<span v-if="r.date"> · {{ formatDate(r.date) }}</span></v-list-item-subtitle>
+          </v-list-item>
+        </v-list>
+      </v-expansion-panel-text>
+    </v-expansion-panel>
+
+    <!-- Incident Log -->
+    <v-expansion-panel v-if="project?.incidentLog?.length">
+      <v-expansion-panel-title>
+        <v-icon start size="small" icon="mdi-alert-circle-outline" color="error" />
+        Incident Log
+        <v-chip size="x-small" variant="tonal" color="error" class="ml-2">{{ project.incidentLog.length }}</v-chip>
+      </v-expansion-panel-title>
+      <v-expansion-panel-text>
+        <v-list density="compact">
+          <v-list-item v-for="(r, i) in project.incidentLog" :key="i">
+            <template #prepend><v-chip size="x-small" :color="r.severity === 'HIGH' ? 'error' : r.severity === 'MEDIUM' ? 'warning' : 'grey'" variant="tonal">{{ r.severity }}</v-chip></template>
+            <v-list-item-title>{{ r.description }}</v-list-item-title>
+            <v-list-item-subtitle class="text-caption">{{ r.date ? formatDate(r.date) : '—' }} · {{ r.status }}</v-list-item-subtitle>
+          </v-list-item>
+        </v-list>
+      </v-expansion-panel-text>
+    </v-expansion-panel>
+
+    <!-- Risk Register -->
+    <v-expansion-panel v-if="project?.riskRegister?.length">
+      <v-expansion-panel-title>
+        <v-icon start size="small" icon="mdi-shield-alert-outline" color="warning" />
+        Risk Register
+        <v-chip size="x-small" variant="tonal" color="warning" class="ml-2">{{ project.riskRegister.length }}</v-chip>
+      </v-expansion-panel-title>
+      <v-expansion-panel-text>
+        <v-list density="compact">
+          <v-list-item v-for="(r, i) in project.riskRegister" :key="i">
+            <v-list-item-title>{{ r.risk }}</v-list-item-title>
+            <v-list-item-subtitle class="text-caption">
+              Likelihood: {{ r.likelihood }} · Impact: {{ r.impact }} · {{ r.status }}
+            </v-list-item-subtitle>
+          </v-list-item>
+        </v-list>
+      </v-expansion-panel-text>
+    </v-expansion-panel>
+
+    <!-- Escalation Records -->
+    <v-expansion-panel v-if="project?.escalationRecords?.length">
+      <v-expansion-panel-title>
+        <v-icon start size="small" icon="mdi-escalator-up" color="deep-orange" />
+        Escalation Records
+        <v-chip size="x-small" variant="tonal" color="deep-orange" class="ml-2">{{ project.escalationRecords.length }}</v-chip>
+      </v-expansion-panel-title>
+      <v-expansion-panel-text>
+        <v-list density="compact">
+          <v-list-item v-for="(r, i) in project.escalationRecords" :key="i">
+            <v-list-item-title>{{ r.issue }}</v-list-item-title>
+            <v-list-item-subtitle class="text-caption">Escalated to: {{ r.escalatedTo }} · {{ r.date ? formatDate(r.date) : '' }}</v-list-item-subtitle>
+          </v-list-item>
+        </v-list>
+      </v-expansion-panel-text>
+    </v-expansion-panel>
+
+  </v-expansion-panels>
+</v-window-item>
+```
+
+**Add `hasOthersData` computed (in script):**
+```typescript
+const hasOthersData = computed(() =>
+  (project.value?.statusUpdates?.length ?? 0) +
+  (project.value?.readinessDocuments?.length ?? 0) +
+  (project.value?.signatories?.length ?? 0) +
+  (project.value?.incidentLog?.length ?? 0) +
+  (project.value?.riskRegister?.length ?? 0) +
+  (project.value?.escalationRecords?.length ?? 0) > 0
+)
+```
+
+### AAA-B Verification
+- [ ] Others tab renders 6 expansion panels; empty ones hidden
+- [ ] Status Updates show as a timeline
+- [ ] Readiness Documents show as a table
+- [ ] Risk Register / Incident Log / Escalations show as lists
+- [ ] No add/edit/delete UI
+- [ ] Empty state when all arrays are empty
+
+---
+
+## GROUP 3 — Analytics Tab Health Summary (AAA-C)
+
+### AAA-C: Add project health summary row at the top of CiProjectAnalyticsTab
+
+**File:** `pmo-frontend/components/coi/CiProjectAnalyticsTab.vue`
+
+**C1: Add health computeds (in script, after existing computeds):**
+```typescript
+const daysRemaining = computed(() => {
+  const end = props.project.revisedCompletionDate || props.project.targetCompletionDate
+  if (!end) return null
+  const diff = Math.ceil((new Date(end).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+  return diff
+})
+const isDelayed = computed(() => {
+  if (daysRemaining.value == null) return false
+  return daysRemaining.value < 0
+})
+const scheduleVarianceDays = computed(() => {
+  const original = props.project.originalCompletionDate
+  const revised = props.project.revisedCompletionDate
+  if (!original || !revised) return null
+  return Math.ceil((new Date(revised).getTime() - new Date(original).getTime()) / (1000 * 60 * 60 * 24))
+})
+```
+
+**C2: Add health summary row at the TOP of the template (before existing KPI row):**
+```vue
+<!-- AAA-C: Project Health Summary -->
+<v-card variant="tonal" color="primary" class="mb-4 pa-3" rounded="lg">
+  <div class="text-overline text-medium-emphasis mb-2">Project Health</div>
+  <v-row dense>
+    <v-col cols="6" sm="3">
+      <div class="text-caption text-grey">Physical Progress</div>
+      <div class="text-h5 font-weight-bold">{{ avgPhysicalProgress.toFixed(1) }}%</div>
+    </v-col>
+    <v-col cols="6" sm="3">
+      <div class="text-caption text-grey">Status</div>
+      <v-chip size="small" :color="getPublicationStatusColor(project.publicationStatus)" variant="tonal">
+        {{ getPublicationStatusLabel(project.publicationStatus) }}
+      </v-chip>
+    </v-col>
+    <v-col v-if="daysRemaining != null" cols="6" sm="3">
+      <div class="text-caption text-grey">{{ isDelayed ? 'Days Overdue' : 'Days Remaining' }}</div>
+      <div class="text-h5 font-weight-bold" :class="isDelayed ? 'text-error' : ''">
+        {{ Math.abs(daysRemaining) }}
+      </div>
+    </v-col>
+    <v-col v-if="scheduleVarianceDays != null" cols="6" sm="3">
+      <div class="text-caption text-grey">Schedule Extension</div>
+      <div class="text-body-1 font-weight-bold" :class="scheduleVarianceDays > 0 ? 'text-warning' : 'text-success'">
+        {{ scheduleVarianceDays > 0 ? `+${scheduleVarianceDays}d` : `${scheduleVarianceDays}d` }}
+      </div>
+    </v-col>
+  </v-row>
+</v-card>
+```
+
+**C3: `getPublicationStatusColor` and `getPublicationStatusLabel` — already defined in `detail-[id].vue`. Since `CiProjectAnalyticsTab` is a child of the detail page, these helpers need to either be reimplemented locally or the statuses need simple color mapping.** Add a local `statusColorMap`:
+```typescript
+const healthStatusColor = computed(() => {
+  const s = props.project.publicationStatus
+  return s === 'PUBLISHED' ? 'success' : s === 'PENDING_REVIEW' ? 'warning' : s === 'REJECTED' ? 'error' : 'grey'
+})
+const healthStatusLabel = computed(() => {
+  const s = props.project.publicationStatus
+  return s === 'PUBLISHED' ? 'Published' : s === 'PENDING_REVIEW' ? 'Pending Review' : s === 'REJECTED' ? 'Rejected' : 'Draft'
+})
+```
+Use `healthStatusColor` and `healthStatusLabel` in the template chip instead of the parent helpers.
+
+### AAA-C Verification
+- [ ] Analytics tab shows health summary row at the top (Physical %, Status, Days Remaining/Overdue, Schedule Extension)
+- [ ] "Days Overdue" shows in red when project is past deadline
+- [ ] Schedule extension shows orange for positive variance, green for neutral
+- [ ] Existing charts (gauges, histograms) below are unaffected
+
+---
+
+## Phase AAA Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Team tab renders personnel cards (assigned users) | AAA-A | ✅ code |
+| CSU/Contractor/Other sections visible when data exists | AAA-A | ✅ code (v-if guards) |
+| Team tab search filters by name/department | AAA-A | ✅ code (filteredAssignedUsers computed) |
+| Team tab is read-only (no CRUD) | AAA-A | ✅ code (display only) |
+| Others tab renders 6 expansion panels | AAA-B | ✅ code |
+| Empty panels hidden; global empty state shown | AAA-B | ✅ code (v-if per panel + hasOthersData) |
+| Others tab is read-only | AAA-B | ✅ code (display only) |
+| Analytics: health summary row at top | AAA-C | ✅ code |
+| Days Remaining/Overdue correctly computed | AAA-C | ✅ code (daysRemaining, isDelayed) |
+| Schedule extension shown | AAA-C | ✅ code (scheduleVarianceDays) |
+| TypeScript: 0 new errors in AAA-added code | all | ✅ vue-tsc — 0 new errors (1 pre-existing ApexOptions TS2322 in untouched chart config is unchanged) |
+| No regression in Overview/Progress/Analytics tabs | all | ⬜ operator smoke |
+
+## Phase AAA Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (HIGH) | AAA-A (Team tab) | Low — additive window-item | No API calls needed |
+| Group 2 (HIGH) | AAA-B (Others tab) | Low — additive window-item | No API calls needed |
+| Group 3 (LOW) | AAA-C (Analytics health row) | Low — additive within component | No backend change |
+
+---
+
+# Phase BBB — Strategic Alignment Refactor, Full Labels, Financial Summary, Gallery Carousel Fix
+
+**Status:** ✅ Phase 3 COMPLETE — BBB-A (Strategic Alignment refactor + full labels for RDP/SEA/LIKHA/SDG + new Project Administration panel), BBB-B (Financial Summary KPI cards; removed empty state), BBB-C (gallery carousel PROFILE-first). vue-tsc 0 errors. (2026-06-02)
+**Research Reference:** §2.276-A through §2.276-D
+**Last Updated:** 2026-06-02
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase BBB)
+
+| ID | Directive |
+|----|-----------|
+| BBB-D1 | Strategic Alignment panel: REMOVE agency fields only, preserve all alignment content. Moved fields go to a NEW Panel (inserted after existing panels). |
+| BBB-D2 | Label functions `labelForRdp`, `labelForSea`, `labelForLikha` are already in coiHierarchies.ts — only import and apply them; no data changes. |
+| BBB-D3 | Financial Summary: add contract-level KPI row ABOVE the existing FY table (additive). Empty state removed in favor of showing contract data. |
+| BBB-D4 | Gallery carousel: change `carouselImages` to prefer PROFILE-category images — 1 line change. No gallery upload UI change. |
+| BBB-D5 | No backend changes — all data is already loaded and available in `project`. |
+
+---
+
+## GROUP 1 — Strategic Alignment Refactor + Full Labels (BBB-A)
+
+### BBB-A: Refactor Strategic Alignment panel and apply full labels
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+**A1: Add label function imports (line 4 area, extend existing import):**
+```typescript
+import { labelForSdg, labelForRdp, labelForSea, labelForLikha } from '~/utils/coiHierarchies'
+```
+
+**A2: Remove from Strategic Alignment panel (lines ~1474–1497):**
+- `project.implementingAgency` v-col
+- `project.coImplementingAgency` v-col
+- `project.attachedAgency` v-col
+- `project.additionalFundingSources` v-col
+- `project.projectStatusCategory` v-col
+
+**A3: Apply full labels to existing alignment chips:**
+```vue
+<!-- RDP: change {{ item }} to {{ labelForRdp(item) }} -->
+<v-chip ... >{{ labelForRdp(item) }}</v-chip>
+
+<!-- SEA: change {{ item }} to {{ labelForSea(item) }} -->
+<v-chip ... >{{ labelForSea(item) }}</v-chip>
+
+<!-- LIKHA: change {{ item }} to {{ labelForLikha(item) }} -->
+<v-chip ... >{{ labelForLikha(item) }}</v-chip>
+
+<!-- SDG: already uses labelForSdg(item) — no change needed -->
+```
+
+**A4: Update empty state guard** — remove `implementingAgency`, `coImplementingAgency`, `attachedAgency`, `additionalFundingSources`, `projectStatusCategory` from the `v-if` condition.
+
+**A5: Add "Project Administration & Governance" panel** (after Panel 4 Project Indicators, or after Panel 7):
+```vue
+<!-- Panel N: Project Administration & Governance -->
+<v-expansion-panel>
+  <v-expansion-panel-title>
+    <v-icon start size="small" icon="mdi-office-building-outline" />
+    Project Administration
+  </v-expansion-panel-title>
+  <v-expansion-panel-text>
+    <v-row>
+      <v-col v-if="project.implementingAgency" cols="12" sm="6">
+        <p class="text-caption text-grey">Implementing Agency</p>
+        <p class="font-weight-medium">{{ project.implementingAgency }}</p>
+      </v-col>
+      <v-col v-if="project.coImplementingAgency" cols="12" sm="6">
+        <p class="text-caption text-grey">Co-Implementing Agency</p>
+        <p class="font-weight-medium">{{ project.coImplementingAgency }}</p>
+      </v-col>
+      <v-col v-if="project.attachedAgency" cols="12" sm="6">
+        <p class="text-caption text-grey">Attached Agency</p>
+        <p class="font-weight-medium">{{ project.attachedAgency }}</p>
+      </v-col>
+      <v-col v-if="project.projectStatusCategory" cols="12" sm="6">
+        <p class="text-caption text-grey">Status Category</p>
+        <v-chip size="small" color="secondary" variant="tonal">{{ project.projectStatusCategory }}</v-chip>
+      </v-col>
+      <v-col v-if="project.additionalFundingSources?.length" cols="12">
+        <p class="text-caption text-grey mb-2">Additional Funding Sources</p>
+        <div class="d-flex flex-wrap ga-2">
+          <v-chip v-for="(src, i) in project.additionalFundingSources" :key="i" size="small" variant="tonal" color="success">
+            {{ src.name }}{{ src.type ? ` (${src.type})` : '' }}
+          </v-chip>
+        </div>
+      </v-col>
+      <v-col v-if="!project.implementingAgency && !project.coImplementingAgency && !project.attachedAgency && !project.projectStatusCategory && !project.additionalFundingSources?.length" cols="12" class="text-center text-grey py-2">
+        No administrative records.
+      </v-col>
+    </v-row>
+  </v-expansion-panel-text>
+</v-expansion-panel>
+```
+
+### BBB-A Verification
+- [ ] Strategic Alignment panel shows ONLY: narrative, RDP, SEA, LIKHA, SDG
+- [ ] RDP chips show full labels (e.g., "Chapter 1 – Overview of Regional Economy...")
+- [ ] SEA chips show full labels (e.g., "SDG..." or agenda item names)
+- [ ] LIKHA chips show full labels (e.g., "L — Launchpad for Global Talents...")
+- [ ] SDG chips unchanged (already show full labels)
+- [ ] Agency fields appear in new "Project Administration" panel
+- [ ] Empty state guard updated (no more agency checks in Strategic Alignment)
+
+---
+
+## GROUP 2 — Financial Summary Enhancement (BBB-B)
+
+### BBB-B: Add contract-level KPI row to Financial Summary panel
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+The panel currently shows "No financial records" when `project.financials.length === 0`. Enhance to ALWAYS show contract-level summary using project entity fields.
+
+**B1: Replace the conditional with always-shown KPI cards ABOVE the FY table:**
+
+```vue
+<!-- Panel 6: Financial Summary -->
+<v-expansion-panel>
+  ...
+  <v-expansion-panel-text>
+    <!-- Contract-level KPIs — always shown when contract data exists -->
+    <v-row dense class="mb-3">
+      <v-col cols="6" sm="3">
+        <v-card variant="tonal" color="primary" class="pa-3" rounded="lg">
+          <div class="text-caption text-grey">Contract Cost</div>
+          <div class="text-subtitle-2 font-weight-bold">{{ formatCurrency(project.contractAmount) }}</div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="3">
+        <v-card variant="tonal" color="info" class="pa-3" rounded="lg">
+          <div class="text-caption text-grey">Cost Incurred</div>
+          <div class="text-subtitle-2 font-weight-bold">{{ formatCurrency(project.costIncurredToDate) }}</div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="3">
+        <v-card variant="tonal" color="success" class="pa-3" rounded="lg">
+          <div class="text-caption text-grey">Remaining Budget</div>
+          <div class="text-subtitle-2 font-weight-bold">
+            {{ project.contractAmount && project.costIncurredToDate
+              ? formatCurrency(Number(project.contractAmount) - Number(project.costIncurredToDate))
+              : '—' }}
+          </div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="3">
+        <v-card variant="tonal" color="warning" class="pa-3" rounded="lg">
+          <div class="text-caption text-grey">Financial Progress</div>
+          <div class="text-subtitle-2 font-weight-bold">{{ project.financialProgress ?? 0 }}%</div>
+          <v-progress-linear :model-value="project.financialProgress ?? 0" color="warning" height="4" rounded class="mt-1" />
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <!-- Per-FY Breakdown (when available) -->
+    <template v-if="project.financials && project.financials.length > 0">
+      <v-divider class="mb-3" />
+      <div class="text-overline text-medium-emphasis mb-2">Per-Fiscal-Year Breakdown</div>
+      <v-row dense class="mb-3">
+        <v-col cols="6" sm="3">
+          <p class="text-caption text-grey mb-1">Total Appropriation</p>
+          <p class="text-subtitle-2 font-weight-bold">{{ formatCurrency(financialSummary.appropriation) }}</p>
+        </v-col>
+        <v-col cols="6" sm="3">
+          <p class="text-caption text-grey mb-1">Total Obligation</p>
+          <p class="text-subtitle-2 font-weight-bold">{{ formatCurrency(financialSummary.obligation) }}</p>
+        </v-col>
+        <v-col cols="6" sm="3">
+          <p class="text-caption text-grey mb-1">Total Disbursement</p>
+          <p class="text-subtitle-2 font-weight-bold">{{ formatCurrency(financialSummary.disbursement) }}</p>
+        </v-col>
+        <v-col cols="6" sm="3">
+          <p class="text-caption text-grey mb-1">Utilization Rate</p>
+          <p class="text-subtitle-2 font-weight-bold">{{ formatRate(financialSummary.utilization) }}</p>
+        </v-col>
+      </v-row>
+      <!-- existing v-data-table unchanged -->
+      <v-data-table ... />
+    </template>
+
+    <!-- Funding sources row -->
+    <template v-if="project.fundSourceName || project.additionalFundingSources?.length">
+      <v-divider class="mb-3" />
+      <div class="text-caption text-grey mb-2">Funding Sources</div>
+      <div class="d-flex flex-wrap ga-2">
+        <v-chip v-if="project.fundSourceName" size="small" variant="tonal" color="primary">{{ project.fundSourceName }}</v-chip>
+        <v-chip v-for="(src, i) in project.additionalFundingSources" :key="i" size="small" variant="tonal" color="success">{{ src.name }}</v-chip>
+      </div>
+    </template>
+
+    <!-- Remove the bare "No financial records" fallback — data always shown via KPIs -->
+  </v-expansion-panel-text>
+</v-expansion-panel>
+```
+
+### BBB-B Verification
+- [ ] Financial Summary panel shows 4 KPI cards: Contract Cost, Cost Incurred, Remaining Budget, Financial Progress
+- [ ] Panel never shows "No financial records" (always shows contract-level data when contract exists)
+- [ ] FY-level table still shows when `project.financials.length > 0`
+- [ ] Funding sources shown when available
+
+---
+
+## GROUP 3 — Gallery Carousel PROFILE Filter (BBB-C)
+
+### BBB-C: Filter carousel to prefer PROFILE-category images
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+**Current (line 324):**
+```typescript
+const carouselImages = computed(() => (gallery.value.length ? gallery.value : profileImages.value))
+```
+
+**Fixed:**
+```typescript
+// BBB-C: carousel shows only PROFILE-tagged images (intended "featured" shots),
+// falling back to all gallery images only if no PROFILE images exist.
+const carouselImages = computed(() => profileImages.value.length ? profileImages.value : gallery.value)
+```
+
+This is a 1-line change that ensures only intentionally featured/cover images appear in the Project Overview carousel. Gallery images uploaded with other categories (IN_PROGRESS, INSPECTION, etc.) remain accessible via the Gallery tab but don't auto-populate the overview.
+
+### BBB-C Verification
+- [ ] Carousel shows only PROFILE-category images when they exist
+- [ ] Carousel falls back to all gallery images when no PROFILE images exist
+- [ ] Gallery tab still shows all images (unaffected)
+- [ ] Uploading an image WITHOUT the PROFILE category does NOT add it to the carousel
+
+---
+
+## Phase BBB Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Strategic Alignment panel: only alignment content | BBB-A | ✅ code |
+| RDP chips show full descriptive labels | BBB-A | ✅ code (labelForRdp imported + used) |
+| SEA chips show full descriptive labels | BBB-A | ✅ code (labelForSea imported + used) |
+| LIKHA chips show full labels | BBB-A | ✅ code (labelForLikha imported + used) |
+| SDG chips unchanged (already correct) | BBB-A | ✅ code |
+| Agency fields in new "Project Administration" panel | BBB-A | ✅ code |
+| Financial Summary 4 KPI cards always visible | BBB-B | ✅ code |
+| No "No financial records" empty container | BBB-B | ✅ code (removed; KPIs always show) |
+| Gallery carousel shows only PROFILE images | BBB-C | ✅ code (1-line computed fix) |
+| TypeScript: 0 new errors | all | ✅ vue-tsc — 0 errors in detail-[id].vue (4 BBB-B field name fixes applied) |
+
+## Phase BBB Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (MEDIUM) | BBB-A (Strategic Alignment) | Low — panel restructure + label import | Independent |
+| Group 2 (MEDIUM) | BBB-B (Financial Summary) | Low — additive KPI row | Independent |
+| Group 3 (LOW) | BBB-C (Gallery carousel) | Low — 1-line computed change | Independent |
+
+---
+
+# Phase CCC — Expansion Grid Fix, Show-More, Gallery Height, Financial Period, Progress Consistency
+
+**Status:** ✅ Phase 3 COMPLETE — CCC-A (align-items:flex-start), CCC-B (show-more/less for alignment + narrative), CCC-C (carousel 280px + preview uploader/category), CCC-D (cost-this-period KPI). vue-tsc 0 errors. (2026-06-02)
+**Research Reference:** §2.277-A through §2.277-H
+**Last Updated:** 2026-06-02
+**Branch:** `pmo-coi`
+
+---
+
+## Governance Directives (Phase CCC)
+
+| ID | Directive |
+|----|-----------|
+| CCC-D1 | Expansion panel grid fix is 1 CSS line — `align-items: flex-start` on `.overview-grid`. No HTML changes. |
+| CCC-D2 | Show More/Less is template-only — no data, no API. Max 4 chips shown initially per section. |
+| CCC-D3 | Gallery modal enhancement: add `profilePreviewUploaderName` + `profilePreviewCategory` refs. Pass when opening from carousel. |
+| CCC-D4 | Financial "Cost This Period" uses `latestReport.costIncurredThisPeriod` (already loaded via QQQ-G composable). |
+| CCC-D5 | Progress tab: verify wrapper headers only — no internal component changes. |
+| CCC-D6 | Analytics Tab equal sizing: DEFERRED — current grid is already responsive and balanced. |
+| CCC-D7 | Team Tab: already complete from AAA-A — no additional work. |
+
+---
+
+## GROUP 1 — Expansion Panel Grid Fix (CCC-A)
+
+### CCC-A: Add `align-items: flex-start` to .overview-grid
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue` (style block)
+
+**Current:**
+```css
+.overview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+```
+
+**Fixed:**
+```css
+.overview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+```
+
+`align-items: flex-start` (instead of the default `stretch`) causes each flex item to take only its own natural height. When Panel A expands, Panel B stays at its collapsed height — no empty white stretch.
+
+### CCC-A Verification
+- [ ] Expand one panel — adjacent panel in same row does NOT stretch
+- [ ] All panels take their natural height independently
+- [ ] Layout remains 2-column on desktop, 1-column on mobile
+
+---
+
+## GROUP 2 — Strategic Alignment Show More / Less (CCC-B)
+
+### CCC-B: Add collapse toggle to long alignment chip lists
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+**B1: Add refs (near other alignment computeds):**
+```typescript
+const MAX_CHIPS = 4
+const showMoreAlignment = reactive<Record<string, boolean>>({
+  rdp: false, sea: false, likha: false, sdg: false,
+})
+```
+
+**B2: In each alignment `v-col`, replace the flat chip loop with:**
+```vue
+<!-- Example for RDP (same pattern for SEA/LIKHA/SDG) -->
+<v-col v-if="project.rdpAlignment?.length" cols="12">
+  <p class="text-caption text-grey mb-2">RDP 2023–2028 Alignment</p>
+  <div class="d-flex flex-wrap ga-2 align-center">
+    <v-chip
+      v-for="(item, i) in (showMoreAlignment.rdp ? project.rdpAlignment : project.rdpAlignment.slice(0, MAX_CHIPS))"
+      :key="i" color="primary" variant="tonal" size="small"
+    >{{ labelForRdp(item) }}</v-chip>
+    <v-btn
+      v-if="project.rdpAlignment.length > MAX_CHIPS"
+      variant="text" size="x-small" color="primary"
+      @click="showMoreAlignment.rdp = !showMoreAlignment.rdp"
+    >
+      {{ showMoreAlignment.rdp ? 'Show less' : `+${project.rdpAlignment.length - MAX_CHIPS} more` }}
+    </v-btn>
+  </div>
+</v-col>
+```
+
+Apply the same pattern to SEA (`showMoreAlignment.sea`), LIKHA (`showMoreAlignment.likha`), SDG (`showMoreAlignment.sdg`).
+
+For the Strategic Alignment Narrative (long text), add a simple `showMoreNarrative` ref:
+```vue
+<v-col v-if="project.strategicAlignment" cols="12">
+  <p class="text-caption text-grey">Strategic Alignment Narrative</p>
+  <p class="text-pre-line" :class="{ 'text-truncate-4': !showMoreNarrative }">
+    {{ project.strategicAlignment }}
+  </p>
+  <v-btn v-if="project.strategicAlignment.length > 200" variant="text" size="x-small" color="primary" @click="showMoreNarrative = !showMoreNarrative">
+    {{ showMoreNarrative ? 'Show less' : 'Show more' }}
+  </v-btn>
+</v-col>
+```
+
+Add CSS:
+```css
+.text-truncate-4 {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+```
+
+### CCC-B Verification
+- [ ] Sections with ≤4 chips show all without "more" button
+- [ ] Sections with >4 chips show first 4 + "+N more" button
+- [ ] Clicking "more" shows all chips; clicking "Show less" collapses
+- [ ] Narrative truncates at 4 lines with "Show more" toggle
+
+---
+
+## GROUP 3 — Gallery Carousel + Modal Enhancement (CCC-C)
+
+### CCC-C: Fixed carousel height + add uploader/category to full-view modal
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+**C1: Fixed carousel height** — the carousel currently uses `height="100%"` inside a flex card with `min-height:300px`. Images of different aspect ratios make the carousel height vary. Set `height="280"` as a stable fixed value:
+
+Change: `<v-carousel ... height="100%" class="flex-grow-1">` → `<v-carousel ... height="280">`
+
+Also change the empty state div height to match: `style="min-height: 280px"` instead of `min-height: 300px`.
+
+**C2: Add uploader name and category to preview refs:**
+```typescript
+const profilePreviewUploaderName = ref('')  // CCC-C
+const profilePreviewCategory = ref('')       // CCC-C
+```
+
+**C3: Pass uploader/category when opening preview:**
+
+Existing `@click` on carousel images (line ~1029):
+```vue
+@click="profilePreviewImg = img.imageUrl;
+        profilePreviewTitle = img.caption;
+        profilePreviewDate = img.imageTakenDate || img.uploadedAt;
+        profilePreviewUploadDate = img.uploadedAt;
+        profilePreviewUploaderName = img.uploadedByName ?? '';
+        profilePreviewCategory = img.category ?? '';
+        profilePreviewOpen = true"
+```
+
+**C4: Add uploader name and category to the preview dialog** (lines 2248–2265):
+```vue
+<v-chip v-if="profilePreviewUploaderName" size="small" variant="tonal" color="primary" prepend-icon="mdi-account-outline">
+  {{ profilePreviewUploaderName }}
+</v-chip>
+<v-chip v-if="profilePreviewCategory" size="small" variant="tonal" color="blue-grey">
+  {{ profilePreviewCategory }}
+</v-chip>
+```
+
+### CCC-C Verification
+- [ ] Carousel has consistent height (280px) regardless of image dimensions
+- [ ] Full-view modal shows uploader name when available
+- [ ] Full-view modal shows category chip when available
+- [ ] Existing caption/date chips unchanged
+
+---
+
+## GROUP 4 — Financial Summary: Cost This Period (CCC-D)
+
+### CCC-D: Add "Cost This Period" KPI card using latestReport
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue`
+
+The `latestReport` computed (from QQQ-G `useCoiProgressReports`) already exists. `latestReport.costIncurredThisPeriod` is in the `ProgressReport` interface.
+
+Add a 5th KPI card to the Financial Summary panel (in the `v-row dense` block):
+```vue
+<v-col v-if="latestReport?.costIncurredThisPeriod != null" cols="6" sm="3">
+  <v-card variant="tonal" color="blue-grey" class="pa-3" rounded="lg">
+    <div class="text-caption text-grey">Cost This Period</div>
+    <div class="text-subtitle-2 font-weight-bold">{{ formatCurrency(Number(latestReport.costIncurredThisPeriod)) }}</div>
+    <div class="text-caption text-grey mt-1">{{ latestReport.reportType === 'WEEKLY' ? 'WAR' : 'MPR' }} · {{ latestReport.reportDate ? formatDate(latestReport.reportDate) : '' }}</div>
+  </v-card>
+</v-col>
+```
+
+### CCC-D Verification
+- [ ] "Cost This Period" card appears when progress report data exists
+- [ ] Value matches `latestReport.costIncurredThisPeriod`
+- [ ] Shows the report type (WAR/MPR) and date as subtitle
+- [ ] Hidden when no progress report data (`v-if`)
+
+---
+
+## Phase CCC Verification Checklist
+
+| Criterion | Sub-phase | Status |
+|---|---|---|
+| Adjacent panel no longer stretches when sibling expands | CCC-A | ✅ code — align-items: flex-start |
+| Overview grid remains 2-column on desktop | CCC-A | ✅ code |
+| Alignment chips show +N more / Show less | CCC-B | ✅ code |
+| Narrative truncates with Show more toggle | CCC-B | ✅ code + .text-truncate-4 CSS |
+| Gallery carousel consistent height (280px) | CCC-C | ✅ code |
+| Full-view modal shows uploader name + category | CCC-C | ✅ code |
+| Financial panel shows "Cost This Period" from latest report | CCC-D | ✅ code (v-if latestReport) |
+| TypeScript: 0 new errors | all | ✅ vue-tsc — 0 errors in detail-[id].vue |
+| No regression in expansion panel opening/state | all | ⬜ operator smoke |
+
+## Phase CCC Delivery Groups
+
+| Group | Sub-phases | Risk | Dependencies |
+|---|---|---|---|
+| Group 1 (HIGH) | CCC-A (grid align-items) | Low — 1 CSS property | Independent; fixes the most visible UI bug |
+| Group 2 (MEDIUM) | CCC-B (show more/less) | Low — template + ref additions | Independent |
+| Group 3 (LOW) | CCC-C (gallery height + modal) | Low — additive | Independent |
+| Group 4 (LOW) | CCC-D (cost this period) | Low — additive KPI card | Requires latestReport to have value |
+
+
+

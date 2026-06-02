@@ -177,7 +177,10 @@ const allDocs = computed<HubDoc[]>(() =>
   isStaging.value ? stagedDocs.value : documents.value,
 )
 
-const isLink = (d: HubDoc) => d.mimeType === 'application/x-google-drive-link' || d.documentType === 'link'
+const isLink = (d: HubDoc) =>
+  d.mimeType === 'application/x-google-drive-link' ||
+  d.mimeType === 'application/x-external-link' ||
+  d.documentType === 'link'
 
 const otherDocs = computed(() =>
   allDocs.value.filter((d) => !managedCodes.value.has(d.documentType) && !isLink(d) && filter.matchesDoc(d)),
@@ -659,6 +662,29 @@ function onRepoUpload(payload: { file: File; documentType: string; title: string
   void persistDoc(payload)
 }
 
+// YYY-D: repository modal link submission bridge — mimeType removed from payload
+// (UploadDocumentDto does not declare mimeType; service auto-detects GDrive vs generic).
+function onRepoLink(payload: { url: string; title: string; description: string }) {
+  if (isStaging.value) {
+    emitStaged({ links: [...(props.modelValue?.links ?? []), { url: payload.url, title: payload.title, description: payload.description }] })
+    return
+  }
+  api.post(`/api/construction-projects/${props.projectId}/documents`, {
+    documentType: activeRepo.value.typeCodes[0] === '__MISC__' ? 'attachment' : (activeRepo.value.typeCodes[0] ?? 'link'),
+    externalLink: payload.url,
+    title: payload.title || undefined,
+    description: payload.description || undefined,
+  }).then(() => {
+    fetchDocuments()
+    checklistRef.value?.refresh()
+    toast.success('External link successfully added.')
+  }).catch((err: unknown) => {
+    const msg = (err as { message?: string })?.message || 'Unable to save external link.'
+    toast.error(msg)
+    console.error('[CiAttachmentHub] onRepoLink failed:', err)
+  })
+}
+
 const sections = computed(() => {
   const base: { value: string; label: string; icon: string }[] = []
   if (hasProject.value) base.push({ value: 'checklist', label: 'Compliance Checklist', icon: 'mdi-clipboard-check-outline' })
@@ -826,6 +852,10 @@ defineExpose({ fetchDocuments, fetchGallery })
           </v-card-title>
           <v-divider />
           <v-card-text>
+            <!-- XXX-E: Construction documentation guide -->
+            <v-alert type="info" variant="tonal" density="compact" class="mb-3" icon="mdi-camera-outline">
+              Document site progress regularly. Photos are used for accomplishment validation, inspection evidence, and milestone verification.
+            </v-alert>
             <!-- Thumbnail strip preview (first 8 images) -->
             <div v-if="gallery.length" class="d-flex flex-wrap ga-2 mb-3">
               <v-img
@@ -974,7 +1004,10 @@ defineExpose({ fetchDocuments, fetchGallery })
       </v-window-item>
 
       <!-- ===== Section 6: Compliance Checklist ===== -->
-      <v-window-item v-if="hasProject" value="checklist">
+      <!-- ZZZ-B: eager ensures CiDocumentChecklist is always mounted when hasProject,
+           so checklistRef.value is never null and .refresh() fires correctly after
+           uploads regardless of whether the user has visited this tab. -->
+      <v-window-item v-if="hasProject" value="checklist" eager>
         <CiDocumentChecklist
           ref="checklistRef"
           :project-id="projectId"
@@ -994,6 +1027,11 @@ defineExpose({ fetchDocuments, fetchGallery })
       <!-- ===== Section 6: Other Attachments ===== -->
       <!-- ===== Section 6b: Miscellaneous & Uncategorized (WWW-C: repository-card architecture) ===== -->
       <v-window-item value="other">
+        <v-col cols="12">
+            <v-alert type="info" variant="tonal" density="compact" class="mt-1" icon="mdi-information-outline">
+              Documents without a recognized type are stored here. Use specific repositories (Key Documents, Supporting Documents) for structured submissions.
+            </v-alert>
+          </v-col>
         <!-- Repository card for all unclassified documents -->
         <v-row dense class="mb-3">
           <v-col cols="12" md="6" lg="4">
@@ -1008,30 +1046,8 @@ defineExpose({ fetchDocuments, fetchGallery })
               @upload="openMiscRepo(true)"
             />
           </v-col>
-          <v-col cols="12">
-            <v-alert type="info" variant="tonal" density="compact" class="mt-1" icon="mdi-information-outline">
-              Documents without a recognized type are stored here. Use specific repositories (Key Documents, Supporting Documents) for structured submissions.
-            </v-alert>
-          </v-col>
+          
         </v-row>
-
-        <!-- Folder workspace for MISC group -->
-        <template v-if="hasProject">
-          <v-divider class="my-3" />
-          <div class="d-flex align-center ga-2 mb-2">
-            <v-icon size="18" color="blue-grey">mdi-folder-multiple-outline</v-icon>
-            <span class="text-subtitle-2 font-weight-medium">Folder Workspace</span>
-          </div>
-          <CiFolderRepository
-            :project-id="projectId"
-            group-code="MISC"
-            :documents="documents"
-            :can-edit="canUpload"
-            :can-delete="canDelete"
-            @uploaded="onFolderUploaded"
-            @deleted="onFolderDeleted"
-          />
-        </template>
 
         <!-- External links (preserved) -->
         <v-divider class="my-4" />
@@ -1086,6 +1102,7 @@ defineExpose({ fetchDocuments, fetchGallery })
       :expand-upload="repoExpandUpload"
       :project-id="hasProject ? projectId : ''"
       @upload="onRepoUpload"
+      @link="onRepoLink"
       @delete="deleteDocument"
       @remove-staged="removeStaged"
     />

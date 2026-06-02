@@ -2036,7 +2036,8 @@ export class ConstructionProjectsService {
       filePath = dto.externalLink!;
       fileName = dto.title || 'External Link';
       fileSize = 0;
-      mimeType = 'application/x-google-drive-link';
+      const isGDriveLink = /drive\.google\.com|docs\.google\.com/i.test(dto.externalLink!);
+      mimeType = isGDriveLink ? 'application/x-google-drive-link' : 'application/x-external-link';
     }
 
     // OOO-A: version auto-increment for folder submissions. Each new upload into a
@@ -2069,24 +2070,29 @@ export class ConstructionProjectsService {
     });
     await this.em.persistAndFlush(doc);
 
-    // Auto-link: if the uploaded documentType matches a KB-E taxonomy typeCode,
-    // update the corresponding checklist item for this project.
+    // YYY-C: Auto-link checklist — fires on ANY upload whose documentType matches a
+    // KB-E taxonomy typeCode. Removed NOT_SUBMITTED filter so re-uploads also update
+    // the checklist (linkedDocumentId, submittedAt, currentVersion). This ensures the
+    // Compliance Checklist always reflects the latest file without manual intervention.
     if (dto.documentType) {
       const docType = await this.docTypeRepo.findOne({ typeCode: dto.documentType });
       if (docType) {
         const checklistItem = await this.docChecklistRepo.findOne({
           projectId,
           documentTypeId: docType.id,
-          submissionStatus: 'NOT_SUBMITTED',
         });
         if (checklistItem) {
+          const wasFirstSubmission = checklistItem.submissionStatus === 'NOT_SUBMITTED';
           checklistItem.linkedDocumentId = doc.id;
-          checklistItem.submissionStatus = 'SUBMITTED';
           checklistItem.submittedAt = new Date();
           checklistItem.submittedBy = userId;
+          checklistItem.currentVersion = (checklistItem.currentVersion ?? 0) + 1;
+          checklistItem.submissionStatus = 'SUBMITTED';
           await this.em.persistAndFlush(checklistItem);
           this.logger.log(
-            `CHECKLIST_AUTO_LINKED: project=${projectId}, checklist=${checklistItem.id}, doc=${doc.id}, typeCode=${dto.documentType}`,
+            wasFirstSubmission
+              ? `CHECKLIST_AUTO_LINKED: project=${projectId}, checklist=${checklistItem.id}, doc=${doc.id}, typeCode=${dto.documentType}`
+              : `CHECKLIST_AUTO_UPDATED: project=${projectId}, checklist=${checklistItem.id}, doc=${doc.id}, typeCode=${dto.documentType}, version=${checklistItem.currentVersion}`,
           );
         }
       }

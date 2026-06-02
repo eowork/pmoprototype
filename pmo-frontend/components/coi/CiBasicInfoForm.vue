@@ -183,6 +183,12 @@ function removeCustomFundingSource(i: number) {
     </v-card-text>
   </v-card>
 
+  <!-- XXX-F: Section overline header for Row B -->
+  <div class="d-flex align-center ga-2 mb-1 mt-2">
+    <v-icon size="16" color="grey-darken-1">mdi-map-marker-outline</v-icon>
+    <span class="text-overline text-grey-darken-1">Location &amp; Implementation</span>
+  </div>
+
   <!-- ══════════════════════════════════════════════════════════════════════
        ROW B — Location | Implementation Agencies (side-by-side)
        ══════════════════════════════════════════════════════════════════════ -->
@@ -281,6 +287,12 @@ function removeCustomFundingSource(i: number) {
       </v-card>
     </v-col>
   </v-row>
+
+  <!-- XXX-F: Section overline header for Row C -->
+  <div class="d-flex align-center ga-2 mb-1 mt-2">
+    <v-icon size="16" color="grey-darken-1">mdi-cash-multiple</v-icon>
+    <span class="text-overline text-grey-darken-1">Funding &amp; Project Details</span>
+  </div>
 
   <!-- ══════════════════════════════════════════════════════════════════════
        ROW C — Funding & Cost | Other Attributes (side-by-side)
@@ -461,6 +473,12 @@ function removeCustomFundingSource(i: number) {
     </v-col>
   </v-row>
 
+  <!-- XXX-F: Section overline header for Row D -->
+  <div class="d-flex align-center ga-2 mb-1 mt-2">
+    <v-icon size="16" color="grey-darken-1">mdi-target</v-icon>
+    <span class="text-overline text-grey-darken-1">Objectives &amp; Beneficiaries</span>
+  </div>
+
   <!-- ══════════════════════════════════════════════════════════════════════
        ROW D — Project Objectives | Beneficiary Groups (side-by-side)
        ══════════════════════════════════════════════════════════════════════ -->
@@ -518,6 +536,12 @@ function removeCustomFundingSource(i: number) {
       </v-card>
     </v-col>
   </v-row>
+
+  <!-- XXX-F: Section overline header for Row E -->
+  <div class="d-flex align-center ga-2 mb-1 mt-2">
+    <v-icon size="16" color="grey-darken-1">mdi-strategy</v-icon>
+    <span class="text-overline text-grey-darken-1">Strategic Alignment</span>
+  </div>
 
   <!-- ══════════════════════════════════════════════════════════════════════
        ROW E — Strategic Alignment (SSS-A: balanced container layout)

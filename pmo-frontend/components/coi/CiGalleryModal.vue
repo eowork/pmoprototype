@@ -68,6 +68,15 @@ const filteredImages = computed(() => {
   return imgs
 })
 
+// XXX-E: "this month" count for gallery analytics
+const thisMonthCount = computed(() => {
+  const now = new Date()
+  return props.images.filter(img => {
+    const d = img.imageTakenDate ? new Date(img.imageTakenDate) : img.createdAt ? new Date(img.createdAt) : null
+    return d && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+  }).length
+})
+
 function formatDate(d?: string) {
   if (!d) return '—'
   const dt = new Date(d)
@@ -166,6 +175,25 @@ function handleDrop(e: DragEvent) {
       <v-divider />
 
       <v-card-text style="max-height:72vh;overflow-y:auto">
+        <!-- XXX-E: Gallery analytics + category filter chips -->
+        <div class="d-flex flex-wrap align-center ga-2 mb-3">
+          <v-chip size="small" variant="tonal" color="primary" prepend-icon="mdi-calendar-month">
+            {{ thisMonthCount }} this month
+          </v-chip>
+          <v-divider vertical />
+          <v-chip
+            v-for="cat in CATEGORY_ITEMS.filter(c => c.value && props.images.some(i => i.category === c.value))"
+            :key="cat.value"
+            size="small"
+            :variant="filterCategory === cat.value ? 'elevated' : 'tonal'"
+            :color="filterCategory === cat.value ? 'primary' : 'grey'"
+            @click="filterCategory = filterCategory === cat.value ? '' : cat.value"
+          >
+            {{ cat.title }}
+          </v-chip>
+          <v-btn v-if="filterCategory" size="x-small" variant="text" @click="filterCategory = ''">Clear</v-btn>
+        </div>
+
         <div v-if="!filteredImages.length" class="text-center text-grey py-12">
           <v-icon icon="mdi-image-off-outline" size="48" color="grey-lighten-1" />
           <div class="text-body-2 mt-2">No images match the current filters.</div>

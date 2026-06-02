@@ -597,9 +597,22 @@ const hasUnsavedChanges = ref(false)
 const draftRestoreSnackbar = ref(false)
 const DRAFT_KEY = 'coi-draft-new'
 
+// XXX-C: lastSavedAt tracks when the draft was last auto-saved for display
+const lastSavedAt = ref<number | null>(null)
+const lastSavedLabel = computed(() => {
+  if (!lastSavedAt.value) return null
+  const diff = Math.floor((Date.now() - lastSavedAt.value) / 1000)
+  if (diff < 10) return 'just now'
+  if (diff < 60) return `${diff}s ago`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  return `${Math.floor(diff / 3600)}h ago`
+})
+let elapsedTick: ReturnType<typeof setInterval> | null = null
+
 function saveDraft() {
   try {
     localStorage.setItem(DRAFT_KEY, JSON.stringify({ ts: Date.now(), form: JSON.parse(JSON.stringify(form.value)) }))
+    lastSavedAt.value = Date.now()  // XXX-C
   } catch { /* quota exceeded — silently skip */ }
 }
 
@@ -634,6 +647,8 @@ onMounted(() => {
   fetchLookups()
   fetchEligibleStaff()
   window.addEventListener('beforeunload', handleBeforeUnload)
+  // XXX-C: poll to refresh "X ago" label every 30s
+  elapsedTick = setInterval(() => { if (lastSavedAt.value) lastSavedAt.value = lastSavedAt.value }, 30_000)
   // Check for saved draft
   const saved = localStorage.getItem(DRAFT_KEY)
   if (saved) {
@@ -647,6 +662,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
   if (draftDebounce) clearTimeout(draftDebounce)
+  if (elapsedTick) clearInterval(elapsedTick)  // XXX-C
 })
 </script>
 
@@ -1368,7 +1384,7 @@ onBeforeUnmount(() => {
         </v-window-item>
       </v-window>
 
-      <!-- PV-C: Unified action footer â€” [Previous]  [Cancel] [Create Project / Next] -->
+      <!-- PV-C: Unified action footer — [Previous]  [Cancel] [Create Project / Next] -->
       <div class="d-flex align-center justify-space-between mt-4 pt-3" style="border-top: 1px solid rgba(0,0,0,0.08)">
         <v-btn
           v-if="activeTab !== 'basic'"
@@ -1380,6 +1396,16 @@ onBeforeUnmount(() => {
           Previous
         </v-btn>
         <v-spacer />
+        <!-- XXX-C: Draft save status indicator -->
+        <div class="d-flex align-center ga-2 text-caption text-grey mr-3">
+          <v-chip v-if="hasUnsavedChanges" size="x-small" color="warning" variant="tonal" prepend-icon="mdi-circle-medium">
+            Unsaved changes
+          </v-chip>
+          <span v-if="lastSavedLabel" class="d-flex align-center ga-1">
+            <v-icon size="14">mdi-content-save-check-outline</v-icon>
+            Draft saved {{ lastSavedLabel }}
+          </span>
+        </div>
         <div class="d-flex ga-2">
           <v-btn variant="outlined" :disabled="submitting" @click="goBack">Cancel</v-btn>
           <v-btn

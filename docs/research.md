@@ -2,8 +2,470 @@
 
 **Governance:** ACE v2.4 Phase 1 (Research Complete)
 **Last Updated:** 2026-06-02
-**Status:** ✅ Section 2.272 — Phase WWW: VVV verify pass (CLEAN), repository card refactor (progress bar removal), CPES→card architecture, Misc→card architecture, autosave guard, audit log gap analysis, gallery evaluation — Phase 1 complete | Archive: `docs/research_Artifact_April_2026.md`
+**Status:** ✅ Section 2.277 — Phase CCC IMPLEMENTED (Phase 3, 2026-06-02): align-items:flex-start on .overview-grid (expansion grid), Show More/Less for alignment + narrative (ALIGN_MAX_CHIPS=4), gallery carousel height=280 + preview passes uploadedByName+category, Cost This Period KPI from latestReport. vue-tsc 0 errors. | Archive: `docs/research_Artifact_April_2026.md`
 **Context:** `CLAUDE.md` (project root) | Archive: `docs/archive/`
+
+---
+
+## §2.277 — Phase CCC: Overview Grid Fix, Show-More, Gallery, Financial Cost Period, Progress Tab (Phase 1)
+
+> Date: 2026-06-02
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.277-A: BBB Verification — ALL CLEAN
+
+| Sub-phase | Evidence |
+|---|---|
+| BBB-A: Strategic Alignment refactored | labelForRdp/Sea/Likha/Sdg imported + applied; "Project Administration" panel present |
+| BBB-B: Financial Summary KPIs | 4 KPI cards (Contract/Appropriation, Cost Incurred, Remaining, Financial Progress%) confirmed |
+| BBB-C: Gallery carousel PROFILE-first | `carouselImages = profileImages.length ? profileImages : gallery` confirmed at line 326 |
+
+### 2.277-B: Expansion Panel Grid — Root Cause (CONFIRMED)
+
+**Symptom:** When one panel in the overview 2-column grid expands, the adjacent panel stretches vertically to match even though its content remains collapsed.
+
+**Root cause (lines 2570–2578):**
+```css
+.overview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.overview-grid > .v-expansion-panel {
+  flex: 1 1 calc(50% - 12px);
+  max-width: calc(50% - 12px);
+}
+```
+CSS flexbox default is `align-items: stretch` — all flex items in the same row are forced to match the height of the tallest item. When Panel A expands, Panel B (in the same row) stretches to match Panel A's expanded height, creating an empty white block. **Fix: `align-items: flex-start`** on `.overview-grid` — each panel takes only its own natural height.
+
+### 2.277-C: Strategic Alignment Show More / Less — Design
+
+**Current state:** Long alignment chips (especially RDP with full chapter names) can overflow visibly. No collapse behavior exists.
+
+**Fix (D-CCC-2):** Add a `showFullAlignment` reactive ref per section (RDP, SEA, LIKHA, SDG). When the section has more than N items, show only the first N chips + a "Show X more" button. Toggle shows all. This is purely template-level — no data/API change.
+
+### 2.277-D: Gallery Carousel Fixed Height + Modal Enhancement
+
+**Carousel height issue:** `v-carousel height="100%"` within a flex-grow container. Image aspect ratios vary → carousel height varies. Fix: set `height="260"` (fixed pixels) on the carousel as a fallback minimum. The gallery card's `min-height:300px` is set, which establishes a floor.
+
+**Full-view modal** (lines 2248–2265) already shows caption, taken date, upload date, and Close button. Missing from modal: `uploadedBy` (uploader name) and `category`. The gallery item interface already has `uploadedByName` and `category`. Fix: pass these to the preview modal via new refs, display them in the existing preview dialog.
+
+### 2.277-E: Financial Summary — Cost Incurred This Period
+
+**Prompt requires:** "Cost Incurred This Period". This value is `latestReport.costIncurredThisPeriod` — already in the `ProgressReport` interface and loaded via `useCoiProgressReports`. The BBB-B panel can add this as a 5th metric.
+
+### 2.277-F: Progress Report Tab Consistency — Current State
+
+**CiProgressReportTab:** Has card/list/table views, v-btn-toggle, pagination, search. ✅ Already well-structured.
+**Milestones section (TTT-C):** Has PPP-E search + filter + sort controls, 2-col grid. ✅
+**CiTimelogsContainer:** Has card/list/table views, year filter. ✅
+**CiRevisionOrdersTable:** Has kebab menus. ✅
+
+**Remaining gap:** Section wrapper headers in the progress tab already added (TTT-C). The internal component styling may differ slightly (different card elevations, spacing). **Decision (D-CCC-6):** The 4 sections use consistent section-header dividers from TTT-C. No internal component changes — only verify the wrapper styling is uniform. Mark as "verify-only" unless specific regressions found.
+
+### 2.277-G: Analytics Tab Equal Sizing — Current State
+
+`CiProjectAnalyticsTab` uses Vuetify grid (`v-row` + `v-col`). The gauge charts are in `v-col cols=12 md=6` blocks. AAA-C health summary is a full-width card. Equal sizing is largely achieved by the responsive grid. No structural changes needed — only the Health Summary row styling consistency. **Defer analytics equal-sizing refactor** — the current implementation is already grid-based.
+
+### 2.277-H: Team Tab — Current State
+
+AAA-A already implements: assigned users with search + filter, CSU/Contractor/Other personnel cards. No additional work needed.
+
+---
+
+## §2.276 — Phase BBB: Strategic Alignment Refactor, Label Conversion, Financial Summary, Gallery Carousel Fix (Phase 1)
+
+> Date: 2026-06-02
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.276-A: Strategic Alignment Panel — Misplaced Fields + Raw Key Labels
+
+**Current state (lines 1462–1537):** Panel 3 "Strategic Alignment" contains:
+- Strategic Alignment Narrative ✓ (correct)
+- Implementing Agency ✗ (wrong panel)
+- Co-Implementing Agency ✗ (wrong panel)
+- Attached Agency ✗ (wrong panel)
+- Additional Funding Sources ✗ (wrong panel)
+- Status Category ✗ (wrong panel)
+- RDP Alignment — chips show raw keys like `RDP_CH1` ✗
+- Socio-Economic Agenda — chips show raw keys ✗
+- CSU Likha Goals — chips show raw keys ✗
+- SDG Goals — chips show `labelForSdg(item)` ✓ (already correct)
+
+**Label functions available** in `coiHierarchies.ts`: `labelForRdp`, `labelForSea`, `labelForLikha`, `labelForSdg`. Only `labelForSdg` is imported in detail page (line 4). The others exist but are not imported.
+
+**Fix (D-BBB-1):**
+1. Import `labelForRdp`, `labelForSea`, `labelForLikha` in detail page
+2. Change RDP chips: `{{ item }}` → `{{ labelForRdp(item) }}`
+3. Change SEA chips: `{{ item }}` → `{{ labelForSea(item) }}`
+4. Change LIKHA chips: `{{ item }}` → `{{ labelForLikha(item) }}`
+5. Move agency/admin fields to a new Panel: "Project Administration & Governance"
+6. Update the "no strategic context" empty-state guard to not check agency fields
+
+### 2.276-B: Financial Summary Panel — Empty State Root Cause
+
+**Current behavior:** Panel 6 shows "No financial records" when `project.financials` (UIFinancial[], mapped from JOINed financials table) is empty. This happens when no per-FY ConstructionProjectFinancial records have been created for the project.
+
+**Data ALWAYS available on the main project entity:**
+- `project.contractAmount` — the contract cost
+- `project.financialProgress` — overall financial progress %
+- `project.costIncurredToDate` — cost incurred
+- `dashFinancials.appropriation` — already computed (falls back to contractAmount)
+- `dashFinancials.obligationPct`, `dashFinancials.disbursementPct` — already computed
+
+**Fix (D-BBB-2):** Enhance the Financial Summary panel to ALWAYS show a contract-level summary using project fields, even when no FY-level financial records exist. The FY-level table (currently shown when `project.financials.length > 0`) becomes supplemental. Add KPI cards for: Contract Cost, Cost Incurred, Remaining Budget, Budget Utilization %.
+
+### 2.276-C: Gallery Carousel — Shows All Gallery Images (Root Cause)
+
+**Current line 324:** `const carouselImages = computed(() => (gallery.value.length ? gallery.value : profileImages.value))`
+
+This shows ALL gallery images in the carousel. `profileImages` is already computed as `gallery.filter(g => g.category === 'PROFILE')` — it just isn't used first. The fix is to prioritize PROFILE-category images in the carousel, falling back to all gallery images only if no PROFILE images exist.
+
+**Fix (D-BBB-3):** `const carouselImages = computed(() => profileImages.value.length ? profileImages.value : gallery.value)`. This makes the carousel show PROFILE images preferentially (which are the intentionally "featured" images), while still showing any image if no PROFILE-tagged ones exist. No backend change; the category field already exists on the ConstructionGallery entity.
+
+**Note:** Gallery media classification (adding 'Project Cover Image' as a new upload category) would be a NEW feature in the gallery upload UI. The current categories (PROFILE, IN_PROGRESS, etc.) can be extended. This is a frontend-only enhancement.
+
+### 2.276-D: Items Already Addressed / Deferred
+
+| Prompt Item | Status | Phase |
+|---|---|---|
+| Team Tab (read-only personnel) | ✅ Done | AAA-A |
+| Others Tab (read-only monitoring data) | ✅ Done | AAA-B |
+| Progress Report tab consistency | ✅ Done | TTT-C (reorder + headers); remaining internal per-component UX deferred |
+| Personnel attachment permission sync | ⬜ Deferred — complex security feature; requires hub RBAC overhaul |
+| Gallery metadata fields (caption/remarks) | ✅ Already exist (`caption`, `imageTakenDate`, `category` on ConstructionGallery entity) |
+
+---
+
+## §2.275 — Phase AAA: Team Tab, Others Tab, Analytics Enhancement (Phase 1)
+
+> Date: 2026-06-02
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.275-A: ZZZ Verification — ALL CLEAN
+
+| Sub-phase | Evidence |
+|---|---|
+| ZZZ-A: Backend restart (operational) | Confirmed operational requirement — no code |
+| ZZZ-B: `eager` on checklist v-window-item | Line 1010 in hub: `<v-window-item v-if="hasProject" value="checklist" eager>` |
+| ZZZ-C: External Links section in modal | `fileModalDocs`, `linkModalDocs`, `copyLink()`, "External Links" section header all confirmed |
+
+**ZZZ fully verified CLEAN.**
+
+### 2.275-B: Team Tab — Gap and Data Availability
+
+**Current state:** `v-tab value="team"` exists in `DETAIL_TAB_ORDER` and the tab navigation, but **no `v-window-item` with `value="team"` exists** in the template (the window-item was never created). The tab is visible but clicking it shows nothing.
+
+**Data available in `UIProjectDetail` (already adapter-mapped):**
+- `project.assignedUsers[]` — from `record_assignments` JOIN `users`; has: `{id, name, email, role, department, phone, personnel_category, project_role, permissions, user_role}`
+- `project.personnelGroups.csu[]` — JSONB rows: name, position, role, rank, etc.
+- `project.personnelGroups.contractor[]` — JSONB rows: contractorName, position, role, etc.
+- `project.personnelGroups.others[]` — JSONB rows
+
+**No new API calls required** — all data is already loaded via `findOne` and mapped into the `project` reactive object.
+
+**Decision (D-AAA-1):** Add `v-window-item value="team"` to the detail page. Render:
+- Section 1: **Assigned Users** (from `project.assignedUsers`) — system-level assignments with role, department, access level chip
+- Section 2: **CSU Personnel** (from `project.personnelGroups.csu`) — name, position, rank
+- Section 3: **Contractor Personnel** (from `project.personnelGroups.contractor`) — contractor name, position, role
+- Section 4: **Other Personnel** (from `project.personnelGroups.others`)
+
+All read-only. No CiPersonnelAccessCard (that component has CRUD functionality). Simple `v-card` grid presentation. Search by name (client-side computed). No pagination needed (personnel lists are typically small).
+
+### 2.275-C: Others Tab — Gap and Data Availability
+
+**Current state:** Same as Team — `v-tab value="others"` exists, no `v-window-item`.
+
+**Data available in `UIProjectDetail`:**
+- `project.statusUpdates[]` — `{date, text}` rows (status update log)
+- `project.readinessDocuments[]` — `{type, status, remarks}` rows
+- `project.signatories[]` — `{name, position, date}` rows
+- `project.incidentLog[]` — `{date, severity, description, status}` rows
+- `project.riskRegister[]` — `{risk, likelihood, impact, mitigation, status}` rows
+- `project.escalationRecords[]` — `{escalatedTo, date, issue, resolution}` rows
+
+**Decision (D-AAA-2):** Add `v-window-item value="others"`. Render 6 collapsible panels (expansion-panels, multiple) showing each JSONB array. Hide panels when their array is empty. All read-only (no add/edit/delete buttons). Show a global "No supplementary data recorded" message when all arrays are empty.
+
+### 2.275-D: Analytics Tab — Current State + Enhancement Scope
+
+**Current `CiProjectAnalyticsTab` already provides:**
+- Physical/financial progress KPI chips
+- Milestone completion rate gauge (ApexCharts radial bar)
+- Financial utilization gauge
+- Milestone slippage histogram
+- Document compliance donut
+- FY utilization
+
+**What's missing for an executive dashboard:**
+- **Project Health summary row** — at-a-glance status: completion %, status chip, days remaining, delayed indicator
+- **Schedule Variance** — original vs revised dates comparison
+- **Progress trend** — monthly progress (needs progress report data from `useCoiProgressReports` already instantiated in QQQ-G)
+
+**Decision (D-AAA-3):** Enhance the Analytics tab by prepending a `CiProjectAnalyticsTab`-level health summary row WITHIN the component or in the detail page wrapper BEFORE `CiProjectAnalyticsTab`. Using data already available in `project`:
+- Days remaining = `project.targetCompletionDate` - today (use revised if exists)
+- Schedule slippage = (today - `project.startDate`) / (`project.targetCompletionDate` - `project.startDate`) vs `project.physicalProgress`
+
+Implementation: Add a compact health summary card row to `CiProjectAnalyticsTab.vue` at the top, using already-available `props.project` data. This is purely additive with zero backend impact.
+
+### 2.275-E: Prompt Items Already Addressed by Prior Phases
+
+| Prompt Requirement | Status | Phase |
+|---|---|---|
+| Autosave + draft restore | ✅ Done | WWW-D + XXX-C |
+| Expandable text fields (auto-grow) | ✅ Done | Pre-existing + CiBasicInfoForm |
+| Project Profile section hierarchy | ✅ Done | XXX-F (overline headers) |
+| Progress Report pagination | ✅ Done | CiProgressReportTab has 5/10/25 per-page in card/table modes |
+| Personnel attachment permission sync | ⬜ Complex — scoped as future (requires per-user permission gate in hub; deferred) |
+| Others Tab data banking enhancement | Partial — read-only implementation satisfies immediate need; extensible metadata framework deferred |
+
+### 2.275-F: Phase AAA Scope Summary
+
+| Group | Scope | Risk |
+|---|---|---|
+| **AAA-A** | Add `v-window-item value="team"` with read-only personnel panels | Low — no new API, additive |
+| **AAA-B** | Add `v-window-item value="others"` with read-only JSONB data panels | Low — no new API, additive |
+| **AAA-C** | Add project health summary row to `CiProjectAnalyticsTab` | Low — additive within existing component |
+
+---
+
+## §2.274 — Phase YYY: Link Submission Validation Fix + Checklist Sync Root Cause (Phase 1)
+
+> Date: 2026-06-02
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.274-A: XXX-A through XXX-F Verification — ALL CLEAN
+
+| Sub-phase | Evidence |
+|---|---|
+| XXX-A: Link emit in modal | `emit('link', ...)` + mdi-link-variant icon + `'link'` doc type handling confirmed |
+| XXX-B: Misc Folder Workspace removed | No `CiFolderRepository` with group-code="MISC" in hub |
+| XXX-C: Autosave timestamp | `lastSavedAt`, `lastSavedLabel`, "Unsaved changes" chip all in new.vue |
+| XXX-D: Modal tooltips | `title="Download file"` and `title="Delete from repository"` on action buttons |
+| XXX-E: Gallery category filter | `categoryFilter` + `thisMonthCount` found in CiGalleryModal |
+| XXX-F: Section overline headers | 4 `text-overline` labels (Location/Funding/Objectives/Strategic) in CiBasicInfoForm |
+
+**XXX fully verified CLEAN. Plan updated accordingly.**
+
+### 2.274-B: Issue #1 — Link Submission Validation Errors (ROOT CAUSE)
+
+**Observed errors:**
+- `property mimeType should not exist` → HTTP 400
+- `externalLink must be a valid Google Drive URL` → HTTP 400
+
+**Full lifecycle trace:**
+
+```
+CiRepositoryModal.submitLink()
+  → emit('link', { url, title, description })
+CiAttachmentHub.onRepoLink()
+  → api.post('/api/construction-projects/:id/documents', {
+      documentType: typeCodes[0],
+      externalLink: payload.url,
+      title,
+      description
+    })                              ← JSON body, no mimeType ✓ (YYY-D fix already applied)
+Controller: POST :id/documents
+  → @Body() UploadDocumentDto      ← ValidationPipe whitelist:true, forbidNonWhitelisted:true
+  → Service: addDocumentToProject
+  → mimeType auto-assigned by service (not from DTO)
+```
+
+**Root cause A — "property mimeType should not exist":**
+
+The global `ValidationPipe` is configured `whitelist: true` + `forbidNonWhitelisted: true`. Any property NOT declared in `UploadDocumentDto` causes HTTP 400. `UploadDocumentDto` has NO `mimeType` field. The comment `// YYY-D: mimeType removed from payload` in the hub confirms this was previously sent and has been removed. The service correctly auto-assigns mimeType from the uploaded file or the externalLink pattern. **The current frontend code does NOT send mimeType — so this error only occurs if an older code path is still executing (stale browser cache / older component version) or if the user tested before YYY-D was applied.** Resolution: backend restart + verify the current `onRepoLink` code is served to the browser.
+
+**Root cause B — "externalLink must be a valid Google Drive URL":**
+
+The current `UploadDocumentDto` on disk:
+```typescript
+@IsOptional()
+@IsUrl({ protocols: ['http', 'https'], require_protocol: true })
+externalLink?: string;
+```
+This accepts ANY https:// URL. The error message "must be a valid Google Drive URL" matches the exact string from a `@Matches(/^https?:\/\/(drive|docs)\.google\.com\//i, { message: 'externalLink must be a valid Google Drive URL' })` decorator that existed in an OLDER version of the DTO. That decorator has been removed. **The error only fires if the backend is running a STALE compiled version (NestJS hot-reload may not have picked up the DTO change).** Resolution: backend hard restart (`Ctrl+C` → `npm run start:dev` fresh).
+
+**Root cause C — Link records not rendering in modal:**
+
+After `onRepoLink` succeeds → `fetchDocuments()` runs → `documents.value` updates → `activeRepoDocs` filters by `activeRepo.typeCodes.includes(d.documentType)`. Since the link was stored with `documentType = activeRepo.typeCodes[0]` (e.g., `'PROJECT_PROFILE'`), it IS included. The modal's `filteredModalDocs` contains it. The `isLinkDoc` check (mimeType includes 'link') → `mdi-link-variant` icon → opens URL in new tab.
+
+**This should already work once the backend is running the current code.** But there is one rendering gap: the modal currently shows files and links in a single flat list. The prompt asks for **separate sections** (Files | External Links). This is a UI improvement, not a functional fix.
+
+### 2.274-B2: Phase YYY Verification Against Live Code
+
+Phase YYY is marked `✅ Phase 3 COMPLETE` in plan.md. Verification against current code:
+
+| YYY Item | Live State |
+|---|---|
+| YYY-A: @Matches GDrive restriction removed from DTO | ✅ CLEAN — DTO on disk has only @IsUrl |
+| YYY-B: Service mimeType auto-detection (GDrive vs generic) | ✅ CLEAN — `const isGDriveLink = /drive\.google\.com/...` present in service |
+| YYY-C: NOT_SUBMITTED filter removed from auto-link | Needs verification |
+| YYY-D: mimeType removed from onRepoLink + toast | ✅ CLEAN — no mimeType in onRepoLink, toast.success/error present |
+| YYY-E: REVISED status in CiDocumentChecklist | ✅ CLEAN — confirmed in system reminder diff |
+
+**YYY gap identified:** The YYY plan does NOT address the `v-window-item eager` fix. The plan marks "Compliance Checklist tab refreshes after upload" as "existing" — but this only works when the tab has been visited. This is the missing piece.
+
+**Why users still see validation errors despite YYY-A/D being implemented:**
+The backend must be **restarted** after DTO changes. NestJS hot-reload (`start:dev`) compiles TypeScript but may not flush module caches. If the backend process is running with the old compiled DTO (with @Matches), both errors persist regardless of what the TypeScript file says. **No code change needed — only a backend hard restart.**
+
+### 2.274-C: Issue #2 — Compliance Checklist Not Updating (ROOT CAUSE)
+
+**Trace:**
+
+```
+User uploads to CPES repo → CiRepositoryCard @upload → openRepo → CiRepositoryModal
+→ submitUpload() → emit('upload', {file, documentType: cpesTypeCode, ...})
+CiAttachmentHub.onRepoUpload() → void persistDoc(payload)
+  → api.upload('/documents', FormData{documentType: cpesTypeCode, file})
+Backend addDocumentToProject():
+  → documentRepo.create({documentType: cpesTypeCode, ...}) + em.flush()
+  → find ConstructionDocumentType where typeCode = cpesTypeCode
+  → find ConstructionDocumentChecklist where projectId + documentTypeId + status=NOT_SUBMITTED
+  → checklistItem.submissionStatus = 'SUBMITTED' + em.flush()   ← BACKEND AUTO-LINKS ✓
+Frontend:
+  → fetchDocuments() → documents.value updated ✓
+  → checklistRef.value?.refresh()                               ← THE BUG IS HERE
+```
+
+**Root cause — `checklistRef.value` is null when checklist tab unvisited:**
+
+`CiDocumentChecklist` is rendered inside `<v-window-item v-if="hasProject" value="checklist">` (line 1007 of hub) — **without the `eager` prop**. Vuetify's `v-window` uses lazy rendering by default: the window-item content is only mounted when that tab is first activated. If the user uploads from the Key Documents or CPES tab without ever visiting the Checklist tab, `checklistRef.value` is `null` and `.refresh()` is a silent no-op.
+
+**The backend DOES correctly update the checklist item.** But the frontend never re-fetches because the component is unmounted.
+
+**Fix (D-YYY-1):** Add `eager` to the checklist `v-window-item`. This mounts `CiDocumentChecklist` at hub initialization (when `hasProject`), so `checklistRef.value` is never null for active projects.
+
+```vue
+<v-window-item v-if="hasProject" value="checklist" eager>
+```
+
+**Secondary root cause — Key Docs / Supporting Docs don't have checklist items:**
+
+The compliance checklist (`construction_document_checklist` table) only contains rows for CPES_DOCS types. When a Key Doc or Supporting Doc is uploaded, the backend's `addDocumentToProject` finds no matching checklist item (since PROJECT_PROFILE, SD_ECO_001, etc. are not in `construction_document_checklist`) → no auto-update → no status change. This is EXPECTED behavior — the checklist is CPES-specific. The WWW-G master summary (4-col overview) addresses the broader cross-section visibility. No fix needed for this; document it as by design.
+
+**Fix scope for Issue #2:** Add `eager` to the checklist window-item (1 word, 1 file, zero risk).
+
+### 2.274-D: Link Records — Separate Files vs External Links Display
+
+**Prompt requirement:** Repository modal must show FILES and EXTERNAL LINKS in separate sections (not a single flat list).
+
+**Current state:** Single `v-list` showing all `pagedModalDocs` — links and files interleaved, distinguished only by icon. The `isLinkDoc` check renders the link icon and opens in new tab, but no visual section separation.
+
+**Design (D-YYY-2):**
+- Split `filteredModalDocs` into `fileModalDocs` (not isLinkDoc) and `linkModalDocs` (isLinkDoc)
+- Show Files section first (existing layout), then an "External Links" section header + separate `v-list`
+- Link list item: `mdi-link-variant`/`mdi-google-drive` icon + URL title + description + submittedBy + date + "Open Link" button + "Copy" chip + delete (if canDelete)
+- Hide the "External Links" section entirely when `linkModalDocs.length === 0`
+
+---
+
+## §2.273 — Phase XXX: Link Submission, Misc Folder Removal, Gallery Eval, Project Profile, CPES Card (Phase 1)
+
+> Date: 2026-06-02
+> Status: Phase 1 complete — ready for Phase 2 plan
+
+### 2.273-A: WWW-A through WWW-G Verification (CLEAN)
+
+| Sub-phase | Evidence |
+|---|---|
+| WWW-A: Progress bar removed | `grep -c v-progress-linear CiRepositoryCard.vue` → **0** |
+| WWW-B: CPES card grid | `cpesCardStats` found 3× in hub |
+| WWW-C: Misc sentinel | `__MISC__` found 3× in hub |
+| WWW-D: Autosave new.vue | `DRAFT_KEY` found 5× |
+| WWW-F: Modal guidance | `guidanceDismissed` found 4× in modal |
+| WWW-G: Checklist summary | `keyDocCount` prop found 3× in CiDocumentChecklist |
+| WWW-E: Remarks audit | Already fully implemented in updateDocumentChecklistItem |
+
+**All WWW sub-phases verified CLEAN.**
+
+### 2.273-B: Link Submission in CiRepositoryModal — Gap Analysis (CRITICAL)
+
+**Prompt requirement (Section III):** Repository records must support both File Upload (Type A) AND External Link (Type B). Display links and files in the same modal list.
+
+**Current state:** CiRepositoryModal has NO link submission form. The modal's emit is:
+```ts
+defineEmits: { 'update:modelValue', 'upload', 'delete', 'remove-staged' }
+```
+— no `link-submit` emit.
+
+**Backend capability:** `addDocumentToProject` ALREADY handles link submission (`if (!file && dto.externalLink)` → saves as `mimeType='application/x-google-drive-link'`). The hub's `submitLink` function exists but is ONLY in the Miscellaneous "External Links" section, not wired to CiRepositoryModal.
+
+**Modal display:** Already handles Google Drive links correctly — `isLinkDoc` returns true for `mimeType === 'application/x-google-drive-link'`, renders `mdi-google-drive` icon, opens in new tab.
+
+**Fix (D-XXX-1):** Add a "Submit Link" tab/toggle inside CiRepositoryModal (alongside the existing upload zone). Emits a new `'link'` event `{ url, title, description }`. Hub's `onRepoLink` handler calls `submitLink` to POST the link as a document. Documents already appear in the modal's list via `documents.value` reload. Link entries show `mdi-link-variant` icon (for generic links vs `mdi-google-drive` for Drive-specific).
+
+**URL detection:** A URL starting with `drive.google.com` → `mimeType='application/x-google-drive-link'`; all others → generic `mimeType='application/x-external-link'` (or reuse existing link handler).
+
+**Validation:** URL must start with `http://` or `https://`; max 500 chars; title required.
+
+### 2.273-C: Miscellaneous Folder Workspace — Removal Confirmed
+
+**Prompt Section VI:** "Remove Folder Workspace. Use same architecture as Key Documents."
+
+**Current state (post-WWW-C):** Misc window-item has both: (a) `CiRepositoryCard` + modal (correct) and (b) `CiFolderRepository` group-code="MISC" (folder workspace — to be removed per this prompt). The prompt is explicit: remove the folder workspace, keep only the repository card architecture.
+
+**Fix (D-XXX-2):** Remove the `CiFolderRepository` block and its surrounding section header from the Misc window-item. The External Links section that follows can be kept or moved into the modal (cleaner: keep it as-is since it's useful context).
+
+### 2.273-D: Autosave Timestamp Indicator — Gap
+
+**Current state:** Autosave writes to localStorage silently; there's no visible "Last saved: X" indicator in the UI. The prompt asks for "Last saved timestamp" and "Unsaved changes indicator."
+
+**Fix (D-XXX-3):** Add a small status line near the Save button in both new.vue and edit-[id].vue:
+- `lastSavedAt = ref<Date | null>(null)` — updated when `saveDraft()` runs
+- Display: `"Draft saved {time ago}"` (e.g., "Draft saved just now" / "Draft saved 3 minutes ago")
+- Unsaved indicator: show a yellow chip "Unsaved changes" when `hasUnsavedChanges = true`
+
+### 2.273-E: CiRepositoryModal Action Buttons — UX / Icon Spacing
+
+**Current state:** Each list item has two icon buttons (download + delete) stacked tight. The download button has no tooltip. On smaller viewports they compress.
+
+**Fix (D-XXX-4):** Add `title` tooltip attrs and ensure minimum gap between buttons. Minor CSS fix. Already has `v-btn variant="text" icon="mdi-download"` and `icon="mdi-delete"`.
+
+### 2.273-F: Gallery Research — Phase 1 Findings
+
+**Current purpose (confirmed):** CiGallery stores images uploaded to the project. It has: `imageUrl`, `caption`, `category` (IN_PROGRESS/COMPLETED/etc.), `imageTakenDate`, `isFeatured`. Displayed in `CiGalleryModal` as a grid with download.
+
+**Assessment for construction documentation role:**
+- Gallery IS the right place for site progress documentation — categories already support IN_PROGRESS/COMPLETED/INSPECTION
+- Missing: timeline/chronological grouping in the modal, monthly-count analytics, "missing documentation" alerts
+- The `CiProjectAnalyticsTab` already has some gallery analytics
+
+**Phase 2 Design Recommendations:**
+1. Group modal images by month (`imageTakenDate`), with a month-divider header
+2. Add a category filter strip (chips) above the grid in the modal
+3. Analytics: image count this month, last upload date — add to the hub's Gallery tab header
+4. Admin guidance: "Regular uploads help document site progress for accomplishment validation"
+
+**Decision (D-XXX-5):** Gallery enhancement is LOW risk and MEDIUM value. Implement month-grouping in modal view + category filter. No backend change needed (data already present). Do NOT rework the gallery entity or upload flow.
+
+### 2.273-G: CPES Card Optimization — Current State
+
+**Post-CPES-fix:** Cards have text-wrap, 3-column grid, blockquote guide. Card shows: file count chip + last upload date.
+
+**Prompt V requirement:** Show only Name / Status / Last Updated / Total Files. "Status" = CPES checklist item status (NOT_SUBMITTED/SUBMITTED/etc.). This requires the hub to know each CPES type's checklist status.
+
+**Decision (D-XXX-6):** Add `cpesChecklistStatus` computed in hub that maps CPES typeCodes to their checklist status. Pass as `statusBreakdown` or a new `status` prop to `CiRepositoryCard`. Keep as a lightweight enhancement — the checklist items are already fetched by `CiDocumentChecklist`.
+
+**Simplest approach:** Read checklist status from the `allDocs` pattern isn't enough (checklist uses separate endpoint). Best approach: the hub fetches the checklist summary reactively by calling the exposed `refresh()` method — but the hub doesn't have access to checklist item statuses. Skip the status field for now; the existing `docCount + latestUpload` is accurate and sufficient. Mark as future enhancement. ✅ confirmed deferred.
+
+### 2.273-H: Project Profile — Section Header Enhancement
+
+**Prompt II requirement:** Group fields into 5 named sections.
+
+**Current CiBasicInfoForm structure:** Already has implicit groups (Row A identity, Row B location/agencies, Row C funding, Row D objectives/beneficiaries, Row E strategic alignment). 
+
+**Decision (D-XXX-7):** Add descriptive section headings above each row group — NOT a full restructure. A section header chip/label above Row A, B, C, D, E adds clarity without changing any save logic or field layout. This is purely additive styling.
+
+### 2.273-I: Summary — Phase XXX Scope
+
+| Item | Decision | Risk |
+|---|---|---|
+| Link submission in CiRepositoryModal | IMPLEMENT — new emit + toggle in modal + hub handler | Medium |
+| Misc Folder Workspace removal | IMPLEMENT — remove CiFolderRepository from Misc | Low |
+| Autosave timestamp indicator | IMPLEMENT — lastSavedAt ref + display near save | Low |
+| Modal action button tooltips | IMPLEMENT — add title attrs, spacing | Low |
+| Gallery month-grouping + category filter | IMPLEMENT — modal-only, no backend | Low |
+| CPES card status field | DEFERRED — data not accessible in hub | N/A |
+| Project Profile section headers | IMPLEMENT — additive labels, no restructure | Low |
 
 ---
 
@@ -20391,3 +20853,139 @@ Use when rendering section headers: `GROUP_LABEL_OVERRIDES[g.groupCode] ?? g.gro
 | Audit logs preserved | all | no deletions |
 
 ---
+
+---
+
+# Phase YYY — Root Cause Analysis
+## Insert Link + Compliance Checklist Sync Failures
+**Date:** 2026-06-02 | **Status:** Phase 1 Complete — Awaiting Phase 2 Authorization
+
+---
+
+## Trace Map
+
+```
+Frontend (CiAttachmentHub.vue / CiRepositoryModal.vue)
+  → api.post('/api/construction-projects/:id/documents')
+  → UploadDocumentDto (class-validator, whitelist: true)
+  → ConstructionProjectsService.addDocumentToProject()
+  → DocumentRepository.create() → persistAndFlush()
+  → Checklist auto-link block
+  → CiDocumentChecklist.vue (via checklistRef.refresh())
+```
+
+---
+
+## CRITICAL ISSUE #1 — Insert Link Functionality
+
+### RCA-L1: `property mimeType should not exist` (400 Bad Request)
+
+**Root Cause:**
+- `CiAttachmentHub.vue` line 677 sends `mimeType` in the JSON body:
+  `mimeType: isGDrive ? 'application/x-google-drive-link' : 'application/x-external-link'`
+- `UploadDocumentDto` has NO `mimeType` field — declared fields are:
+  `documentType, description, category, title, externalLink, lifecycleStatus, folder_id`
+- NestJS ValidationPipe uses `whitelist: true` + `forbidNonWhitelisted: true` (project standard).
+  Any undeclared property triggers 400: `"property mimeType should not exist"`.
+
+**Evidence File:** `pmo-backend/src/construction-projects/dto/upload-document.dto.ts` (full file)
+**Sending File:** `pmo-frontend/components/coi/CiAttachmentHub.vue` lines 666-684
+
+---
+
+### RCA-L2: `externalLink must be a valid Google Drive URL` (400 Bad Request)
+
+**Root Cause:**
+- `UploadDocumentDto.externalLink` has:
+  `@Matches(/^https?:\/\/(drive|docs)\.google\.com\//i, { message: 'externalLink must be a valid Google Drive URL' })`
+- This restricts ALL external links to `drive.google.com` or `docs.google.com` only.
+- ANY other URL (OneDrive, SharePoint, Dropbox, CSU repos, public HTTPS) triggers this error.
+
+**Evidence File:** `pmo-backend/src/construction-projects/dto/upload-document.dto.ts` lines 34-37
+
+---
+
+### RCA-L3: Service hardcodes `application/x-google-drive-link` for ALL external links
+
+**Root Cause:**
+- `ConstructionProjectsService.addDocumentToProject()` line 2039:
+  `mimeType = 'application/x-google-drive-link'` — hardcoded for ALL links regardless of URL type.
+- A non-GDrive link saved after fix would be stored with the wrong mimeType.
+- Frontend `isLink()` and `isLinkDoc()` checks depend on correct mimeType to render link vs file.
+
+**Evidence File:** `pmo-backend/src/construction-projects/construction-projects.service.ts` line 2039
+
+---
+
+### RCA-L4: No user feedback (toast) in `onRepoLink()`
+
+**Root Cause:**
+- `CiAttachmentHub.vue` `onRepoLink()` function (lines 666-684):
+  - No `toast.success()` on successful save
+  - No `toast.error()` in catch block
+  - Users receive zero confirmation whether the link was saved or failed.
+
+**Evidence File:** `pmo-frontend/components/coi/CiAttachmentHub.vue` lines 666-684
+
+---
+
+## CRITICAL ISSUE #2 — Compliance Checklist Not Updating
+
+### RCA-C1: Auto-link fires ONLY on `NOT_SUBMITTED` items
+
+**Root Cause:**
+- `addDocumentToProject()` auto-link query (service lines 2077-2091):
+  ```ts
+  const checklistItem = await this.docChecklistRepo.findOne({
+    projectId,
+    documentTypeId: docType.id,
+    submissionStatus: 'NOT_SUBMITTED',  // ← BLOCKS ALL RE-UPLOADS
+  });
+  ```
+- If a checklist item is already SUBMITTED, APPROVED, UNDER_REVIEW, or REJECTED:
+  re-uploading that document type does NOT update `linkedDocumentId`, `currentVersion`, `submittedAt`, or `submittedBy`.
+- The checklist item remains stale with the old doc reference and old timestamp.
+- This is the primary reason the checklist appears "frozen" after the initial submission.
+
+**Evidence File:** `pmo-backend/src/construction-projects/construction-projects.service.ts` lines 2074-2093
+
+---
+
+### RCA-C2: No `REVISED` status in checklist system
+
+**Root Cause:**
+- Frontend `ChecklistItem.submissionStatus` type = `'NOT_SUBMITTED' | 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED'`
+- No `REVISED` status exists.
+- `statusOptions` array in `CiDocumentChecklist.vue` lines 183-189 has no REVISED entry.
+- The `submissionStatus` DB column is `VARCHAR(30)` — no enum constraint — so adding `REVISED` requires no migration.
+- Re-uploads after first submission cannot be visually distinguished from the initial submission.
+
+**Evidence File:** `pmo-frontend/components/coi/CiDocumentChecklist.vue` lines 57-71, 183-189
+
+---
+
+## Non-Issue Findings (Verified Working)
+
+| Finding | Result |
+|---|---|
+| `checklistRef.value?.refresh()` called after upload | ✅ Called in `persistDoc()` line 328 and `onRepoLink()` line 680 |
+| `CiDocumentChecklist` exposed `refresh` method | ✅ `defineExpose({ refresh: fetchChecklist })` line 380 |
+| `activeRepoDocs` includes link docs (after fix) | ✅ Filters by `typeCodes.includes(d.documentType)` — mimeType-agnostic |
+| `isLinkDoc()` in CiRepositoryModal handles non-GDrive links | ✅ Checks `application/x-external-link` too (XXX-A already patched) |
+| `v-window-item` keeps CiDocumentChecklist mounted | ✅ Not destroyed when tab switches — ref is stable |
+| Checklist `findDocumentChecklist()` lazy-init | ✅ Creates missing items on first GET call |
+| Supporting doc typeCode uploads auto-link (when NOT_SUBMITTED) | ✅ Works for first upload; fails on re-upload (RCA-C1) |
+
+---
+
+## Fix Summary
+
+| Issue | Fix | Location |
+|---|---|---|
+| RCA-L1 (mimeType in payload) | Remove `mimeType` from frontend POST body | CiAttachmentHub.vue `onRepoLink()` |
+| RCA-L2 (GDrive-only restriction) | Remove `@Matches()` from `externalLink` in DTO | upload-document.dto.ts |
+| RCA-L3 (hardcoded mimeType) | Detect GDrive vs generic, assign correct mimeType | service `addDocumentToProject()` |
+| RCA-L4 (no toast) | Add toast.success + toast.error in onRepoLink | CiAttachmentHub.vue |
+| RCA-C1 (NOT_SUBMITTED filter) | Remove filter; update ALL existing checklist items | service auto-link block |
+| RCA-C2 (no REVISED) | Add REVISED status; set on version > 1 uploads | service + CiDocumentChecklist.vue |
+

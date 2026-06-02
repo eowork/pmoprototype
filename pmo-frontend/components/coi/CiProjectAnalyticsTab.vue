@@ -24,6 +24,27 @@ function fmtCurrency(v: number | null): string {
 // KPI summary
 const avgPhysicalProgress = computed(() => Number(props.project.physicalProgress || 0))
 
+// AAA-C: Project Health summary computeds
+const daysRemaining = computed<number | null>(() => {
+  const end = (props.project as any).revisedCompletionDate || props.project.targetCompletionDate
+  if (!end) return null
+  return Math.ceil((new Date(end as string).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+})
+const isDelayed = computed(() => daysRemaining.value != null && daysRemaining.value < 0)
+const scheduleVarianceDays = computed<number | null>(() => {
+  const original = (props.project as any).originalCompletionDate
+  const revised = (props.project as any).revisedCompletionDate
+  if (!original || !revised) return null
+  return Math.ceil((new Date(revised as string).getTime() - new Date(original as string).getTime()) / (1000 * 60 * 60 * 24))
+})
+const healthStatusColor = computed(() => {
+  const s = props.project.publicationStatus
+  return s === 'PUBLISHED' ? 'success' : s === 'PENDING_REVIEW' ? 'warning' : s === 'REJECTED' ? 'error' : 'grey'
+})
+const healthStatusLabel = computed(() => {
+  const s = props.project.publicationStatus
+  return s === 'PUBLISHED' ? 'Published' : s === 'PENDING_REVIEW' ? 'Pending Review' : s === 'REJECTED' ? 'Rejected' : 'Draft'
+})
 
 const milestoneCompletionRate = computed(() => {
   const ms = props.project.milestones || []
@@ -252,6 +273,33 @@ const hasNonZeroMilestones = computed(() =>
     </template>
 
     <template v-if="!allEmpty">
+    <!-- AAA-C: Project Health Summary row -->
+    <v-card variant="tonal" color="primary" class="mb-4 pa-3" rounded="lg">
+      <div class="text-overline text-medium-emphasis mb-2">Project Health</div>
+      <v-row dense>
+        <v-col cols="6" sm="3">
+          <div class="text-caption text-grey">Physical Progress</div>
+          <div class="text-h5 font-weight-bold">{{ avgPhysicalProgress.toFixed(1) }}%</div>
+        </v-col>
+        <v-col cols="6" sm="3">
+          <div class="text-caption text-grey">Status</div>
+          <v-chip size="small" :color="healthStatusColor" variant="tonal" class="mt-1">{{ healthStatusLabel }}</v-chip>
+        </v-col>
+        <v-col v-if="daysRemaining != null" cols="6" sm="3">
+          <div class="text-caption text-grey">{{ isDelayed ? 'Days Overdue' : 'Days Remaining' }}</div>
+          <div class="text-h5 font-weight-bold" :class="isDelayed ? 'text-error' : ''">
+            {{ Math.abs(daysRemaining) }}
+          </div>
+        </v-col>
+        <v-col v-if="scheduleVarianceDays != null" cols="6" sm="3">
+          <div class="text-caption text-grey">Schedule Extension</div>
+          <div class="text-body-1 font-weight-bold" :class="scheduleVarianceDays > 0 ? 'text-warning' : 'text-success'">
+            {{ scheduleVarianceDays > 0 ? `+${scheduleVarianceDays}d` : scheduleVarianceDays === 0 ? 'On schedule' : `${scheduleVarianceDays}d` }}
+          </div>
+        </v-col>
+      </v-row>
+    </v-card>
+
     <!-- KPI summary -->
     <v-row dense class="mb-2">
       <v-col cols="6" md="3">

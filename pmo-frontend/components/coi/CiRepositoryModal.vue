@@ -60,6 +60,7 @@ const emit = defineEmits<{
   upload: [payload: { file: File; documentType: string; title: string; description: string }]
   delete: [docId: string]
   'remove-staged': [tempId: string]
+  link: [payload: { url: string; title: string; description: string }]  // XXX-A
 }>()
 
 const api = useApi()
@@ -113,9 +114,24 @@ const filteredModalDocs = computed(() => {
 // AAA-H-3: client-side pagination
 const MODAL_PAGE_SIZE = 20
 const modalDisplayLimit = ref(MODAL_PAGE_SIZE)
-const pagedModalDocs = computed(() => filteredModalDocs.value.slice(0, modalDisplayLimit.value))
-const hasMoreModalDocs = computed(() => filteredModalDocs.value.length > modalDisplayLimit.value)
+
+// ZZZ-C: split filteredModalDocs into file entries and external link entries for separate rendering
+const fileModalDocs = computed(() => filteredModalDocs.value.filter(d => !isLinkDoc(d)))
+const linkModalDocs = computed(() => filteredModalDocs.value.filter(d => isLinkDoc(d)))
+const pagedModalDocs = computed(() => fileModalDocs.value.slice(0, modalDisplayLimit.value))
+const hasMoreModalDocs = computed(() => fileModalDocs.value.length > modalDisplayLimit.value)
 watch([modalSearch, modalFilterType], () => { modalDisplayLimit.value = MODAL_PAGE_SIZE })
+
+// ZZZ-C: copy external link URL to clipboard
+const toast = useToast ? useToast() : { success: (m: string) => console.log(m), error: (m: string) => console.error(m) }
+async function copyLink(url: string) {
+  try {
+    await navigator.clipboard.writeText(url)
+    toast.success('Link copied to clipboard')
+  } catch {
+    toast.error('Could not copy link — please copy manually')
+  }
+}
 
 // Upload form state
 const showUpload = ref(props.expandUpload)
@@ -189,6 +205,7 @@ watch(
   (v) => {
     if (v) {
       showUpload.value = props.expandUpload
+      showLinkForm.value = false  // XXX-A: reset link form on open
       // TTT-A: always reset to THIS repository's primary type. The modal is a shared
       // instance; a stale uploadType from a previously-opened repo would file uploads
       // under the wrong documentType, making them invisible in the current repository.
@@ -220,9 +237,27 @@ function formatSize(bytes: number): string {
   return `${bytes} B`
 }
 
-// CCC-A: authenticated download with original filename; links open raw href.
+// XXX-A: link submission form state
+const showLinkForm = ref(false)
+const linkUrl = ref('')
+const linkTitle = ref('')
+const linkDescription = ref('')
+const URL_RE = /^https?:\/\/.+/i
+
+function submitLink() {
+  if (!linkUrl.value || !URL_RE.test(linkUrl.value)) return
+  emit('link', { url: linkUrl.value, title: linkTitle.value || linkUrl.value, description: linkDescription.value })
+  linkUrl.value = ''
+  linkTitle.value = ''
+  linkDescription.value = ''
+  showLinkForm.value = false
+}
+
+// CCC-A / XXX-A: authenticated download; links open raw href.
 function isLinkDoc(doc: RepoDoc): boolean {
-  return doc.mimeType === 'application/x-google-drive-link'
+  return doc.mimeType === 'application/x-google-drive-link' ||
+    doc.mimeType === 'application/x-external-link' ||
+    doc.documentType === 'link'
 }
 async function downloadDoc(doc: RepoDoc) {
   if (isLinkDoc(doc) || !props.projectId) {
@@ -268,15 +303,23 @@ async function downloadDoc(doc: RepoDoc) {
         </v-col>
         <v-col cols="12" sm="2" md="3" class="d-flex justify-end align-center ga-2">
           <v-btn-toggle v-model="modalSort" mandatory density="compact" variant="outlined">
-            <v-btn value="date-desc" icon="mdi-sort-calendar-descending" size="small" density="compact" />
-            <v-btn value="date-asc" icon="mdi-sort-calendar-ascending" size="small" density="compact" />
-            <v-btn value="name-asc" icon="mdi-sort-alphabetical-ascending" size="small" density="compact" />
+            <v-btn value="date-desc" icon="mdi-sort-calendar-descending" size="medium" density="compact" />
+            <v-btn value="date-asc" icon="mdi-sort-calendar-ascending" size="medium" density="compact" />
+            <v-btn value="name-asc" icon="mdi-sort-alphabetical-ascending" size="medium" density="compact" />
           </v-btn-toggle>
           <v-btn
             v-if="canUpload && mode !== 'view'"
-            :color="color" variant="tonal" size="small"
+            :color="color" variant="tonal" size="medium"
             :icon="showUpload ? 'mdi-chevron-up' : 'mdi-upload'"
-            @click="showUpload = !showUpload"
+            @click="showUpload = !showUpload; if (showUpload) showLinkForm = false"
+          />
+          <!-- XXX-A: Submit Link toggle -->
+          <v-btn
+            v-if="canUpload && mode !== 'view'"
+            :color="color" variant="tonal" size="small"
+            :icon="showLinkForm ? 'mdi-chevron-up' : 'mdi-link-plus'"
+            title="Submit Link"
+            @click="showLinkForm = !showLinkForm; if (showLinkForm) showUpload = false"
           />
         </v-col>
       </v-row>
@@ -351,6 +394,43 @@ async function downloadDoc(doc: RepoDoc) {
           </v-card>
         </v-expand-transition>
 
+        <!-- XXX-A: Link submission form panel -->
+        <v-expand-transition>
+          <v-card v-if="showLinkForm && canUpload && mode !== 'view'" variant="tonal" color="blue-grey" class="mb-4">
+            <v-card-title class="d-flex align-center ga-2 text-body-2 py-2 px-3">
+              <v-icon icon="mdi-link-plus" size="small" />
+              Submit External Link
+            </v-card-title>
+            <v-card-text class="py-2">
+              <v-row dense>
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="linkUrl"
+                    label="URL *"
+                    placeholder="https://drive.google.com/..."
+                    prepend-inner-icon="mdi-link"
+                    variant="outlined"
+                    density="compact"
+                    hide-details="auto"
+                    :rules="[(v: string) => !v || URL_RE.test(v) || 'Must be a valid https:// URL']"
+                  />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field v-model="linkTitle" label="Title (optional)" variant="outlined" density="compact" hide-details />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field v-model="linkDescription" label="Description (optional)" variant="outlined" density="compact" hide-details />
+                </v-col>
+                <v-col cols="12" class="d-flex justify-end">
+                  <v-btn color="blue-grey" :disabled="!linkUrl || !URL_RE.test(linkUrl)" prepend-icon="mdi-link-plus" @click="submitLink">
+                    {{ mode === 'staging' ? 'Stage Link' : 'Submit Link' }}
+                  </v-btn>
+                </v-col>
+              </v-row>
+            </v-card-text>
+          </v-card>
+        </v-expand-transition>
+
         <!-- Staged documents (new.vue) -->
         <template v-if="staged.length">
           <div class="text-overline text-medium-emphasis">Pending ({{ staged.length }})</div>
@@ -364,43 +444,97 @@ async function downloadDoc(doc: RepoDoc) {
           </v-list>
         </template>
 
-        <!-- Flat document list (AAA-H-3/4) -->
-        <div v-if="!filteredModalDocs.length" class="text-center text-grey py-10">
+        <!-- ZZZ-C: FILES section (uploaded files only, links in separate section below) -->
+        <div v-if="!fileModalDocs.length && !linkModalDocs.length" class="text-center text-grey py-10">
           <v-icon icon="mdi-file-outline" size="40" color="grey-lighten-1" />
           <div class="text-body-2 mt-2">No files match the current filters.</div>
         </div>
-        <v-list v-else density="compact">
-          <v-list-item v-for="doc in pagedModalDocs" :key="doc.id">
-            <template #prepend>
-              <v-icon
-                :icon="doc.mimeType === 'application/x-google-drive-link' ? 'mdi-google-drive' : 'mdi-file-document'"
-                :color="doc.mimeType === 'application/x-google-drive-link' ? 'info' : color"
-                size="small"
-              />
-            </template>
-            <v-list-item-title>
-              <a v-if="isLinkDoc(doc)" :href="doc.filePath" target="_blank" rel="noopener" class="text-decoration-none">{{ doc.fileName }}</a>
-              <a v-else href="#" class="text-decoration-none" @click.prevent="downloadDoc(doc)">{{ doc.fileName }}</a>
-            </v-list-item-title>
-            <v-list-item-subtitle class="text-caption">
-              {{ typeLabel(doc.documentType) }}
-              <span v-if="doc.uploadedByName"> · {{ doc.uploadedByName }}</span>
-              <span v-if="doc.createdAt"> · {{ formatDate(doc.createdAt) }}</span>
-              <span v-if="doc.version != null"> · v{{ doc.version }}</span>
-              <span v-if="doc.fileSize"> · {{ formatSize(doc.fileSize) }}</span>
-              <v-chip v-if="doc.lifecycleStatus && doc.lifecycleStatus !== 'ACTIVE'" size="x-small" variant="tonal" color="grey" class="ml-1">{{ doc.lifecycleStatus }}</v-chip>
-            </v-list-item-subtitle>
-            <template #append>
-              <v-btn variant="text" size="small" icon="mdi-download" @click.stop="downloadDoc(doc)" />
-              <v-btn v-if="canDelete" icon="mdi-delete" size="small" variant="text" color="error" @click.stop="emit('delete', doc.id)" />
-            </template>
-          </v-list-item>
-        </v-list>
-        <div v-if="hasMoreModalDocs" class="text-center mt-2">
-          <v-btn variant="text" size="small" @click="modalDisplayLimit += MODAL_PAGE_SIZE">
-            Load more ({{ filteredModalDocs.length - modalDisplayLimit }} remaining)
-          </v-btn>
-        </div>
+
+        <template v-if="fileModalDocs.length">
+          <div class="text-overline text-weight-bold mb-1">
+            <v-icon size="14" class="mr-1">mdi-file-multiple-outline</v-icon>
+            Files ({{ fileModalDocs.length }})
+          </div>
+          <v-list density="compact">
+            <v-list-item v-for="doc in pagedModalDocs" :key="doc.id">
+              <template #prepend>
+                <v-icon icon="mdi-file-document" :color="color" size="small" />
+              </template>
+              <v-list-item-title>
+                <a href="#" class="text-decoration-none" @click.prevent="downloadDoc(doc)">{{ doc.fileName }}</a>
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption">
+                {{ typeLabel(doc.documentType) }}
+                <span v-if="doc.uploadedByName"> · {{ doc.uploadedByName }}</span>
+                <span v-if="doc.createdAt"> · {{ formatDate(doc.createdAt) }}</span>
+                <span v-if="doc.version != null"> · v{{ doc.version }}</span>
+                <span v-if="doc.fileSize"> · {{ formatSize(doc.fileSize) }}</span>
+                <v-chip v-if="doc.lifecycleStatus && doc.lifecycleStatus !== 'ACTIVE'" size="x-small" variant="tonal" color="grey" class="ml-1">{{ doc.lifecycleStatus }}</v-chip>
+              </v-list-item-subtitle>
+              <template #append>
+                <div class="d-flex align-center ga-1">
+                  <v-btn variant="text" size="small" icon="mdi-download" title="Download file" @click.stop="downloadDoc(doc)" />
+                  <v-btn v-if="canDelete" icon="mdi-delete" size="small" variant="text" color="error" title="Delete from repository" @click.stop="emit('delete', doc.id)" />
+                </div>
+              </template>
+            </v-list-item>
+          </v-list>
+          <div v-if="hasMoreModalDocs" class="text-center mt-2">
+            <v-btn variant="text" size="small" @click="modalDisplayLimit += MODAL_PAGE_SIZE">
+              Load more ({{ fileModalDocs.length - modalDisplayLimit }} remaining)
+            </v-btn>
+          </div>
+        </template>
+
+        <!-- ZZZ-C: EXTERNAL LINKS section (separate from files) -->
+        <template v-if="linkModalDocs.length">
+          <v-divider class="my-3" />
+          <div class="text-overline text-weight-bold mb-1">
+            <v-icon size="14" class="mr-1">mdi-link-variant</v-icon>
+            External Links ({{ linkModalDocs.length }})
+          </div>
+          <v-list density="compact">
+            <v-list-item v-for="doc in linkModalDocs" :key="doc.id">
+              <template #prepend>
+                <v-icon
+                  :icon="doc.mimeType === 'application/x-google-drive-link' ? 'mdi-google-drive' : 'mdi-link-variant'"
+                  color="info"
+                  size="small"
+                />
+              </template>
+              <v-list-item-title>
+                <a :href="doc.filePath" target="_blank" rel="noopener" class="text-decoration-none">
+                  {{ doc.fileName }}
+                </a>
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption">
+                <span v-if="doc.uploadedByName">{{ doc.uploadedByName }}</span>
+                <span v-if="doc.createdAt"> · {{ formatDate(doc.createdAt) }}</span>
+                <span v-if="doc.description"> · {{ doc.description }}</span>
+              </v-list-item-subtitle>
+              <template #append>
+                <div class="d-flex align-center ga-1">
+                  <v-btn
+                    variant="text" size="small" icon="mdi-open-in-new"
+                    title="Open link in new tab"
+                    tag="a" :href="doc.filePath" target="_blank" rel="noopener"
+                  />
+                  <v-btn
+                    variant="text" size="small" icon="mdi-content-copy"
+                    title="Copy link URL"
+                    @click.stop="copyLink(doc.filePath)"
+                  />
+                  <v-btn
+                    v-if="canDelete"
+                    icon="mdi-delete" size="small" variant="text" color="error"
+                    title="Remove link"
+                    @click.stop="emit('delete', doc.id)"
+                  />
+                </div>
+              </template>
+            </v-list-item>
+          </v-list>
+        </template>
 
         <!-- AAA-H-5: recent activity -->
         <template v-if="projectId">

@@ -3,7 +3,6 @@ import {
   IsString,
   IsUrl,
   MaxLength,
-  Matches,
   IsEnum,
   IsUUID,
 } from 'class-validator';
@@ -31,9 +30,6 @@ export class UploadDocumentDto {
 
   @IsOptional()
   @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
-  @Matches(/^https?:\/\/(drive|docs)\.google\.com\//i, {
-    message: 'externalLink must be a valid Google Drive URL',
-  })
   externalLink?: string;
 
   @IsOptional()

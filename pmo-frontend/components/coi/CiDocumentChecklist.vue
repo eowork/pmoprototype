@@ -58,7 +58,7 @@ interface ChecklistItem {
   id: string
   projectId: string
   documentTypeId: string
-  submissionStatus: 'NOT_SUBMITTED' | 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED'
+  submissionStatus: 'NOT_SUBMITTED' | 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'REVISED'
   submittedBy?: string | null
   submittedAt?: string | null
   reviewedBy?: string | null
@@ -183,6 +183,7 @@ function formatDate(iso: string): string {
 const statusOptions = [
   { title: 'Not Submitted', value: 'NOT_SUBMITTED', color: 'grey' },
   { title: 'Submitted', value: 'SUBMITTED', color: 'info' },
+  { title: 'Revised', value: 'REVISED', color: 'teal' },
   { title: 'Under Review', value: 'UNDER_REVIEW', color: 'warning' },
   { title: 'Approved', value: 'APPROVED', color: 'success' },
   { title: 'Rejected', value: 'REJECTED', color: 'error' },
@@ -453,7 +454,7 @@ defineExpose({ refresh: fetchChecklist })
         <v-expansion-panel-title>
           <div class="d-flex align-center ga-2 w-100">
             <v-icon icon="mdi-folder-outline" size="small" />
-            <span class="text-subtitle-2 font-weight-medium text-truncate">{{ g.groupLabel }}</span>
+            <span class="text-subtitle-2 font-weight-bold text-truncate">{{ g.groupLabel }}</span>
             <v-spacer />
             <v-chip
               size="x-small"
