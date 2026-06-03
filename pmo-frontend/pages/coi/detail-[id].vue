@@ -666,7 +666,30 @@ const profilePreviewDate          = ref('')   // LD-B: image taken date (preferr
 const profilePreviewUploadDate    = ref('')   // LD-B: server upload date (secondary)
 const profilePreviewUploaderName  = ref('')   // CCC-C
 const profilePreviewCategory      = ref('')   // CCC-C
+const profilePreviewIndex         = ref(0)    // DDD-B: current image index
 const profilePreviewOpen          = ref(false)
+
+// DDD-B: navigate to a specific image in carouselImages
+function openPreview(idx: number) {
+  const img = carouselImages.value[idx]
+  if (!img) return
+  profilePreviewIndex.value = idx
+  profilePreviewImg.value = img.imageUrl
+  profilePreviewTitle.value = img.caption
+  profilePreviewDate.value = img.imageTakenDate || img.uploadedAt
+  profilePreviewUploadDate.value = img.uploadedAt
+  profilePreviewUploaderName.value = (img as any).uploadedByName ?? ''
+  profilePreviewCategory.value = img.category ?? ''
+  profilePreviewOpen.value = true
+}
+function previewPrev() {
+  if (!carouselImages.value.length) return
+  openPreview((profilePreviewIndex.value - 1 + carouselImages.value.length) % carouselImages.value.length)
+}
+function previewNext() {
+  if (!carouselImages.value.length) return
+  openPreview((profilePreviewIndex.value + 1) % carouselImages.value.length)
+}
 
 // KV-D3: persist group remarks via PATCH /api/construction-projects/:id/document-remarks
 async function handleRemarksUpdate(groupCode: string, remarks: string) {
@@ -1018,14 +1041,14 @@ onMounted(() => {
               <v-card variant="outlined" class="h-100 overflow-hidden d-flex flex-column" style="min-height: 280px">
                 <v-carousel
                   v-if="carouselImages.length"
-                  height="280"
+                  height="560"
                   hide-delimiter-background
                   show-arrows="hover"
                   :continuous="false"
                   class="flex-grow-1"
                 >
                   <v-carousel-item
-                    v-for="img in carouselImages"
+                    v-for="(img, idx) in carouselImages"
                     :key="img.id"
                   >
                     <v-img
@@ -1034,7 +1057,7 @@ onMounted(() => {
                       cover
                       position="center"
                       class="cursor-zoom-in bg-grey-lighten-3"
-                      @click="profilePreviewImg = img.imageUrl; profilePreviewTitle = img.caption; profilePreviewDate = img.imageTakenDate || img.uploadedAt; profilePreviewUploadDate = img.uploadedAt; profilePreviewUploaderName = (img as any).uploadedByName ?? ''; profilePreviewCategory = img.category ?? ''; profilePreviewOpen = true"
+                      @click="openPreview(idx)"
                     >
                       <div v-if="img.caption" class="carousel-caption text-body-2 px-3 py-2">{{ img.caption }}</div>
                     </v-img>
@@ -1240,6 +1263,23 @@ onMounted(() => {
                     </template>
                     <p v-else-if="project.beneficiaries">{{ Number(project.beneficiaries).toLocaleString() }} direct beneficiaries</p>
                   </v-col>
+
+                  <!-- DDD-A: Location — elevated to Profile panel as a critical infrastructure attribute -->
+                  <v-col v-if="project.campus || project.spatialCoverage || project.municipality || project.province || project.latitude != null" cols="12">
+                    <div class="d-flex align-center ga-2 mb-2">
+                      <v-icon size="16" color="blue-grey">mdi-map-marker-outline</v-icon>
+                      <p class="text-caption text-grey font-weight-medium text-uppercase mb-0">Location</p>
+                    </div>
+                    <div class="d-flex flex-wrap ga-2">
+                      <v-chip v-if="project.campus" size="small" color="primary" variant="tonal" prepend-icon="mdi-school-outline">{{ project.campus }}</v-chip>
+                      <v-chip v-if="project.spatialCoverage" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-map">{{ project.spatialCoverage }}</v-chip>
+                      <v-chip v-if="project.municipality" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-city">{{ project.municipality }}</v-chip>
+                      <v-chip v-if="project.province" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-map-marker">{{ project.province }}</v-chip>
+                      <v-chip v-if="project.latitude != null && project.longitude != null" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-crosshairs-gps">
+                        {{ project.latitude }}, {{ project.longitude }}
+                      </v-chip>
+                    </div>
+                  </v-col>
                 </v-row>
               </v-expansion-panel-text>
             </v-expansion-panel>
@@ -1254,10 +1294,6 @@ onMounted(() => {
                 <v-row>
                   <v-col cols="12" sm="6">
                     <v-list density="compact">
-                      <v-list-item v-if="project.campus">
-                        <v-list-item-title>Campus</v-list-item-title>
-                        <v-list-item-subtitle>{{ project.campus }}</v-list-item-subtitle>
-                      </v-list-item>
                       <v-list-item v-if="project.buildingType">
                         <v-list-item-title>Building Type</v-list-item-title>
                         <v-list-item-subtitle>{{ project.buildingType }}</v-list-item-subtitle>
@@ -1269,10 +1305,6 @@ onMounted(() => {
                       <v-list-item v-if="project.numberOfFloors">
                         <v-list-item-title>Number of Floors</v-list-item-title>
                         <v-list-item-subtitle>{{ project.numberOfFloors }}</v-list-item-subtitle>
-                      </v-list-item>
-                      <v-list-item v-if="project.latitude != null && project.longitude != null">
-                        <v-list-item-title>Coordinates</v-list-item-title>
-                        <v-list-item-subtitle>{{ project.latitude }}, {{ project.longitude }}</v-list-item-subtitle>
                       </v-list-item>
                     </v-list>
                   </v-col>
@@ -1305,15 +1337,7 @@ onMounted(() => {
                     </v-list>
                   </v-col>
 
-                  <!-- MG: Location -->
-                  <v-col v-if="project.spatialCoverage || project.municipality || project.province" cols="12">
-                    <p class="text-caption text-grey font-weight-medium text-uppercase mb-1">Location</p>
-                    <div class="d-flex flex-wrap ga-2">
-                      <v-chip v-if="project.spatialCoverage" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-map">{{ project.spatialCoverage }}</v-chip>
-                      <v-chip v-if="project.municipality" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-city">{{ project.municipality }}</v-chip>
-                      <v-chip v-if="project.province" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-map-marker">{{ project.province }}</v-chip>
-                    </div>
-                  </v-col>
+                  <!-- DDD-A: Location moved to Project Profile panel -->
 
                   <!-- MH: Revision Orders -->
                   <v-col v-if="project.originalStartDate || project.revisedStartDate || project.originalCompletionDate || project.revisedCompletionDate || project.revisedProjectDuration" cols="12">
@@ -1364,13 +1388,13 @@ onMounted(() => {
                 <v-icon start size="small" icon="mdi-chart-line" />
                 Progress &amp; Reports
               </v-expansion-panel-title>
-              <div class="d-flex justify-end">
+              <v-expansion-panel-text>
+                <!-- TTT-B: PROGRESS REPORT SUMMARY -->
+                <div class="d-flex justify-end">
                   <v-btn size="small" color="info" variant="tonal" prepend-icon="mdi-chart-line" @click="activeTab = 'progress'">
                     View Progress Reports
                   </v-btn>
               </div>
-              <v-expansion-panel-text>
-                <!-- TTT-B: PROGRESS REPORT SUMMARY -->
                 <div class="text-overline text-medium-emphasis mb-2">Progress Report Summary</div>
                 <v-row dense class="mb-3">
                   <v-col cols="6" sm="3">
@@ -1420,21 +1444,7 @@ onMounted(() => {
                 </v-row>
                 <v-progress-linear v-if="prLoading" indeterminate height="2" color="blue-grey" class="mb-3" />
 
-                <!-- TTT-B: MILESTONE SUMMARY -->
-                <v-divider class="my-3" />
-                <div class="text-overline text-medium-emphasis mb-2">Milestone Summary</div>
-                <div class="d-flex flex-wrap ga-2 mb-2">
-                  <v-chip size="small" variant="tonal" color="grey-darken-1" prepend-icon="mdi-flag-outline">Total {{ milestoneSummary.total }}</v-chip>
-                  <v-chip size="small" variant="tonal" color="success" prepend-icon="mdi-check-circle">Completed {{ milestoneSummary.completed }}</v-chip>
-                  <v-chip size="small" variant="tonal" color="primary" prepend-icon="mdi-progress-clock">Ongoing {{ milestoneSummary.ongoing }}</v-chip>
-                  <v-chip size="small" variant="tonal" color="error" prepend-icon="mdi-alert-circle-outline">Delayed {{ milestoneSummary.delayed }}</v-chip>
-                </div>
-                <div v-if="milestoneSummary.upcoming" class="text-body-2 mb-2">
-                  <v-icon size="16" color="info" class="mr-1">mdi-calendar-arrow-right</v-icon>
-                  <span class="text-grey-darken-1">Next upcoming:</span>
-                  <span class="font-weight-medium ml-1">{{ milestoneSummary.upcoming.name || 'Untitled' }}</span>
-                  <span class="text-caption text-grey ml-1">({{ formatDate(milestoneSummary.upcoming.targetDate) }})</span>
-                </div>
+                <!-- DDD-C: Milestone Summary removed (redundant — full milestone view is in Progress tab) -->
 
                 <!-- TTT-B: RECENT ACTIVITY -->
                 <v-divider class="my-3" />
@@ -2280,10 +2290,17 @@ onMounted(() => {
 
     <!-- ===================== Dialogs (outside tabs) ===================== -->
 
-    <!-- LA-E: Profile image fullscreen preview with metadata -->
+    <!-- LA-E: Profile image fullscreen preview with metadata. DDD-B: prev/next navigation. -->
     <v-dialog v-model="profilePreviewOpen" max-width="960">
       <v-card>
-        <v-img :src="profilePreviewImg" contain max-height="75vh" />
+        <div class="d-flex align-center" style="background:#000">
+          <v-btn v-if="carouselImages.length > 1" icon="mdi-chevron-left" variant="text" size="large" color="white" @click="previewPrev" />
+          <v-img :src="profilePreviewImg" contain max-height="75vh" class="flex-grow-1" />
+          <v-btn v-if="carouselImages.length > 1" icon="mdi-chevron-right" variant="text" size="large" color="white" @click="previewNext" />
+        </div>
+        <div v-if="carouselImages.length > 1" class="text-caption text-center text-grey py-1">
+          {{ profilePreviewIndex + 1 }} / {{ carouselImages.length }}
+        </div>
         <v-card-text v-if="profilePreviewTitle || profilePreviewDate || profilePreviewUploadDate" class="py-2 d-flex align-center ga-3 flex-wrap">
           <div v-if="profilePreviewTitle" class="text-body-1 font-weight-medium">{{ profilePreviewTitle }}</div>
           <!-- LD-B: Taken date chip (primary) -->

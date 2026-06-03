@@ -1,8 +1,18 @@
 # PMO Dashboard — Project Context
 
 > **Governance:** ACE Framework v2.4 (Operator LTS)
-> **Last Updated:** 2026-05-28
-> **Status:** Phase III ✅ COMPLETE — COI Enterprise Refactor complete (FFF/GGG/HHH/III all done; branch: pmo-coi)
+> **Last Updated:** 2026-06-02
+> **Status:** Phase DDD ✅ COMPLETE — COI Phase 3 sprint; docs refactored to 5-artifact AI-first structure
+
+## Documentation Structure (AI-First, 2026-06-02)
+```
+docs/state.md        ← READ FIRST — current project state, blockers, constraints
+docs/plan.md         ← Active work only — pending tasks, smoke tests, candidates
+docs/research.md     ← Research findings only (R-001 through R-012)
+docs/history.md      ← Completed work archive, approved decisions, bug fixes
+docs/architecture.md ← Technical reference — stack, patterns, conventions
+```
+**AI Onboarding:** Read `docs/state.md` + `docs/plan.md` for implementation work. Others only when needed.
 
 ---
 

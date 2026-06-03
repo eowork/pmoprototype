@@ -46,6 +46,30 @@ const healthStatusLabel = computed(() => {
   return s === 'PUBLISHED' ? 'Published' : s === 'PENDING_REVIEW' ? 'Pending Review' : s === 'REJECTED' ? 'Rejected' : 'Draft'
 })
 
+// DDD-D: Stakeholder analytics — cost / snapshot computeds
+const revisedCost = computed(() => {
+  const fins = (props.project.financials || []) as any[]
+  const total = fins.reduce((s, f) => s + Number(f.appropriation ?? 0), 0)
+  return total || Number((props.project as any).contractAmount || 0)
+})
+const originalCost = computed(() => Number((props.project as any).contractAmount || 0))
+const costToDate = computed(() => Number((props.project as any).costIncurredToDate || 0))
+const remainingBalance = computed(() => revisedCost.value - costToDate.value)
+const budgetUtilPct = computed(() => revisedCost.value > 0 ? (costToDate.value / revisedCost.value) * 100 : 0)
+const projectStage = computed(() => {
+  const p = Number(props.project.physicalProgress || 0)
+  if (p === 0) return 'Not Started'
+  if (p < 25) return 'Early Stage'
+  if (p < 75) return 'In Progress'
+  if (p < 100) return 'Near Completion'
+  return 'Completed'
+})
+function fmtDate(iso?: string | null): string {
+  if (!iso) return '—'
+  try { return new Date(iso).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }) }
+  catch { return iso }
+}
+
 const milestoneCompletionRate = computed(() => {
   const ms = props.project.milestones || []
   if (!ms.length) return 0
@@ -273,7 +297,113 @@ const hasNonZeroMilestones = computed(() =>
     </template>
 
     <template v-if="!allEmpty">
-    <!-- AAA-C: Project Health Summary row -->
+    <!-- DDD-D: Stakeholder Analytics Dashboard — 4 KPI sections before existing charts -->
+
+    <!-- SECTION 1: PROJECT STATUS -->
+    <div class="text-overline text-medium-emphasis mb-2">Project Status</div>
+    <v-row dense class="mb-4">
+      <v-col cols="6" sm="3">
+        <v-card variant="tonal" color="primary" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Physical Progress</div>
+          <div class="text-h5 font-weight-bold">{{ avgPhysicalProgress.toFixed(1) }}%</div>
+          <v-progress-linear :model-value="avgPhysicalProgress" height="4" rounded class="mt-1" />
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="3">
+        <v-card variant="tonal" color="info" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Financial Progress</div>
+          <div class="text-h5 font-weight-bold">{{ (Number(props.project.financialProgress) || 0).toFixed(1) }}%</div>
+          <v-progress-linear :model-value="Number(props.project.financialProgress) || 0" height="4" color="info" rounded class="mt-1" />
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="3">
+        <v-card variant="tonal" :color="isDelayed ? 'error' : 'success'" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">{{ isDelayed ? 'Days Overdue' : 'Days Remaining' }}</div>
+          <div class="text-h5 font-weight-bold">{{ daysRemaining != null ? Math.abs(daysRemaining) : '—' }}</div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="3">
+        <v-card variant="tonal" color="secondary" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Current Stage</div>
+          <div class="text-body-1 font-weight-bold mt-1">{{ projectStage }}</div>
+          <v-chip size="x-small" :color="healthStatusColor" variant="tonal" class="mt-1">{{ healthStatusLabel }}</v-chip>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <!-- SECTION 2: PROJECT COST -->
+    <div class="text-overline text-medium-emphasis mb-2">Project Cost</div>
+    <v-row dense class="mb-4">
+      <v-col cols="6" sm="4" md="2">
+        <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Original Cost</div>
+          <div class="text-body-2 font-weight-bold">{{ fmtCurrency(originalCost) }}</div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="4" md="2">
+        <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Revised Cost</div>
+          <div class="text-body-2 font-weight-bold">{{ fmtCurrency(revisedCost) }}</div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="4" md="2">
+        <v-card variant="tonal" color="info" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Cost To Date</div>
+          <div class="text-body-2 font-weight-bold">{{ fmtCurrency(costToDate) }}</div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="4" md="2">
+        <v-card variant="tonal" :color="remainingBalance < 0 ? 'error' : 'success'" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Remaining</div>
+          <div class="text-body-2 font-weight-bold">{{ fmtCurrency(remainingBalance) }}</div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="4" md="2">
+        <v-card variant="tonal" color="warning" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Utilization</div>
+          <div class="text-body-2 font-weight-bold">{{ budgetUtilPct.toFixed(1) }}%</div>
+          <v-progress-linear :model-value="budgetUtilPct" height="4" color="warning" rounded class="mt-1" />
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <!-- SECTION 3: PROJECT DATES -->
+    <div class="text-overline text-medium-emphasis mb-2">Project Dates</div>
+    <v-row dense class="mb-4">
+      <v-col v-for="(item, i) in [
+        { label: 'Original Start', value: (props.project as any).originalStartDate },
+        { label: 'Original End', value: (props.project as any).originalCompletionDate },
+        { label: 'Revised Start', value: (props.project as any).revisedStartDate },
+        { label: 'Revised End', value: (props.project as any).revisedCompletionDate },
+      ]" :key="i" cols="6" sm="3">
+        <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">{{ item.label }}</div>
+          <div class="text-body-2 font-weight-medium">{{ item.value ? fmtDate(item.value) : '—' }}</div>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <!-- SECTION 4: PROJECT SNAPSHOT -->
+    <div class="text-overline text-medium-emphasis mb-2">Project Snapshot</div>
+    <v-row dense class="mb-4">
+      <v-col v-for="(item, i) in [
+        { label: 'Contractor', value: (props.project as any).contractor, icon: 'mdi-hard-hat' },
+        { label: 'Campus', value: props.project.campus, icon: 'mdi-school-outline' },
+        { label: 'Building Type', value: (props.project as any).buildingType, icon: 'mdi-office-building-outline' },
+        { label: 'Duration', value: (props.project as any).projectDuration, icon: 'mdi-timer-outline' },
+      ]" :key="i" cols="6" sm="3">
+        <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
+          <div class="d-flex align-center ga-1 mb-1">
+            <v-icon size="14" color="grey">{{ item.icon }}</v-icon>
+            <div class="text-caption text-grey">{{ item.label }}</div>
+          </div>
+          <div class="text-body-2 font-weight-medium">{{ item.value || '—' }}</div>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <v-divider class="mb-4" />
+    <!-- AAA-C: Project Health Summary row (retained for quick reference) -->
     <v-card variant="tonal" color="primary" class="mb-4 pa-3" rounded="lg">
       <div class="text-overline text-medium-emphasis mb-2">Project Health</div>
       <v-row dense>
