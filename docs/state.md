@@ -5,13 +5,11 @@
 
 ## Current Phase
 
-**Phase III + JJJ Planning** — ✅ Phase 1 + Phase 2 complete. Pending Phase 3 authorization.
+**Phase III + JJJ** — ✅ Phase 3 complete. Committed `0643c6c`. vue-tsc + tsc 0 new errors. No migrations.
 
-**Research delivered (R-077–R-087):** Full COI/CORE dashboard post-GGG/HHH inventory; untapped backend field audit (`by_campus.avg_progress`, `by_campus.total_contract`, `by_status.total_contract`); UO analytics endpoints data map; missing backend analytics gap analysis; HCI assessment; chart library evaluation (ApexCharts confirmed); executive KPI taxonomy; backend extension plan (`by_funding_source` + `by_contractor` additions to `getAnalyticsSummary()`).
+**III delivered:** `getAnalyticsSummary()` extended with `by_funding_source` + `by_contractor` GROUP BY queries; campus panel dual-bar (count + avg_progress); Avg Progress by Campus horizontal bar chart (purple); Budget by Campus donut + Contract by Status donut; Contractor horizontal bar (top-10, sky-blue); fundingSourceChart upgraded to prefer backend data; top-of-tab guidance banner + 4 section labels.
 
-**Plan delivered:**
-- **Phase III (COI):** 6 sub-steps — backend `getAnalyticsSummary()` extension (III-A); dual-bar campus panel (III-B); per-campus avg progress horizontal bar chart (III-C); budget by campus + contract by status donuts (III-D); contractor chart + backend funding source upgrade (III-E); analytics tab guidance banners (III-F). Zero new endpoints. One backend method extension.
-- **Phase JJJ (Core Dashboard):** 4 sub-steps — Q1–Q4 UO Accomplishment Trend area chart (JJJ-A); Q1–Q4 Financial Utilization Trend chart (JJJ-B); fiscal year watcher extended to reload charts (JJJ-C); section guidance subtitles (JJJ-D). Zero new endpoints.
+**JJJ delivered:** Q1–Q4 UO Accomplishment Trend area chart (green); Q1–Q4 Financial Utilization Trend area chart (purple); fiscal year watcher reloads all 3 UO datasets; Quick Actions subtitle; Other Modules section heading.
 
 ---
 
@@ -72,10 +70,9 @@
 
 ## Current Priorities
 
-1. **Authorize Phase III** — COI Dashboard Analytics Tier 2 (backend extension + 5 new charts). Issue `RUN_ACE PHASE 3` for III.
-2. **Authorize Phase JJJ** — CSU CORE Executive Dashboard (Q1–Q4 trend charts + guidance). Issue `RUN_ACE PHASE 3` for JJJ.
-3. **Run pending DB migrations** — 7 migrations (sdg_goals, custom_supporting_sections, war fields, mpr fields, notes_banking, concerns_list, billing fields)
-4. **Backend restart** — activates `/templates/SD_ECO_*.docx` static serving
+1. **Run pending DB migrations** — 7 migrations (sdg_goals, custom_supporting_sections, war fields, mpr fields, notes_banking, concerns_list, billing fields): `npx mikro-orm migration:up`
+2. **Backend restart** — activates `/templates/SD_ECO_*.docx` static serving + new `by_funding_source`/`by_contractor` analytics fields
+3. **Operator smoke test** — COI dashboard analytics tab (verify Contractor chart + Funding Source donut populate); CORE dashboard UO Summary (verify Q1–Q4 charts render after fiscal year select)
 
 ---
 
@@ -83,10 +80,9 @@
 
 | Blocker | Resolution |
 |---|---|
-| Phase III + JJJ await Phase 3 authorization | Issue `RUN_ACE PHASE 3` for III (COI analytics tier 2) and JJJ (CORE trend charts) |
 | 7 pending migrations | `npx mikro-orm migration:up` — sdg_goals, custom_supporting_sections, **GGG: project_notes_banking, war fields, mpr fields**, **ZZZ: concerns_list** |
 | `/templates/*.docx` 404 | Backend hard restart (`Ctrl+C` → `npm run start:dev`) |
-| Backend restart required for GGG | New DTO fields (war/mpr/notes_banking) need recompiled DTO or `forbidNonWhitelisted` rejects them |
+| Backend restart required | New analytics fields (`by_funding_source`, `by_contractor`) require restart to take effect |
 | Pre-existing ApexOptions TS2322 | Deferred — not introduced by recent work |
 
 ---
