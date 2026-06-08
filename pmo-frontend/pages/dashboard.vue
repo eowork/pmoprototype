@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useFiscalYearStore } from '~/stores/fiscalYear'
 import { storeToRefs } from 'pinia'
+import VueApexCharts from 'vue3-apexcharts'
 
 definePageMeta({
   middleware: 'auth',
@@ -69,6 +70,73 @@ async function loadUoSummary() {
   }
 }
 
+// JJJ-A: UO Q1-Q4 accomplishment trend
+const uoTrend = ref<any>(null)
+const uoTrendLoading = ref(false)
+
+async function loadUoTrend() {
+  if (!selectedFiscalYear.value) return
+  uoTrendLoading.value = true
+  try {
+    uoTrend.value = await api.get<any>(
+      `/api/university-operations/analytics/quarterly-trend?fiscal_year=${selectedFiscalYear.value}`
+    )
+  } catch {
+    uoTrend.value = null
+  } finally {
+    uoTrendLoading.value = false
+  }
+}
+
+// JJJ-B: UO Q1-Q4 financial utilization trend
+const uoFinancialTrend = ref<any>(null)
+
+async function loadUoFinancialTrend() {
+  if (!selectedFiscalYear.value) return
+  try {
+    uoFinancialTrend.value = await api.get<any>(
+      `/api/university-operations/analytics/financial-quarterly-trend?fiscal_year=${selectedFiscalYear.value}`
+    )
+  } catch {
+    uoFinancialTrend.value = null
+  }
+}
+
+const uoTrendChart = computed(() => {
+  const quarters = (uoTrend.value?.quarters || []) as Array<{ quarter: string; accomplishment_rate_pct: number | null }>
+  return {
+    series: [{ name: 'Accomplishment Rate', data: quarters.map(q => +(q.accomplishment_rate_pct ?? 0).toFixed(1)) }],
+    options: {
+      chart: { type: 'area' as const, toolbar: { show: false } },
+      xaxis: { categories: quarters.map(q => q.quarter) },
+      yaxis: { max: 100, labels: { formatter: (v: number) => `${v.toFixed(0)}%` } },
+      colors: ['#059669'],
+      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } },
+      stroke: { curve: 'smooth' as const, width: 2 },
+      markers: { size: 5 },
+      dataLabels: { enabled: true, formatter: (v: any) => `${Number(v).toFixed(1)}%` },
+      tooltip: { y: { formatter: (v: number) => `${v.toFixed(1)}%` } },
+    },
+  }
+})
+
+const uoFinancialTrendChart = computed(() => {
+  const quarters = (uoFinancialTrend.value?.quarters || []) as Array<{ quarter: string; utilization_rate: number }>
+  return {
+    series: [{ name: 'Utilization Rate', data: quarters.map(q => +Number(q.utilization_rate).toFixed(1)) }],
+    options: {
+      chart: { type: 'area' as const, toolbar: { show: false } },
+      xaxis: { categories: quarters.map(q => q.quarter) },
+      yaxis: { max: 100, labels: { formatter: (v: number) => `${v.toFixed(0)}%` } },
+      colors: ['#7c3aed'],
+      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } },
+      stroke: { curve: 'smooth' as const, width: 2 },
+      markers: { size: 5 },
+      dataLabels: { enabled: true, formatter: (v: any) => `${Number(v).toFixed(1)}%` },
+    },
+  }
+})
+
 // HHH-B: Load COI analytics summary + financial summary
 async function loadCoiAnalytics() {
   coiAnalyticsLoading.value = true
@@ -93,7 +161,14 @@ const coiCostUtilPct = computed(() => {
   return a ? Math.min((o / a) * 100, 100) : 0
 })
 
-watch(selectedFiscalYear, () => loadUoSummary(), { immediate: true })
+// JJJ-C: Reload all UO datasets on fiscal year change
+watch(selectedFiscalYear, async () => {
+  await Promise.allSettled([
+    loadUoSummary(),
+    loadUoTrend(),
+    loadUoFinancialTrend(),
+  ])
+}, { immediate: true })
 
 onMounted(async () => {
   try {
@@ -322,12 +397,31 @@ function formatCurrencyShort(amount: number): string {
         >
           No University Operations data available for the selected fiscal year.
         </v-alert>
+
+        <!-- JJJ-A: Q1-Q4 Accomplishment Trend -->
+        <template v-if="uoTrend?.quarters?.length">
+          <v-divider class="my-3" />
+          <div class="text-caption text-grey-darken-1 text-uppercase font-weight-bold mb-1">Q1–Q4 Accomplishment Trend</div>
+          <p class="text-caption text-grey mb-2">University-wide indicator accomplishment rate per quarter</p>
+          <VueApexCharts type="area" height="180"
+            :options="uoTrendChart.options" :series="uoTrendChart.series" />
+        </template>
+
+        <!-- JJJ-B: Q1-Q4 Financial Utilization Trend -->
+        <template v-if="uoFinancialTrend?.quarters?.length">
+          <v-divider class="my-3" />
+          <div class="text-caption text-grey-darken-1 text-uppercase font-weight-bold mb-1">Q1–Q4 Financial Utilization</div>
+          <p class="text-caption text-grey mb-2">Fund utilization rate per quarter — how efficiently appropriations are being obligated</p>
+          <VueApexCharts type="area" height="160"
+            :options="uoFinancialTrendChart.options" :series="uoFinancialTrendChart.series" />
+        </template>
       </template>
     </v-card>
 
     <!-- Quick Actions -->
     <v-card class="mb-6 pa-4">
-      <h2 class="text-h6 font-weight-bold mb-4">Quick Actions</h2>
+      <h2 class="text-h6 font-weight-bold mb-1">Quick Actions</h2>
+      <p class="text-caption text-grey-darken-1 mb-4">Frequently used workflows across CSU CORE modules</p>
       <v-row>
         <v-col cols="12" md="6">
           <v-btn
@@ -379,6 +473,12 @@ function formatCurrencyShort(amount: number): string {
         </v-col>
       </v-row>
     </v-card>
+
+    <!-- JJJ-D: Other Modules section heading -->
+    <div class="mb-3 mt-2" v-if="statCards.length">
+      <h2 class="text-subtitle-1 font-weight-bold">Other Modules</h2>
+      <p class="text-caption text-grey-darken-1">Navigate to other university management modules</p>
+    </div>
 
     <!-- Other Module Cards (Repair, UO, GAD) — Infrastructure shown above via mini-summary -->
     <v-row v-if="statCards.length">

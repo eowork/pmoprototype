@@ -495,9 +495,13 @@ watch(activeTab, (tab) => {
 const analyticsReady = computed(() => !!analyticsSummary.value && !!financialSummary.value)
 
 const campusBars = computed(() => {
-  const data = (analyticsSummary.value?.by_campus || []) as Array<{ campus: string; count: number }>
+  const data = (analyticsSummary.value?.by_campus || []) as Array<{ campus: string; count: number; avg_progress: number }>
   const max = Math.max(...data.map(d => d.count), 1)
-  return [...data].sort((a, b) => b.count - a.count).map(d => ({ ...d, pct: (d.count / max) * 100 }))
+  return [...data].sort((a, b) => b.count - a.count).map(d => ({
+    ...d,
+    pct: (d.count / max) * 100,
+    avg_progress: parseFloat(String(d.avg_progress)) || 0,
+  }))
 })
 
 const budgetGauge = computed(() => {
@@ -639,20 +643,115 @@ const progressDistChart = computed(() => {
   }
 })
 
+// III-E: Upgraded fundingSourceChart — prefers backend by_funding_source, falls back to client-side
 const fundingSourceChart = computed(() => {
+  const backendData = (analyticsSummary.value?.by_funding_source || []) as Array<{
+    funding_source_name: string; count: number
+  }>
+  if (backendData.length) {
+    return {
+      series: backendData.map(d => d.count),
+      options: {
+        chart: { type: 'donut' as const, toolbar: { show: false } },
+        labels: backendData.map(d => d.funding_source_name || 'Unknown'),
+        legend: { position: 'bottom' as const },
+      },
+    }
+  }
   const map: Record<string, number> = {}
-  projects.value.forEach(p => {
-    const fs = p.fundSource || 'Unknown'
-    map[fs] = (map[fs] || 0) + 1
-  })
-  const labels = Object.keys(map)
-  const series = labels.map(l => map[l])
+  projects.value.forEach(p => { const fs = p.fundSource || 'Unknown'; map[fs] = (map[fs] || 0) + 1 })
   return {
-    series,
+    series: Object.values(map),
     options: {
       chart: { type: 'donut' as const, toolbar: { show: false } },
-      labels,
+      labels: Object.keys(map),
       legend: { position: 'bottom' as const },
+    },
+  }
+})
+
+// III-C: Per-campus avg progress horizontal bar chart
+const campusProgressChart = computed(() => {
+  const data = (analyticsSummary.value?.by_campus || []) as Array<{ campus: string; avg_progress: number }>
+  const sorted = [...data].sort((a, b) =>
+    (parseFloat(String(b.avg_progress)) || 0) - (parseFloat(String(a.avg_progress)) || 0)
+  )
+  return {
+    series: [{ name: 'Avg Progress %', data: sorted.map(d => +((parseFloat(String(d.avg_progress)) || 0).toFixed(1))) }],
+    options: {
+      chart: { type: 'bar' as const, toolbar: { show: false } },
+      plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
+      xaxis: { max: 100, labels: { formatter: (v: string) => `${v}%` } },
+      yaxis: { categories: sorted.map(d => d.campus || 'Unknown') },
+      colors: ['#7c3aed'],
+      dataLabels: { enabled: true, formatter: (v: any) => `${Number(v).toFixed(1)}%` },
+    },
+  }
+})
+
+// III-D: Budget by campus donut
+const budgetByCampusChart = computed(() => {
+  const data = (analyticsSummary.value?.by_campus || []) as Array<{ campus: string; total_contract: number }>
+  const fmt = (v: number) => {
+    if (v >= 1_000_000_000) return `₱${(v / 1_000_000_000).toFixed(1)}B`
+    if (v >= 1_000_000) return `₱${(v / 1_000_000).toFixed(1)}M`
+    return `₱${v.toLocaleString()}`
+  }
+  return {
+    series: data.map(d => parseFloat(String(d.total_contract || 0))),
+    options: {
+      chart: { type: 'donut' as const, toolbar: { show: false } },
+      labels: data.map(d => d.campus || 'Unknown'),
+      legend: { position: 'bottom' as const },
+      tooltip: { y: { formatter: fmt } },
+    },
+  }
+})
+
+// III-D: Contract value by status donut
+const contractByStatusChart = computed(() => {
+  const data = (analyticsSummary.value?.by_status || []) as Array<{ status: string; total_contract: number }>
+  const STATUS_COLORS: Record<string, string> = {
+    ONGOING: '#3b82f6', COMPLETE: '#059669', COMPLETED: '#059669',
+    ON_HOLD: '#f59e0b', CANCELLED: '#ef4444', PROPOSAL: '#6b7280',
+  }
+  const fmt = (v: number) => {
+    if (v >= 1_000_000_000) return `₱${(v / 1_000_000_000).toFixed(1)}B`
+    if (v >= 1_000_000) return `₱${(v / 1_000_000).toFixed(1)}M`
+    return `₱${v.toLocaleString()}`
+  }
+  return {
+    series: data.map(d => parseFloat(String(d.total_contract || 0))),
+    options: {
+      chart: { type: 'donut' as const, toolbar: { show: false } },
+      labels: data.map(d => d.status),
+      colors: data.map(d => STATUS_COLORS[d.status] || '#9ca3af'),
+      legend: { position: 'bottom' as const },
+      tooltip: { y: { formatter: fmt } },
+    },
+  }
+})
+
+// III-E: Projects by contractor horizontal bar
+const contractorChart = computed(() => {
+  const backendData = (analyticsSummary.value?.by_contractor || []) as Array<{ contractor_name: string; count: number }>
+  const data = backendData.length
+    ? backendData
+    : (() => {
+        const map: Record<string, number> = {}
+        projects.value.forEach(p => { if (p.contractor) { map[p.contractor] = (map[p.contractor] || 0) + 1 } })
+        return Object.entries(map).sort(([, a], [, b]) => b - a).slice(0, 10)
+          .map(([contractor_name, count]) => ({ contractor_name, count }))
+      })()
+  const truncate = (s: string) => s.length > 28 ? s.slice(0, 26) + '…' : s
+  return {
+    series: [{ name: 'Projects', data: data.map(d => d.count) }],
+    options: {
+      chart: { type: 'bar' as const, toolbar: { show: false } },
+      plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
+      yaxis: { categories: data.map(d => truncate(d.contractor_name || '')) },
+      colors: ['#0ea5e9'],
+      dataLabels: { enabled: false },
     },
   }
 })
@@ -844,14 +943,19 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
             <div
               v-for="campus in campusBars"
               :key="campus.campus"
-              class="mb-2 cursor-pointer"
+              class="mb-3"
               style="cursor:pointer"
               @click="drillToCampus(campus.campus)"
             >
               <div class="d-flex justify-space-between text-caption mb-1">
-                <span class="text-primary">{{ campus.campus || 'Unknown' }}</span><span>{{ campus.count }}</span>
+                <span class="text-primary font-weight-medium">{{ campus.campus || 'Unknown' }}</span>
+                <span>{{ campus.count }} project{{ campus.count !== 1 ? 's' : '' }}</span>
               </div>
-              <v-progress-linear :model-value="campus.pct" height="6" rounded color="primary" />
+              <v-progress-linear :model-value="campus.pct" height="6" rounded color="primary" class="mb-1" />
+              <div class="d-flex justify-space-between text-caption mb-1" style="opacity:0.75">
+                <span>Avg Progress</span><span>{{ campus.avg_progress.toFixed(1) }}%</span>
+              </div>
+              <v-progress-linear :model-value="campus.avg_progress" height="4" rounded color="deep-purple" />
             </div>
             <div v-if="!campusBars.length" class="text-caption text-grey">No campus data.</div>
             <div v-if="campusBars.length" class="text-caption text-grey mt-2">
@@ -1390,6 +1494,12 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
         <v-btn color="primary" variant="tonal" prepend-icon="mdi-refresh" @click="fetchAnalytics">Retry</v-btn>
       </div>
       <template v-else-if="analyticsSummary">
+        <!-- III-F: Top-of-tab guidance banner -->
+        <v-alert type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-information-outline">
+          <strong>Portfolio Analytics</strong> — Comprehensive analytics across {{ stats.total }} infrastructure projects.
+          Charts use authoritative DB aggregates from the analytics endpoints.
+        </v-alert>
+
         <!-- Financial Hero Row -->
         <v-row class="mb-4" dense>
           <v-col cols="6" md="3">
@@ -1417,6 +1527,11 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
             </v-card>
           </v-col>
         </v-row>
+
+        <!-- III-F: Status & Campus Distribution section label -->
+        <div class="text-caption text-grey-darken-1 font-weight-bold text-uppercase mt-4 mb-2">
+          <v-icon size="14" class="mr-1">mdi-chart-pie</v-icon> Status &amp; Campus Distribution
+        </div>
 
         <!-- Charts Row -->
         <v-row>
@@ -1448,42 +1563,86 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
           </v-col>
         </v-row>
 
-        <!-- GGG-D: Physical Progress Distribution + Funding Source Distribution -->
-        <v-row class="mt-4">
-          <v-col cols="12" md="7">
+        <!-- III-F: Physical Accomplishment Analytics section label -->
+        <div class="text-caption text-grey-darken-1 font-weight-bold text-uppercase mt-4 mb-2">
+          <v-icon size="14" class="mr-1">mdi-chart-bar</v-icon> Physical Accomplishment Analytics
+        </div>
+
+        <!-- Physical Progress Distribution (full-width) -->
+        <v-row>
+          <v-col cols="12">
             <v-card class="pa-4">
               <v-card-title class="text-body-1 font-weight-bold mb-2">Physical Progress Distribution</v-card-title>
               <VueApexCharts
                 v-if="projects.length > 0"
                 type="bar"
-                height="240"
+                height="200"
                 :options="progressDistChart.options"
                 :series="progressDistChart.series"
               />
               <div v-else class="text-center py-8 text-grey">No project data</div>
             </v-card>
           </v-col>
-          <v-col cols="12" md="5">
+        </v-row>
+
+        <!-- III-F: Campus Intelligence section label -->
+        <div class="text-caption text-grey-darken-1 font-weight-bold text-uppercase mt-4 mb-2">
+          <v-icon size="14" class="mr-1">mdi-map-marker-multiple</v-icon> Campus Intelligence
+        </div>
+
+        <!-- III-C + III-D: Avg Progress by Campus + Budget by Campus -->
+        <v-row class="mt-1">
+          <v-col cols="12" md="6">
             <v-card class="pa-4">
-              <v-card-title class="text-body-1 font-weight-bold mb-2">Funding Source Distribution</v-card-title>
+              <v-card-title class="text-body-1 font-weight-bold mb-1">Avg Physical Progress by Campus</v-card-title>
+              <v-card-subtitle class="text-caption pb-2">Which campuses are most advanced in construction delivery?</v-card-subtitle>
               <VueApexCharts
-                v-if="fundingSourceChart.series.length > 0"
-                type="donut"
-                height="240"
-                :options="fundingSourceChart.options"
-                :series="fundingSourceChart.series"
+                v-if="campusProgressChart.series[0].data.length > 0"
+                type="bar"
+                height="220"
+                :options="campusProgressChart.options"
+                :series="campusProgressChart.series"
               />
-              <div v-else class="text-center py-8 text-grey">No funding source data</div>
+              <div v-else class="text-center py-4 text-grey">No campus data</div>
+            </v-card>
+          </v-col>
+          <v-col cols="12" md="6">
+            <v-card class="pa-4">
+              <v-card-title class="text-body-1 font-weight-bold mb-1">Budget Concentration by Campus</v-card-title>
+              <v-card-subtitle class="text-caption pb-2">Where is infrastructure investment concentrated?</v-card-subtitle>
+              <VueApexCharts
+                v-if="budgetByCampusChart.series.some(v => v > 0)"
+                type="donut"
+                height="220"
+                :options="budgetByCampusChart.options"
+                :series="budgetByCampusChart.series"
+              />
+              <div v-else class="text-center py-4 text-grey">No financial data</div>
             </v-card>
           </v-col>
         </v-row>
 
-        <!-- Publication Status Breakdown -->
+        <!-- III-D: Contract Value by Status -->
         <v-row class="mt-4">
-          <v-col cols="12">
+          <v-col cols="12" md="6">
             <v-card class="pa-4">
-              <v-card-title class="text-body-1 font-weight-bold mb-3">Publication Status Breakdown</v-card-title>
-              <div class="d-flex flex-wrap ga-3">
+              <v-card-title class="text-body-1 font-weight-bold mb-1">Contract Value by Status</v-card-title>
+              <v-card-subtitle class="text-caption pb-2">How much budget is allocated per project status?</v-card-subtitle>
+              <VueApexCharts
+                v-if="contractByStatusChart.series.some(v => v > 0)"
+                type="donut"
+                height="220"
+                :options="contractByStatusChart.options"
+                :series="contractByStatusChart.series"
+              />
+              <div v-else class="text-center py-4 text-grey">No data</div>
+            </v-card>
+          </v-col>
+          <v-col cols="12" md="6">
+            <v-card class="pa-4">
+              <v-card-title class="text-body-1 font-weight-bold mb-1">Publication Status Breakdown</v-card-title>
+              <v-card-subtitle class="text-caption pb-2">Review readiness across the portfolio</v-card-subtitle>
+              <div class="d-flex flex-wrap ga-3 pt-2">
                 <v-chip
                   v-for="item in analyticsSummary.by_publication_status"
                   :key="item.publication_status"
@@ -1494,6 +1653,43 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
                   {{ item.publication_status }}: {{ item.count }}
                 </v-chip>
               </div>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <!-- III-F: Partnership & Funding Analytics section label -->
+        <div class="text-caption text-grey-darken-1 font-weight-bold text-uppercase mt-4 mb-2">
+          <v-icon size="14" class="mr-1">mdi-handshake</v-icon> Partnership &amp; Funding Analytics
+        </div>
+
+        <!-- III-E: Contractor + Funding Source row -->
+        <v-row class="mt-1">
+          <v-col cols="12" md="7">
+            <v-card class="pa-4">
+              <v-card-title class="text-body-1 font-weight-bold mb-1">Projects by Contractor</v-card-title>
+              <v-card-subtitle class="text-caption pb-2">Which contractors have the most active projects?</v-card-subtitle>
+              <VueApexCharts
+                v-if="contractorChart.series[0]?.data?.length > 0"
+                type="bar"
+                height="260"
+                :options="contractorChart.options"
+                :series="contractorChart.series"
+              />
+              <div v-else class="text-center py-4 text-grey">No contractor data</div>
+            </v-card>
+          </v-col>
+          <v-col cols="12" md="5">
+            <v-card class="pa-4">
+              <v-card-title class="text-body-1 font-weight-bold mb-1">Funding Source Distribution</v-card-title>
+              <v-card-subtitle class="text-caption pb-2">How projects are distributed by funding source</v-card-subtitle>
+              <VueApexCharts
+                v-if="fundingSourceChart.series.length > 0"
+                type="donut"
+                height="260"
+                :options="fundingSourceChart.options"
+                :series="fundingSourceChart.series"
+              />
+              <div v-else class="text-center py-4 text-grey">No funding source data</div>
             </v-card>
           </v-col>
         </v-row>

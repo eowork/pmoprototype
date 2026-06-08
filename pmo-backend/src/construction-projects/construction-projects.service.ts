@@ -518,7 +518,7 @@ export class ConstructionProjectsService {
 
   async getAnalyticsSummary(): Promise<any> {
     const conn = this.em.getConnection();
-    const [statusRows, campusRows, pubRows, aggRow] = await Promise.all([
+    const [statusRows, campusRows, pubRows, aggRow, fundingSourceRows, contractorRows] = await Promise.all([
       conn.execute(
         `SELECT status, COUNT(*) as count, COALESCE(SUM(contract_amount),0) as total_contract
          FROM construction_projects WHERE deleted_at IS NULL GROUP BY status ORDER BY count DESC`,
@@ -541,6 +541,18 @@ export class ConstructionProjectsService {
                 ) as delayed_count
          FROM construction_projects WHERE deleted_at IS NULL`,
       ),
+      conn.execute(
+        `SELECT funding_source_name, COUNT(*) as count, COALESCE(SUM(contract_amount),0) as total_contract
+         FROM construction_projects
+         WHERE deleted_at IS NULL AND funding_source_name IS NOT NULL
+         GROUP BY funding_source_name ORDER BY count DESC`,
+      ),
+      conn.execute(
+        `SELECT contractor_name, COUNT(*) as count, COALESCE(SUM(contract_amount),0) as total_contract
+         FROM construction_projects
+         WHERE deleted_at IS NULL AND contractor_name IS NOT NULL
+         GROUP BY contractor_name ORDER BY count DESC LIMIT 10`,
+      ),
     ]);
     return {
       total: parseInt(aggRow[0].total, 10),
@@ -561,6 +573,16 @@ export class ConstructionProjectsService {
       by_publication_status: pubRows.map((r) => ({
         publication_status: r.publication_status,
         count: parseInt(r.count, 10),
+      })),
+      by_funding_source: fundingSourceRows.map((r) => ({
+        funding_source_name: r.funding_source_name,
+        count: parseInt(r.count, 10),
+        total_contract: parseFloat(r.total_contract),
+      })),
+      by_contractor: contractorRows.map((r) => ({
+        contractor_name: r.contractor_name,
+        count: parseInt(r.count, 10),
+        total_contract: parseFloat(r.total_contract),
       })),
     };
   }
