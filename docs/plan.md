@@ -2773,7 +2773,7 @@ onActivated(() => { fetchChecklist() })
 ---
 
 ## GIT-PRE-GGG: Commit All Uncommitted Work Before Dashboard Phases
-> **Status:** 🔲 REQUIRED before GGG or HHH implementation begins
+> **Status:** ✅ COMPLETE — committed `fd5877c`, pushed to `pmo-coi`
 > **Research:** R-076
 
 Stages and commits all work completed through Phase EEE that was never pushed to `pmo-coi`.
@@ -2811,7 +2811,7 @@ git push origin pmo-coi
 ---
 
 ## PHASE GGG — COI Infrastructure Portfolio Dashboard Modernization
-> **Status:** 🔲 PENDING AUTHORIZATION
+> **Status:** ✅ COMPLETE — Phase 3 implemented 2026-06-08. vue-tsc 0 new errors.
 > **Research:** R-067, R-068, R-069, R-071, R-073, R-074, R-075, R-076 (research.md)
 > **File:** `pmo-frontend/pages/coi/index.vue`
 > **Scope:** Refactor COI index into a true Infrastructure Portfolio Dashboard — add Quick Actions, expand KPI row, enhance Analytics tab, add Executive Monitoring panel, wire interactive chart drill-down. NO new backend endpoints. Zero API-breaking changes. All existing list/filter/CRUD functionality preserved.
@@ -3441,7 +3441,7 @@ Place this inside the hero strip card, below the campus bars `v-card` and the st
 ---
 
 ## PHASE HHH — CSU CORE Executive Dashboard Modernization
-> **Status:** 🔲 PENDING AUTHORIZATION
+> **Status:** ✅ COMPLETE — Phase 3 implemented 2026-06-08. vue-tsc 0 new errors.
 > **Research:** R-070, R-072, R-073 (research.md)
 > **File:** `pmo-frontend/pages/dashboard.vue`, `pmo-frontend/components/AdminKpiRow.vue`
 > **Scope:** Refactor CSU CORE dashboard from navigation hub into an Executive Command Center. Replace redundant full-list fetches with analytics endpoint. Add cross-module analytics, executive monitoring, and guidance banners. Contractor-specific view preserved.

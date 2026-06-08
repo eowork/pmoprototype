@@ -1,13 +1,15 @@
 # PMO Dashboard — Project State
-> **Last Updated:** 2026-06-04 | **Branch:** `pmo-coi` | **Governance:** ACE v2.4
+> **Last Updated:** 2026-06-08 | **Branch:** `pmo-coi` | **Governance:** ACE v2.4
 
 ---
 
 ## Current Phase
 
-**Phase EEE** — ✅ Phase 3 complete (not yet committed). vue-tsc + tsc 0 new errors. 1 backend fix. No migrations.
+**Phase GGG + HHH** — ✅ Phase 3 complete (not yet committed). vue-tsc + tsc 0 new errors. No migrations. No backend changes.
 
-**EEE delivered:** Compliance scorecard (group-level bars replace status donut); KY-B1 backend fix (risk register and Others tab arrays can now be cleared); Readiness Documents balanced layout; git commit message standard documented.
+**GGG delivered:** COI Infrastructure Portfolio Dashboard — 8-card KPI row (added On Hold + Cost Utilized); Quick Actions strip; Executive Monitoring panel (Upcoming Completions + Slow-Moving Projects); Physical Progress Distribution bar chart + Funding Source donut chart in Analytics tab; label corrections (Budget Utilization→Cost Utilization, Obligation→Cost Incurred, removed duplicate Disbursement card); interactive chart drill-down (click campus bar/status chip → auto-filter Projects tab).
+
+**HHH delivered:** CSU CORE Executive Dashboard — AdminKpiRow refactored to single analytics/summary call (Infrastructure total, Delayed, Pending Reviews, UO Compliance); Infrastructure Portfolio mini-summary card on dashboard (4 metrics + cost utilization bar, click-to-navigate); dismissible context banner; restructured page sections (Banner → AdminKpiRow → Infrastructure → UO → Quick Actions → Modules); UO Summary always visible for non-contractors; Infrastructure removed from redundant module cards row.
 
 ---
 
@@ -58,12 +60,10 @@
 
 ## Current Priorities
 
-1. **Git backup** — commit DDD/EEE changes to `pmo-coi`
+1. **Commit GGG + HHH** — commit dashboard changes to `pmo-coi` and push
 2. **Run pending DB migrations** — 7 migrations (sdg_goals, custom_supporting_sections, war fields, mpr fields, notes_banking, concerns_list, billing fields)
 3. **Backend restart** — activates `/templates/SD_ECO_*.docx` static serving
 4. **Implement Phase FFF** — DTO persistence fix + compliance donut (already planned, pending Phase 3 auth)
-5. **Phase GGG auth** — COI Infrastructure Portfolio Dashboard modernization (Phase 1+2 complete — awaiting RUN_ACE for GGG)
-6. **Phase HHH auth** — CSU CORE Executive Dashboard modernization (Phase 1+2 complete — awaiting RUN_ACE for HHH)
 
 ---
 
@@ -71,7 +71,7 @@
 
 | Blocker | Resolution |
 |---|---|
-| Uncommitted work (DDD/EEE/FFF/GGG/ZZZ) | `git add ... && git commit && git push origin pmo-coi` |
+| Uncommitted GGG + HHH dashboard work | `git add ... && git commit && git push origin pmo-coi` |
 | 7 pending migrations | `npx mikro-orm migration:up` — sdg_goals, custom_supporting_sections, **GGG: project_notes_banking, war fields, mpr fields**, **ZZZ: concerns_list** |
 | `/templates/*.docx` 404 | Backend hard restart (`Ctrl+C` → `npm run start:dev`) |
 | Backend restart required for GGG | New DTO fields (war/mpr/notes_banking) need recompiled DTO or `forbidNonWhitelisted` rejects them |

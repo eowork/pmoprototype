@@ -6,51 +6,29 @@ const props = defineProps<Props>()
 
 const api = useApi()
 
-const totalProjects = ref<number | null>(null)
-const pendingReviews = ref<number | null>(null)
-const activeContractors = ref<number | null>(null)
+const coiTotal = ref<number | null>(null)
+const coiDelayed = ref<number | null>(null)
+const coiPendingReviews = ref<number | null>(null)
 const quarterlyCompliance = ref<number | null>(null)
 
-const loadingProjects = ref(true)
-const loadingPending = ref(true)
-const loadingContractors = ref(true)
+const loadingCoi = ref(true)
 const loadingCompliance = ref(true)
 
-async function loadProjects() {
-  loadingProjects.value = true
+async function loadCoiSummary() {
+  loadingCoi.value = true
   try {
-    const res = await api.get<{ data: unknown[] }>('/api/construction-projects')
-    totalProjects.value = res.data?.length ?? 0
+    const res = await api.get<any>('/api/construction-projects/analytics/summary')
+    coiTotal.value = res.total ?? 0
+    coiDelayed.value = res.delayed_count ?? 0
+    const pubStatus = (res.by_publication_status || []) as Array<{ publication_status: string; count: number }>
+    const pending = pubStatus.find(p => p.publication_status === 'PENDING_REVIEW')
+    coiPendingReviews.value = pending ? Number(pending.count) : 0
   } catch {
-    totalProjects.value = 0
+    coiTotal.value = 0
+    coiDelayed.value = 0
+    coiPendingReviews.value = 0
   } finally {
-    loadingProjects.value = false
-  }
-}
-
-async function loadPending() {
-  loadingPending.value = true
-  try {
-    const res = await api.get<{ data: unknown[] }>(
-      '/api/construction-projects?publication_status=PENDING_REVIEW',
-    )
-    pendingReviews.value = res.data?.length ?? 0
-  } catch {
-    pendingReviews.value = 0
-  } finally {
-    loadingPending.value = false
-  }
-}
-
-async function loadContractors() {
-  loadingContractors.value = true
-  try {
-    const res = await api.get<{ data: unknown[] }>('/api/contractors')
-    activeContractors.value = res.data?.length ?? 0
-  } catch {
-    activeContractors.value = 0
-  } finally {
-    loadingContractors.value = false
+    loadingCoi.value = false
   }
 }
 
@@ -79,9 +57,7 @@ async function loadCompliance() {
 }
 
 onMounted(() => {
-  loadProjects()
-  loadPending()
-  loadContractors()
+  loadCoiSummary()
   loadCompliance()
 })
 
@@ -90,34 +66,38 @@ watch(() => props.selectedFiscalYear, () => loadCompliance())
 const tiles = computed(() => [
   {
     key: 'total',
-    label: 'Total Projects',
-    icon: 'mdi-clipboard-list-outline',
-    value: totalProjects.value,
-    loading: loadingProjects.value,
+    label: 'Infrastructure Projects',
+    icon: 'mdi-office-building',
+    value: coiTotal.value,
+    loading: loadingCoi.value,
+    color: 'primary',
+    suffix: '',
+  },
+  {
+    key: 'delayed',
+    label: 'Delayed Projects',
+    icon: 'mdi-alert-decagram',
+    value: coiDelayed.value,
+    loading: loadingCoi.value,
+    color: 'error',
     suffix: '',
   },
   {
     key: 'pending',
     label: 'Pending Reviews',
     icon: 'mdi-clipboard-clock-outline',
-    value: pendingReviews.value,
-    loading: loadingPending.value,
-    suffix: '',
-  },
-  {
-    key: 'contractors',
-    label: 'Active Contractors',
-    icon: 'mdi-account-hard-hat',
-    value: activeContractors.value,
-    loading: loadingContractors.value,
+    value: coiPendingReviews.value,
+    loading: loadingCoi.value,
+    color: 'warning',
     suffix: '',
   },
   {
     key: 'compliance',
-    label: 'Quarterly Compliance',
+    label: 'UO Compliance Rate',
     icon: 'mdi-check-decagram-outline',
     value: quarterlyCompliance.value != null ? quarterlyCompliance.value.toFixed(1) : 'N/A',
     loading: loadingCompliance.value,
+    color: 'success',
     suffix: quarterlyCompliance.value != null ? '%' : '',
   },
 ])
@@ -132,14 +112,14 @@ const tiles = computed(() => [
       sm="6"
       lg="3"
     >
-      <v-card class="pa-4" variant="elevated">
+      <v-card :color="tile.color" variant="tonal" class="pa-4">
         <div class="d-flex align-center">
-          <v-avatar color="figma-accent" size="44" variant="tonal" class="mr-3">
+          <v-avatar :color="tile.color" size="44" variant="tonal" class="mr-3">
             <v-icon :icon="tile.icon" />
           </v-avatar>
           <div>
-            <p class="text-caption text-figma-muted mb-1">{{ tile.label }}</p>
-            <p class="text-h5 font-weight-bold text-figma-primary">
+            <p class="text-caption font-weight-medium mb-1">{{ tile.label }}</p>
+            <p class="text-h5 font-weight-bold">
               <v-progress-circular
                 v-if="tile.loading"
                 :size="20"

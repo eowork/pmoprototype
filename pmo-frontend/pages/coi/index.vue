@@ -324,8 +324,10 @@ const stats = ref({
   total: 0,
   ongoing: 0,
   completed: 0,
+  onHold: 0,
   pendingReview: 0,
   totalContractValue: 0,
+  costUtilized: 0,
   avgProgress: 0,
 })
 
@@ -341,6 +343,7 @@ function computeStats(projectList: UIProject[]) {
     const s = (p.status || '').toUpperCase()
     return s === 'COMPLETE' || s === 'COMPLETED'
   }).length
+  stats.value.onHold = projectList.filter(p => (p.status || '').toUpperCase() === 'ON_HOLD').length
   stats.value.pendingReview = projectList.filter(p => p.publicationStatus === 'PENDING_REVIEW').length
   stats.value.totalContractValue = projectList.reduce((sum, p) => sum + (p.totalContractAmount || 0), 0)
   stats.value.avgProgress = projectList.length > 0
@@ -359,7 +362,9 @@ function syncStatsFromAnalytics() {
   stats.value.total = a.total ?? projects.value.length
   stats.value.ongoing = findCount('ONGOING')
   stats.value.completed = findCount('COMPLETE', 'COMPLETED')
+  stats.value.onHold = findCount('ON_HOLD')
   stats.value.totalContractValue = a.total_contract_value ?? 0
+  stats.value.costUtilized = financialSummary.value?.total_obligation ?? 0
   stats.value.avgProgress = a.avg_progress ?? 0
   // pendingReview stays client-derived (publication_status, not in summary status dist)
   stats.value.pendingReview = projects.value.filter(p => p.publicationStatus === 'PENDING_REVIEW').length
@@ -516,6 +521,35 @@ const attentionItems = computed(() =>
   }).slice(0, ATTN_LIMIT),
 )
 
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+const upcomingCompletions = computed(() => {
+  const now = new Date()
+  const cutoff = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
+  return projects.value.filter(p => {
+    if ((p.status || '').toUpperCase() !== 'ONGOING') return false
+    const end = p.revisedCompletionDate || p.endDate
+    if (!end) return false
+    const d = new Date(end)
+    return !Number.isNaN(d.getTime()) && d >= now && d <= cutoff
+  }).sort((a, b) => {
+    const da = new Date(a.revisedCompletionDate || a.endDate || '').getTime()
+    const db = new Date(b.revisedCompletionDate || b.endDate || '').getTime()
+    return da - db
+  }).slice(0, 5)
+})
+
+const slowMovingProjects = computed(() =>
+  projects.value.filter(p =>
+    (p.status || '').toUpperCase() === 'ONGOING' && (Number(p.physicalAccomplishment) || 0) < 25,
+  ).sort((a, b) => (Number(a.physicalAccomplishment) || 0) - (Number(b.physicalAccomplishment) || 0))
+    .slice(0, 5),
+)
+
 const statusPips = computed(() =>
   (analyticsSummary.value?.by_status || []).map((s: any) => ({
     status: s.status as string,
@@ -527,7 +561,16 @@ const statusPips = computed(() =>
 )
 
 const statusChartOptions = computed(() => ({
-  chart: { type: 'donut' as const, toolbar: { show: false } },
+  chart: {
+    type: 'donut' as const,
+    toolbar: { show: false },
+    events: {
+      dataPointSelection: (_e: any, _ctx: any, config: any) => {
+        const status = (analyticsSummary.value?.by_status || [])[config.dataPointIndex]?.status
+        if (status) drillToStatus(status)
+      },
+    },
+  },
   labels: (analyticsSummary.value?.by_status || []).map((s: any) => s.status),
   legend: { position: 'bottom' as const },
   colors: ['#059669', '#3b82f6', '#f59e0b', '#ef4444', '#6b7280'],
@@ -538,7 +581,16 @@ const statusChartSeries = computed(() =>
 )
 
 const campusChartOptions = computed(() => ({
-  chart: { type: 'bar' as const, toolbar: { show: false } },
+  chart: {
+    type: 'bar' as const,
+    toolbar: { show: false },
+    events: {
+      dataPointSelection: (_e: any, _ctx: any, config: any) => {
+        const campus = (analyticsSummary.value?.by_campus || [])[config.dataPointIndex]?.campus
+        if (campus) drillToCampus(campus)
+      },
+    },
+  },
   xaxis: { categories: (analyticsSummary.value?.by_campus || []).map((c: any) => c.campus || 'Unknown') },
   plotOptions: { bar: { borderRadius: 4, columnWidth: '50%' } },
   colors: ['#059669'],
@@ -555,6 +607,55 @@ function formatCurrencyShort(amount: number): string {
   if (amount >= 1_000_000) return `₱${(amount / 1_000_000).toFixed(1)}M`
   return `₱${amount.toLocaleString()}`
 }
+
+function drillToCampus(campus: string) {
+  filterCampus.value = campus?.toUpperCase() || ''
+  activeTab.value = 'projects'
+}
+
+function drillToStatus(status: string) {
+  filterStatus.value = status?.toUpperCase() || ''
+  activeTab.value = 'projects'
+}
+
+const progressDistChart = computed(() => {
+  const buckets = [0, 0, 0, 0]
+  projects.value.forEach(p => {
+    const pct = Number(p.physicalAccomplishment) || 0
+    if (pct < 25) buckets[0]++
+    else if (pct < 50) buckets[1]++
+    else if (pct < 75) buckets[2]++
+    else buckets[3]++
+  })
+  return {
+    series: [{ name: 'Projects', data: buckets }],
+    options: {
+      chart: { type: 'bar' as const, toolbar: { show: false } },
+      xaxis: { categories: ['0–24%', '25–49%', '50–74%', '75–100%'] },
+      plotOptions: { bar: { borderRadius: 4, columnWidth: '55%' } },
+      colors: ['#f59e0b'],
+      dataLabels: { enabled: true },
+    },
+  }
+})
+
+const fundingSourceChart = computed(() => {
+  const map: Record<string, number> = {}
+  projects.value.forEach(p => {
+    const fs = p.fundSource || 'Unknown'
+    map[fs] = (map[fs] || 0) + 1
+  })
+  const labels = Object.keys(map)
+  const series = labels.map(l => map[l])
+  return {
+    series,
+    options: {
+      chart: { type: 'donut' as const, toolbar: { show: false } },
+      labels,
+      legend: { position: 'bottom' as const },
+    },
+  }
+})
 
 onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
 </script>
@@ -587,9 +688,22 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
     <!-- Projects Tab -->
     <v-window-item value="projects">
 
-    <!-- KPI Stats Panel (III-D: removed Total Projects, added Avg Progress; typography uplifted) -->
+    <!-- GGG-B: Quick Actions strip -->
+    <v-row dense class="mb-3">
+      <v-col cols="12" class="d-flex flex-wrap ga-2">
+        <v-btn v-if="canAdd('coi')" color="primary" prepend-icon="mdi-plus" size="small" @click="createProject">New Project</v-btn>
+        <v-btn color="warning" variant="tonal" prepend-icon="mdi-clipboard-check-outline" size="small" @click="filterStatus = 'PENDING_REVIEW'; activeTab = 'projects'">
+          Review Projects
+          <v-badge v-if="stats.pendingReview > 0" :content="stats.pendingReview" color="error" floating inline />
+        </v-btn>
+        <v-btn color="info" variant="tonal" prepend-icon="mdi-chart-bar" size="small" @click="activeTab = 'analytics'">Portfolio Analytics</v-btn>
+        <v-btn color="grey-darken-1" variant="tonal" prepend-icon="mdi-earth" size="small" :to="'/coi/public'">Public View</v-btn>
+      </v-col>
+    </v-row>
+
+    <!-- KPI Stats Panel — 8 cards × md="3" (4 per row on md+) -->
     <v-row class="mb-3" dense>
-      <v-col cols="6" sm="4" md="2">
+      <v-col cols="6" sm="4" md="3">
         <v-card color="success" variant="tonal" class="pa-3 d-flex align-center ga-3">
           <v-icon icon="mdi-check-circle" size="32" />
           <div>
@@ -598,7 +712,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
           </div>
         </v-card>
       </v-col>
-      <v-col cols="6" sm="4" md="2">
+      <v-col cols="6" sm="4" md="3">
         <v-card color="info" variant="tonal" class="pa-3 d-flex align-center ga-3">
           <v-icon icon="mdi-progress-clock" size="32" />
           <div>
@@ -607,7 +721,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
           </div>
         </v-card>
       </v-col>
-      <v-col cols="6" sm="4" md="2">
+      <v-col cols="6" sm="4" md="3">
         <v-card color="error" variant="tonal" class="pa-3 d-flex align-center ga-3">
           <v-icon icon="mdi-alert-decagram" size="32" />
           <div>
@@ -616,7 +730,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
           </div>
         </v-card>
       </v-col>
-      <v-col cols="6" sm="4" md="2">
+      <v-col cols="6" sm="4" md="3">
         <v-card color="warning" variant="tonal" class="pa-3 d-flex align-center ga-3">
           <v-icon icon="mdi-clipboard-clock" size="32" />
           <div>
@@ -625,7 +739,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
           </div>
         </v-card>
       </v-col>
-      <v-col cols="6" sm="4" md="2">
+      <v-col cols="6" sm="4" md="3">
         <v-card color="teal" variant="tonal" class="pa-3 d-flex align-center ga-3">
           <v-icon icon="mdi-cash-multiple" size="32" />
           <div>
@@ -634,12 +748,30 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
           </div>
         </v-card>
       </v-col>
-      <v-col cols="6" sm="4" md="2">
+      <v-col cols="6" sm="4" md="3">
         <v-card color="deep-purple" variant="tonal" class="pa-3 d-flex align-center ga-3">
           <v-icon icon="mdi-trending-up" size="32" />
           <div>
             <p class="text-body-2 font-weight-medium">Avg Progress</p>
             <p class="text-h5 font-weight-bold">{{ stats.avgProgress.toFixed(1) }}%</p>
+          </div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="4" md="3">
+        <v-card color="amber" variant="tonal" class="pa-3 d-flex align-center ga-3">
+          <v-icon icon="mdi-pause-circle" size="32" />
+          <div>
+            <p class="text-body-2 font-weight-medium">On Hold</p>
+            <p class="text-h4 font-weight-bold">{{ stats.onHold }}</p>
+          </div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="4" md="3">
+        <v-card color="teal-darken-1" variant="tonal" class="pa-3 d-flex align-center ga-3">
+          <v-icon icon="mdi-cash-check" size="32" />
+          <div>
+            <p class="text-body-2 font-weight-medium">Cost Utilized</p>
+            <p class="text-h6 font-weight-bold">{{ formatCurrencyShort(stats.costUtilized) }}</p>
           </div>
         </v-card>
       </v-col>
@@ -659,9 +791,20 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
             <div class="text-caption text-grey mb-1">Overall Portfolio Progress</div>
             <v-progress-linear :model-value="stats.avgProgress" height="12" rounded color="primary" />
             <div class="d-flex flex-wrap ga-1 mt-2">
-              <v-chip v-for="pip in statusPips" :key="pip.status" :color="pip.color" size="x-small" variant="tonal">
+              <v-chip
+                v-for="pip in statusPips"
+                :key="pip.status"
+                :color="pip.color"
+                size="x-small"
+                variant="tonal"
+                style="cursor:pointer"
+                @click="drillToStatus(pip.status)"
+              >
                 {{ pip.status }}: {{ pip.count }}
               </v-chip>
+            </div>
+            <div class="text-caption text-grey mt-1">
+              <v-icon size="11" class="mr-1">mdi-cursor-default-click</v-icon>Click a status to filter
             </div>
           </v-col>
           <v-col cols="12" md="3" class="d-flex justify-md-end">
@@ -679,24 +822,18 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
       <v-row dense class="mb-3">
         <v-col cols="12" md="4">
           <v-card variant="outlined" class="h-100 pa-3">
-            <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">Budget Utilization</div>
+            <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">Cost Utilization</div>
             <div class="mb-2">
               <div class="d-flex justify-space-between text-caption mb-1">
                 <span>Appropriation</span><span>{{ formatCurrencyShort(budgetGauge.appropriation) }}</span>
               </div>
               <v-progress-linear :model-value="100" height="8" rounded color="teal" />
             </div>
-            <div class="mb-2">
-              <div class="d-flex justify-space-between text-caption mb-1">
-                <span>Obligation</span><span>{{ budgetGauge.obligationPct.toFixed(1) }}%</span>
-              </div>
-              <v-progress-linear :model-value="budgetGauge.obligationPct" height="8" rounded color="info" />
-            </div>
             <div>
               <div class="d-flex justify-space-between text-caption mb-1">
-                <span>Disbursement</span><span>{{ budgetGauge.disbursementPct.toFixed(1) }}%</span>
+                <span>Cost Incurred</span><span>{{ budgetGauge.obligationPct.toFixed(1) }}%</span>
               </div>
-              <v-progress-linear :model-value="budgetGauge.disbursementPct" height="8" rounded color="success" />
+              <v-progress-linear :model-value="budgetGauge.obligationPct" height="8" rounded color="info" />
             </div>
           </v-card>
         </v-col>
@@ -704,13 +841,22 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
         <v-col cols="12" md="4">
           <v-card variant="outlined" class="h-100 pa-3">
             <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">Projects by Campus</div>
-            <div v-for="campus in campusBars" :key="campus.campus" class="mb-2">
+            <div
+              v-for="campus in campusBars"
+              :key="campus.campus"
+              class="mb-2 cursor-pointer"
+              style="cursor:pointer"
+              @click="drillToCampus(campus.campus)"
+            >
               <div class="d-flex justify-space-between text-caption mb-1">
-                <span>{{ campus.campus || 'Unknown' }}</span><span>{{ campus.count }}</span>
+                <span class="text-primary">{{ campus.campus || 'Unknown' }}</span><span>{{ campus.count }}</span>
               </div>
               <v-progress-linear :model-value="campus.pct" height="6" rounded color="primary" />
             </div>
             <div v-if="!campusBars.length" class="text-caption text-grey">No campus data.</div>
+            <div v-if="campusBars.length" class="text-caption text-grey mt-2">
+              <v-icon size="12" class="mr-1">mdi-cursor-default-click</v-icon>Click to filter projects
+            </div>
           </v-card>
         </v-col>
 
@@ -731,6 +877,53 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
                   <v-chip v-if="p.publicationStatus === 'REJECTED'" size="x-small" color="error" variant="tonal">Rejected</v-chip>
                   <v-chip v-else-if="p.publicationStatus === 'PENDING_REVIEW'" size="x-small" color="warning" variant="tonal">Pending</v-chip>
                   <v-chip v-else size="x-small" color="orange" variant="tonal">Delayed</v-chip>
+                </v-list-item-subtitle>
+              </v-list-item>
+            </v-list>
+          </v-card>
+        </v-col>
+      </v-row>
+      <!-- GGG-C: Executive Monitoring — Upcoming Completions + Slow-Moving Projects -->
+      <v-row dense class="mb-3">
+        <v-col cols="12" md="6">
+          <v-card variant="outlined" class="h-100 pa-3">
+            <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">
+              <v-icon icon="mdi-calendar-clock" size="small" color="info" class="mr-1" />Completing in 30 Days
+            </div>
+            <div v-if="!upcomingCompletions.length" class="text-caption text-grey py-2">No projects completing in the next 30 days.</div>
+            <v-list v-else density="compact" class="pa-0">
+              <v-list-item
+                v-for="p in upcomingCompletions"
+                :key="p.id"
+                class="px-0 cursor-pointer"
+                @click="router.push(`/coi/detail-${p.id}`)"
+              >
+                <v-list-item-title class="text-caption font-weight-medium text-truncate">{{ p.projectName }}</v-list-item-title>
+                <v-list-item-subtitle class="text-caption text-grey">
+                  Due {{ formatDate(p.revisedCompletionDate || p.endDate) }} · {{ (Number(p.physicalAccomplishment) || 0).toFixed(0) }}% complete
+                </v-list-item-subtitle>
+              </v-list-item>
+            </v-list>
+          </v-card>
+        </v-col>
+        <v-col cols="12" md="6">
+          <v-card variant="outlined" class="h-100 pa-3">
+            <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">
+              <v-icon icon="mdi-turtle" size="small" color="warning" class="mr-1" />Slow-Moving Projects
+              <span class="font-weight-regular text-lowercase"> (ongoing, &lt;25%)</span>
+            </div>
+            <div v-if="!slowMovingProjects.length" class="text-caption text-grey py-2">No slow-moving projects.</div>
+            <v-list v-else density="compact" class="pa-0">
+              <v-list-item
+                v-for="p in slowMovingProjects"
+                :key="p.id"
+                class="px-0 cursor-pointer"
+                @click="router.push(`/coi/detail-${p.id}`)"
+              >
+                <v-list-item-title class="text-caption font-weight-medium text-truncate">{{ p.projectName }}</v-list-item-title>
+                <v-list-item-subtitle class="d-flex align-center ga-2 mt-0">
+                  <v-progress-linear :model-value="Number(p.physicalAccomplishment) || 0" color="warning" height="4" rounded style="max-width:80px" />
+                  <span class="text-caption text-warning">{{ (Number(p.physicalAccomplishment) || 0).toFixed(0) }}%</span>
                 </v-list-item-subtitle>
               </v-list-item>
             </v-list>
@@ -1207,14 +1400,14 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
           </v-col>
           <v-col cols="6" md="3">
             <v-card color="info" variant="tonal" class="pa-4">
-              <p class="text-caption">Total Obligation</p>
+              <p class="text-caption">Cost Incurred</p>
               <p class="text-h5 font-weight-bold">{{ formatCurrencyShort(financialSummary?.total_obligation || 0) }}</p>
             </v-card>
           </v-col>
           <v-col cols="6" md="3">
-            <v-card color="success" variant="tonal" class="pa-4">
-              <p class="text-caption">Total Disbursement</p>
-              <p class="text-h5 font-weight-bold">{{ formatCurrencyShort(financialSummary?.total_disbursement || 0) }}</p>
+            <v-card color="deep-purple" variant="tonal" class="pa-4">
+              <p class="text-caption">Avg Progress</p>
+              <p class="text-h5 font-weight-bold">{{ stats.avgProgress.toFixed(1) }}%</p>
             </v-card>
           </v-col>
           <v-col cols="6" md="3">
@@ -1251,6 +1444,36 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
                 :series="campusChartSeries"
               />
               <div v-else class="text-center py-8 text-grey">No campus data</div>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <!-- GGG-D: Physical Progress Distribution + Funding Source Distribution -->
+        <v-row class="mt-4">
+          <v-col cols="12" md="7">
+            <v-card class="pa-4">
+              <v-card-title class="text-body-1 font-weight-bold mb-2">Physical Progress Distribution</v-card-title>
+              <VueApexCharts
+                v-if="projects.length > 0"
+                type="bar"
+                height="240"
+                :options="progressDistChart.options"
+                :series="progressDistChart.series"
+              />
+              <div v-else class="text-center py-8 text-grey">No project data</div>
+            </v-card>
+          </v-col>
+          <v-col cols="12" md="5">
+            <v-card class="pa-4">
+              <v-card-title class="text-body-1 font-weight-bold mb-2">Funding Source Distribution</v-card-title>
+              <VueApexCharts
+                v-if="fundingSourceChart.series.length > 0"
+                type="donut"
+                height="240"
+                :options="fundingSourceChart.options"
+                :series="fundingSourceChart.series"
+              />
+              <div v-else class="text-center py-8 text-grey">No funding source data</div>
             </v-card>
           </v-col>
         </v-row>
