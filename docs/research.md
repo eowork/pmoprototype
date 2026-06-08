@@ -1,6 +1,6 @@
 # PMO Dashboard — Research Repository
 > Research findings only. Not plans, not decisions, not history.
-> **Last Updated:** 2026-06-02 | **Governance:** ACE v2.4
+> **Last Updated:** 2026-06-08 | **Governance:** ACE v2.4
 
 ---
 
@@ -2061,3 +2061,392 @@ function drillToStatus(status: string) {
 - `docs/guides/Artifacts.txt` (new guide file)
 
 **Recommendation:** Stage all modified tracked + relevant untracked files → single commit → push `pmo-coi`.
+
+---
+
+## Dashboard Modernization Research — Phase III/JJJ Brief (2026-06-08)
+
+### R-077: COI Dashboard — Post-GGG Implementation Inventory
+
+**Topic:** What GGG delivered vs what the Phase III/JJJ brief still requires
+
+**Delivered by GGG (commit 324f217):**
+- 8 KPI stat cards: Completed, Ongoing, Delayed, On Hold, Pending Review, Total Budget, Avg Progress, Cost Utilized — all sourced from `analytics/summary` + `analytics/financial-summary`
+- Quick Actions strip (New Project, Review Projects w/ badge, Portfolio Analytics, Public View)
+- Hero strip: Portfolio Budget, Overall Progress bar, status pips (clickable → filter)
+- Cost Utilization panel: Appropriation + Cost Incurred progress bars
+- Projects by Campus panel: clickable bars → drill to Projects tab with campus filter
+- Needs Attention list (delayed + rejected + pending-review projects)
+- Upcoming Completions panel (ONGOING within 30-day window)
+- Slow-Moving Projects panel (ONGOING, <25%)
+- Analytics tab: Financial hero (4 KPIs), Status donut (clickable), Campus bar chart (clickable + `dataPointSelection`), Physical Progress Distribution bar (4 buckets, client-side), Funding Source donut (client-side from `p.fundSource`), Publication Status chips
+
+**Still absent (required by brief):**
+- Per-campus average progress chart (backend field `by_campus[].avg_progress` available but unused)
+- Per-campus contract value breakdown chart (`by_campus[].total_contract` available but unused)
+- Per-status contract distribution chart (`by_status[].total_contract` available but unused)
+- By-contractor analytics (NO backend endpoint — requires new endpoint)
+- By-year analytics (NO backend endpoint — requires new backend)
+- Completion forecast (predictive — NO backend logic)
+- Milestone completion rates (milestone data not aggregated at index level)
+- Section-level guidance banners in Analytics tab
+- Financial Analytics section (dedicated section with area/trend chart)
+- `projects_with_financials` data completeness indicator
+
+**Conclusion:** Sections 1 (Snapshot) and 5 (Attention) are complete. Sections 2, 3, 4 partially done. Priority gaps: per-campus analytics from existing untapped backend fields.
+
+---
+
+### R-078: CSU CORE Dashboard — Post-HHH Implementation Inventory
+
+**Topic:** What HHH delivered vs what the Phase III/JJJ brief still requires
+
+**Delivered by HHH (commit 324f217):**
+- Dismissible context banner (localStorage-persisted)
+- AdminKpiRow: 4 colored tiles sourced from single `analytics/summary` call (Infrastructure total, Delayed, Pending Reviews, UO Compliance Rate)
+- Infrastructure Portfolio mini-summary card: Total/Ongoing/Delayed/Avg Progress + cost utilization bar + click-navigate to /coi
+- UO Summary: Physical + Financial pillar cards per fiscal year (already existing)
+- Quick Actions section
+- Module cards (Repair, UO, GAD)
+
+**Still absent (required by brief):**
+- Total Budget Portfolio in Executive Snapshot (value available from COI financial summary; already shown in Infrastructure card but not as standalone KPI)
+- System Activity feed (activity log endpoint exists; not wired on dashboard)
+- Cross-module analytics charts (no visualization layer — all numbers only)
+- UO Quarterly Trend chart (`/analytics/quarterly-trend` endpoint EXISTS; not rendered)
+- UO Financial Quarterly Trend chart (`/analytics/financial-quarterly-trend` EXISTS; not rendered)
+- Portfolio Distribution donut (cross-module: COI / UO / Repairs / GAD) — Repairs/GAD have no analytics endpoints
+- Campus Distribution chart for COI (backend data exists)
+- Budget Utilization chart (COI + UO combined)
+- Operational Intelligence section (deadline alerts, budget risks)
+- Section-level guidance banners (only top banner exists; section cards have no description)
+- Pending Reviews KPI shows in AdminKpiRow; no cross-module unified pending count
+
+**Conclusion:** Dashboard is informational but not analytical. Missing charts make it a data display page rather than an executive decision-support system. Biggest win: UO Quarterly Trend chart — one API call, high executive value.
+
+---
+
+### R-079: COI Analytics/Summary — Untapped Response Fields
+
+**Topic:** Which fields returned by `GET /api/construction-projects/analytics/summary` are currently unused in the frontend
+
+**Full response shape (from `getAnalyticsSummary()` service method):**
+```ts
+{
+  total: number,
+  total_contract_value: number,
+  avg_progress: number,
+  delayed_count: number,
+  by_status: Array<{
+    status: string,
+    count: number,
+    total_contract: number,   // ← UNTAPPED — contract value by status
+  }>,
+  by_campus: Array<{
+    campus: string,
+    count: number,
+    total_contract: number,   // ← UNTAPPED — contract value by campus
+    avg_progress: number,     // ← UNTAPPED — avg physical progress per campus
+  }>,
+  by_publication_status: Array<{
+    publication_status: string,
+    count: number,
+  }>,
+}
+```
+
+**Currently used in frontend:**
+- `total`, `avg_progress`, `delayed_count`, `total_contract_value` → KPI cards
+- `by_status[].status`, `by_status[].count` → status donut chart + pips
+- `by_campus[].campus`, `by_campus[].count` → campus bar chart + progress bars
+- `by_publication_status[]` → publication chips
+
+**Untapped (zero frontend usage):**
+- `by_campus[].avg_progress` — authoritative per-campus average physical progress (DB aggregate)
+- `by_campus[].total_contract` — total contract value per campus
+- `by_status[].total_contract` — total contract value per status
+
+**Opportunity:** All 3 untapped fields are already computed in a single existing DB query. Zero additional API calls needed. Enables: per-campus progress bars (showing % not just count), contract budget distribution by campus/status charts.
+
+---
+
+### R-080: UO Analytics Endpoints — Dashboard-Usable Data Map
+
+**Topic:** Which existing UO analytics endpoints can be surfaced on the CSU CORE dashboard without new backend work
+
+**Available endpoints (all working, all tested):**
+
+| Endpoint | Response | Dashboard use |
+|---|---|---|
+| `GET /analytics/pillar-summary?fiscal_year=` | pillars[]: accomplishment_rate_pct per pillar | Already in HHH pillar cards |
+| `GET /analytics/quarterly-trend?fiscal_year=` | quarters[]: {quarter, target_rate, actual_rate, accomplishment_rate_pct} | ✅ HIGH VALUE — Q1/Q2/Q3/Q4 trend line chart |
+| `GET /analytics/financial-pillar-summary?fiscal_year=` | pillars[]: {total_appropriation, total_obligations, total_disbursement, avg_utilization_rate} | Already in HHH pillar cards |
+| `GET /analytics/financial-quarterly-trend?fiscal_year=` | quarters[]: {quarter, total_appropriation, total_obligations, total_disbursement, utilization_rate} | ✅ HIGH VALUE — Q1–Q4 financial trend chart |
+| `GET /analytics/yearly-comparison?years=` | Multi-year pillar comparison | Future use |
+| `GET /analytics/financial-campus-breakdown?fiscal_year=` | Campus-level financial data | Future use |
+
+**Quarterly trend response shape (key for JJJ-A):**
+```ts
+quarters: Array<{
+  quarter: 'Q1' | 'Q2' | 'Q3' | 'Q4',
+  target_rate: number,
+  actual_rate: number | null,
+  accomplishment_rate_pct: number | null,  // (actual/target)*100
+}>
+```
+
+**Financial quarterly trend response shape (for JJJ-B):**
+```ts
+quarters: Array<{
+  quarter: 'Q1' | 'Q2' | 'Q3' | 'Q4',
+  total_appropriation: number,
+  total_obligations: number,
+  total_disbursement: number,
+  utilization_rate: number,
+}>
+```
+
+**Recommendation:** Surface both trend datasets as ApexCharts area/line charts on dashboard.vue. No new backend work. One API call each. High executive value — shows performance trajectory not just snapshot.
+
+---
+
+### R-081: Analytics Gaps Requiring New Backend Work
+
+**Topic:** Features in the brief that CANNOT be built from existing endpoints
+
+**Category A — Missing COI aggregations (new service method + controller route needed):**
+
+| Feature | Missing endpoint | SQL feasibility |
+|---|---|---|
+| Projects by contractor | `GET /analytics/by-contractor` | Easy — GROUP BY contractor_name on construction_projects |
+| Projects by year | `GET /analytics/by-year` | Easy — GROUP BY DATE_PART('year', start_date) |
+| Progress trend over time | `GET /analytics/progress-trend` | Medium — aggregation over progress_reports by report_date |
+| Milestone completion rate | `GET /analytics/milestone-summary` | Medium — GROUP BY project, milestone status |
+| Funding source from backend | extend existing summary | Easy — add `by_funding_source` to `getAnalyticsSummary()` |
+
+**Category B — Missing cross-module data (no path without major new work):**
+
+| Feature | Gap | Effort |
+|---|---|---|
+| Active Personnel count | No personnel count endpoint | New endpoint needed |
+| System-wide pending reviews | Three separate module endpoints | Aggregation needed or parallel calls |
+| Repair module analytics | No `/api/repair-projects/analytics` endpoint | New module endpoint |
+| GAD analytics | No analytics endpoint | New module endpoint |
+
+**Category C — Out of scope / YAGNI:**
+- Completion forecasts (predictive ML) — far future
+- Budget risk scoring (requires definition) — far future
+
+**Conclusion for Phase III/JJJ scope:** Limit to existing endpoints. New backend for `by_funding_source` extension to analytics/summary is the only single-method addition worth doing. All others deferred.
+
+---
+
+### R-082: HCI Assessment — Post-GGG/HHH Remaining Issues
+
+**Topic:** Human-Computer Interaction gaps remaining after GGG/HHH implementations
+
+**COI Dashboard (`pages/coi/index.vue`) — current HCI state:**
+
+Strengths (GGG delivered):
+- 8-card KPI row provides immediate portfolio snapshot
+- Clickable campus bars + status pips create intuitive drill-down
+- Executive Monitoring panels (Upcoming / Slow-Moving) surface operational risks
+- Quick Actions strip reduces navigation friction
+
+Remaining gaps:
+1. **Analytics tab has no section headings or guidance banners.** User sees "Status Distribution" chart with no context on why it matters or what action to take.
+2. **Per-campus analytics shows only count.** `by_campus[].avg_progress` is richer — showing both volume and progress per campus is more actionable.
+3. **Financial analytics section is minimal.** One appropriation bar + one cost-incurred bar. No trend, no per-project breakdown, no variance indicator.
+4. **Analytics tab chart sections are cramped** — charts displayed 5/7 col without breathing room; labels may be cut off at sm breakpoint.
+5. **No cross-filtering between Analytics and Projects tabs beyond campus/status.** Clicking Funding Source donut has no drill-down action (tooltip only).
+6. **Empty state for projects is text-only.** No visual differentiation between "zero projects exist" and "filtered to zero projects".
+
+**CSU CORE Dashboard (`pages/dashboard.vue`) — current HCI state:**
+
+Strengths (HHH delivered):
+- Context banner orients new users
+- AdminKpiRow gives 4 critical numbers immediately
+- Infrastructure mini-summary card click-to-navigate is intuitive
+
+Remaining gaps:
+1. **No charts anywhere on the dashboard.** Entirely text/numbers — does not meet the executive analytics requirement.
+2. **UO Summary is cards-only.** Q1–Q4 trend is invisible without the quarterly-trend chart.
+3. **Quick Actions section is positioned below Analytics** — users need to scroll past UO summary (which is data-heavy) to reach Quick Actions.
+4. **Module cards (Repair/UO/GAD) show counts only** — no status indication, no visual health indicator.
+5. **No guidance banners on UO Summary, Infrastructure, or Module sections.**
+6. **Section headers use h2 text but no visual separation** — information architecture is flat, no hierarchy between sections.
+
+---
+
+### R-083: Visualization Library Evaluation
+
+**Topic:** Which chart library to use for new dashboard visualizations
+
+**Existing implementation:** `vue3-apexcharts` (VueApexCharts) — already installed and used in `pages/coi/index.vue`, `CiProjectAnalyticsTab.vue`
+
+**Evaluation:**
+
+| Criterion | ApexCharts | ECharts | Chart.js |
+|---|---|---|---|
+| Already installed | ✅ Yes | ❌ No | ❌ No |
+| Vue 3 wrapper | ✅ vue3-apexcharts | ✅ vue-echarts | ✅ vue-chartjs |
+| Vuetify 3 style fit | ✅ Configurable | ✅ Configurable | ⚠️ Less flexible |
+| Responsive | ✅ Built-in | ✅ Built-in | ⚠️ Manual |
+| Interactive events | ✅ dataPointSelection | ✅ Events API | ⚠️ Limited |
+| Animation | ✅ Smooth | ✅ Rich | ✅ Basic |
+| Bundle size | Medium | Large | Small |
+| SSR (Nuxt) | ⚠️ Client-only | ⚠️ Client-only | ⚠️ Client-only |
+
+**Recommendation:** Continue with ApexCharts exclusively.
+- Zero new dependencies
+- Pattern already established in codebase
+- `dataPointSelection` drill-down pattern already proven (GGG)
+- Consistent rendering across COI + dashboard
+- SSR: wrap all chart components in `<ClientOnly>` or use `import.meta.client` guard (existing pattern)
+
+**Vuetify native components to prefer over charts:**
+- Simple progress bars: `v-progress-linear` (already used)
+- Status chips with counts: `v-chip` (already used)
+- KPI numbers: `v-card` with `text-h4` (already used)
+- Alert cards: `v-alert` (already used)
+
+---
+
+### R-084: Executive Dashboard KPI Taxonomy
+
+**Topic:** Which KPIs are highest-value for each user type accessing the CSU CORE and COI dashboards
+
+**Primary user types:**
+1. **University President / VP** — cross-module institutional view
+2. **PMO Director** — COI portfolio + budget oversight
+3. **MIS Director** — system health, data quality
+4. **Campus Administrator** — campus-scoped projects
+5. **Project Manager / Staff** — own project list
+
+**KPI value matrix:**
+
+| KPI | President/VP | PMO Director | MIS | Campus Admin | PM/Staff |
+|---|---|---|---|---|---|
+| Total Infrastructure Projects | High | High | Med | Med | Low |
+| Delayed Projects Count | High | High | Low | Med | High |
+| Total Budget Portfolio | High | High | Low | Med | Low |
+| Cost Utilization % | High | High | Low | Low | Low |
+| Avg Physical Progress | High | High | Low | Med | Med |
+| UO Accomplishment Rate | High | Low | Low | Low | Low |
+| Pending Reviews | Med | High | Med | Low | High |
+| Projects by Campus | High | Med | Low | High | Low |
+| Quarterly Trend | High | Med | Low | Low | Low |
+
+**Derived priorities for Phase III/JJJ:**
+1. Cross-module KPIs (President level) → dashboard.vue
+2. COI portfolio analytics (PMO level) → coi/index.vue Analytics tab
+3. Campus-filtered view (Campus Admin) → coi/index.vue campus drill-down (already done in GGG)
+4. Per-project drill-down (PM/Staff) → detail-[id].vue (already complete)
+
+**Conclusion:** Phase III focuses on PMO Director analytics (per-campus progress + contract distribution). Phase JJJ focuses on President/VP level (quarterly trend chart + cross-module overview).
+
+---
+
+### R-085: COI Analytics Tab — Tier 2 Feasibility Matrix
+
+**Topic:** What can be added to the COI Analytics tab using only existing data (no new backend work except one extension)
+
+**Tier 1 (existing untapped backend fields — zero new endpoints):**
+
+| Visualization | Data source | Type | Value |
+|---|---|---|---|
+| Per-campus avg progress bars | `by_campus[].avg_progress` (analytics/summary) | Horizontal bar | HIGH — shows which campuses are lagging |
+| Budget by campus donut | `by_campus[].total_contract` (analytics/summary) | Donut | MED — shows budget concentration |
+| Contract value by status | `by_status[].total_contract` (analytics/summary) | Stacked/grouped bar | MED — shows how much budget is in Ongoing vs Completed |
+| Data completeness indicator | `projects_with_financials` (financial-summary) | Single KPI chip | MED — shows how many projects have progress report data |
+
+**Tier 2 (client-side computed from project list — already loaded):**
+
+| Visualization | Data source | Type | Value |
+|---|---|---|---|
+| Physical Progress Distribution | `p.physicalAccomplishment` | 4-bucket bar | HIGH — already implemented in GGG |
+| Funding Source Distribution | `p.fundSource` | Donut | MED — already implemented in GGG |
+| Contractor distribution | `p.contractor` | Horizontal bar | MED — client-side feasible |
+
+**Tier 3 (requires new backend endpoint):**
+
+| Visualization | New endpoint needed | Priority |
+|---|---|---|
+| Progress trend over time | `GET /analytics/progress-trend` | LOW (complex query) |
+| Projects by year | `GET /analytics/by-year` | LOW |
+| `by_funding_source` from DB | extend `getAnalyticsSummary()` | MED — add one GROUP BY |
+
+**Recommendation for Phase III:** Implement Tier 1 (3 new charts from zero new API calls) + Tier 2 contractor bar (client-side). Add one Tier 3 extension: add `by_funding_source` to `getAnalyticsSummary()` to replace the client-side `p.fundSource` donut with backend-authoritative data. This is a 3-line SQL addition to an existing method.
+
+---
+
+### R-086: Dashboard Section Architecture — Information Hierarchy
+
+**Topic:** Optimal page structure for both dashboards post-Phase III/JJJ
+
+**CSU CORE Dashboard — recommended final architecture:**
+
+```
+1. [CONTEXT BANNER] — dismissible, role-aware
+2. [EXECUTIVE SNAPSHOT] — AdminKpiRow (4 KPI tiles: Infrastructure / Delayed / Pending / UO Compliance)
+3. [INFRASTRUCTURE PORTFOLIO] — mini-summary card + campus progress chart + cost utilization bar
+4. [UO PERFORMANCE] — pillar cards + Q1-Q4 Accomplishment Trend chart + Financial Utilization chart
+5. [QUICK ACTIONS] — 4 action buttons
+6. [OTHER MODULES] — Repair / GAD lightweight cards
+```
+
+**COI Dashboard — recommended final architecture:**
+
+```
+1. [QUICK ACTIONS] — already implemented (GGG-B)
+2. [PORTFOLIO SNAPSHOT] — 8 KPI cards + hero strip (already done GGG-A)
+3. [CAMPUS INTELLIGENCE] — Campus count bars (clickable, GGG-E) + NEW: campus avg-progress bars
+4. [FINANCIAL OVERVIEW] — Cost Utilization panel (GGG) + NEW: Budget by Campus donut + Contract by Status bar
+5. [EXECUTIVE MONITORING] — Upcoming Completions + Slow-Moving (GGG-C)
+6. [FILTER + PROJECT LIST] — existing, unchanged
+--- Analytics Tab ---
+7. [FINANCIAL HERO] — 4 KPI cards (GGG-D)
+8. [STATUS & CAMPUS CHARTS] — Status donut + Campus bar (GGG-D)
+9. [PROGRESS ANALYTICS] — Physical Progress Distribution + NEW: Per-campus avg progress
+10. [FINANCIAL ANALYTICS] — NEW: Budget by campus + Contract by Status
+11. [DISTRIBUTION] — Funding Source donut + NEW: Contractor distribution
+12. [PUBLICATION STATUS] — existing chips
+```
+
+**HCI principle applied:** Each section has one purpose, one audience, one decision-support outcome. Guidance banners in the Analytics tab explain what each chart answers.
+
+---
+
+### R-087: Phase III/JJJ — Backend Extension Assessment
+
+**Topic:** Minimum backend change to maximize dashboard analytics coverage
+
+**Proposed extension to `getAnalyticsSummary()` (3 lines of SQL, zero new endpoint):**
+
+Add to the existing `getAnalyticsSummary` method in `construction-projects.service.ts`:
+```sql
+SELECT funding_source_name, COUNT(*) as count, COALESCE(SUM(contract_amount),0) as total_contract
+FROM construction_projects
+WHERE deleted_at IS NULL
+GROUP BY funding_source_name
+ORDER BY count DESC
+```
+
+Returns `by_funding_source: Array<{funding_source_name, count, total_contract}>`.
+
+This replaces the client-side `p.fundSource` grouping (which works but is less reliable than DB aggregation) with an authoritative backend count.
+
+**Contractor distribution extension (similar):**
+```sql
+SELECT contractor_name, COUNT(*) as count, COALESCE(SUM(contract_amount),0) as total_contract
+FROM construction_projects
+WHERE deleted_at IS NULL AND contractor_name IS NOT NULL
+GROUP BY contractor_name
+ORDER BY count DESC LIMIT 10
+```
+
+Returns `by_contractor: Array<{contractor_name, count, total_contract}>`.
+
+**Assessment:** Both extensions are additive to the existing `getAnalyticsSummary()` response. No DTO change (endpoint already returns `any`). No migration needed. Backend tsc passes because return type is `Promise<any>`. Estimated implementation: 15 minutes per extension.
+
+**Recommendation for Phase III:** Add both extensions. Replace client-side groupings with authoritative DB aggregates. Frontend change: swap `fundingSourceChart` computed from `p.fundSource` grouping to `analyticsSummary.value?.by_funding_source`. Add new `contractorChart` computed from `analyticsSummary.value?.by_contractor`.

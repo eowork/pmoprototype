@@ -1,7 +1,8 @@
 # PMO Dashboard — Project State
-> **Last Updated:** 2026-06-02
+> **Last Updated:** 2026-06-08
 > **Branch:** `pmo-coi`
 > **Governance:** ACE v2.4
+> **Note:** This file is a secondary reference. Authoritative current state is in `docs/state.md`.
 
 ---
 
@@ -9,14 +10,14 @@
 
 | Dimension | Status |
 |---|---|
-| **Active Module** | Construction of Infrastructure (COI) |
-| **Current Phase** | DDD ✅ Complete — documentation refactor in progress |
-| **Last Commit** | `5b2bd00` — COI Phase 3 sprint (AAA/BBB/CCC/ZZZ/YYY) |
-| **Next Commit Pending** | DDD changes (Location→Profile, gallery nav, analytics, milestone CRUD removal) |
-| **Deployment Readiness** | Controlled Pilot — operator smoke test required after each backend restart |
+| **Active Module** | COI Dashboard + CSU CORE Dashboard |
+| **Current Phase** | Phase III + JJJ — Phase 1+2 complete, awaiting Phase 3 authorization |
+| **Last Commit** | `324f217` — GGG (COI Dashboard) + HHH (CORE Dashboard) modernization |
+| **Next Commit Pending** | Phase III (COI analytics tier 2) + Phase JJJ (CORE trend charts) — pending RUN_ACE |
+| **Deployment Readiness** | Controlled Pilot — operator smoke test required after backend restart |
 | **Backend Status** | Running — restart required to activate `/templates/SD_ECO_*.docx` static serving |
-| **TypeScript Status** | ✅ 0 new errors across all touched files (1 pre-existing ApexOptions TS2322 in chart config) |
-| **Migrations Pending** | `Migration20260602000000_AddSdgGoalsToConstructionProjects`, `Migration20260603000000_AddCustomSupportingSections` |
+| **TypeScript Status** | ✅ 0 new errors — vue-tsc + tsc both clean after GGG/HHH |
+| **Migrations Pending** | 7 migrations (sdg_goals, custom_supporting_sections, war/mpr fields, notes_banking, concerns_list, billing fields) |
 | **Test Coverage** | Manual (operator smoke test protocol — no automated tests) |
 
 ---

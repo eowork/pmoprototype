@@ -3790,9 +3790,633 @@ Change outer condition: `v-if="!isContractor"` only.
 
 | Item | Reason |
 |---|---|
-| Contractor Performance analytics | No index-level endpoint; requires new backend work |
-| Completion Trends time-series at COI index | Requires new analytics endpoint (time-series aggregation) |
+| Contractor Performance analytics | Promoted to Phase III-E (client-side feasible; backend extension planned in III-A) |
+| Completion Trends time-series at COI index | Requires new analytics endpoint (time-series aggregation) — still deferred |
 | Cross-module global financial analytics | Until data entry stable across all modules |
 | Financial analytics endpoints (COI FY breakdown) | `ConstructionProjectFinancial` entity archived; no FY data exists |
 | OAuth token rotation review | Low risk in current env |
 | Subfolder CRUD inside repository modal | Out of scope for card architecture |
+
+---
+
+## PHASE III — COI Dashboard Analytics Tier 2
+> **Status:** 🔲 PENDING AUTHORIZATION
+> **Research:** R-077, R-079, R-082, R-083, R-084, R-085, R-086, R-087
+> **Files:** `pmo-backend/src/construction-projects/construction-projects.service.ts`, `pmo-frontend/pages/coi/index.vue`
+> **Scope:** Add per-campus progress analytics, contract distribution charts, contractor distribution, backend aggregation extensions. All additions use the existing `analytics/summary` endpoint or minimally extend it. Zero new controller routes. Zero migrations.
+> **Commit style:** `feat(coi): <description>` per EEE-D standard
+
+---
+
+### III-A: Backend Extension — Add `by_funding_source` and `by_contractor` to Analytics Summary
+
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts`
+**Research:** R-087
+
+Extend `getAnalyticsSummary()` to include two additional GROUP BY queries in the existing `Promise.all`.
+
+**Step 1 — Add to the `Promise.all` array in `getAnalyticsSummary()`:**
+```ts
+conn.execute(
+  `SELECT funding_source_name, COUNT(*) as count, COALESCE(SUM(contract_amount),0) as total_contract
+   FROM construction_projects
+   WHERE deleted_at IS NULL AND funding_source_name IS NOT NULL
+   GROUP BY funding_source_name ORDER BY count DESC`
+),
+conn.execute(
+  `SELECT contractor_name, COUNT(*) as count, COALESCE(SUM(contract_amount),0) as total_contract
+   FROM construction_projects
+   WHERE deleted_at IS NULL AND contractor_name IS NOT NULL
+   GROUP BY contractor_name ORDER BY count DESC LIMIT 10`
+),
+```
+
+**Step 2 — Add to return object:**
+```ts
+by_funding_source: fundingSourceRows.map(r => ({
+  funding_source_name: r.funding_source_name,
+  count: parseInt(r.count, 10),
+  total_contract: parseFloat(r.total_contract),
+})),
+by_contractor: contractorRows.map(r => ({
+  contractor_name: r.contractor_name,
+  count: parseInt(r.count, 10),
+  total_contract: parseFloat(r.total_contract),
+})),
+```
+
+**Acceptance:**
+- [ ] `GET /api/construction-projects/analytics/summary` response includes `by_funding_source[]` and `by_contractor[]`
+- [ ] `tsc --noEmit` passes (return type is `Promise<any>` — no DTO change)
+
+---
+
+### III-B: Campus Intelligence Panel — Dual-Bar (Count + Avg Progress)
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Research:** R-079
+
+The existing "Projects by Campus" hero panel shows only count. `by_campus[].avg_progress` is already returned but unused. Add a secondary progress bar per campus row.
+
+**Step 1 — Update `campusBars` computed to include `avg_progress`:**
+```ts
+const campusBars = computed(() => {
+  const data = (analyticsSummary.value?.by_campus || []) as Array<{
+    campus: string; count: number; avg_progress: number
+  }>
+  const max = Math.max(...data.map(d => d.count), 1)
+  return [...data].sort((a, b) => b.count - a.count).map(d => ({
+    ...d,
+    pct: (d.count / max) * 100,
+    avg_progress: parseFloat(String(d.avg_progress)) || 0,
+  }))
+})
+```
+
+**Step 2 — Update campus bar rows template to show dual-bar:**
+```html
+<div
+  v-for="campus in campusBars"
+  :key="campus.campus"
+  class="mb-3"
+  style="cursor:pointer"
+  @click="drillToCampus(campus.campus)"
+>
+  <div class="d-flex justify-space-between text-caption mb-1">
+    <span class="text-primary font-weight-medium">{{ campus.campus || 'Unknown' }}</span>
+    <span>{{ campus.count }} project{{ campus.count !== 1 ? 's' : '' }}</span>
+  </div>
+  <v-progress-linear :model-value="campus.pct" height="6" rounded color="primary" class="mb-1" />
+  <div class="d-flex justify-space-between text-caption mb-1" style="opacity:0.75">
+    <span>Avg Progress</span><span>{{ campus.avg_progress.toFixed(1) }}%</span>
+  </div>
+  <v-progress-linear :model-value="campus.avg_progress" height="4" rounded color="deep-purple" />
+</div>
+```
+
+**Acceptance:**
+- [ ] Each campus shows 2 bars: project count (primary) + avg progress (deep-purple)
+- [ ] Avg progress uses `by_campus[].avg_progress` from backend
+- [ ] Click-to-filter still works
+
+---
+
+### III-C: Analytics Tab — Per-Campus Avg Progress Chart
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Research:** R-079, R-086
+
+Add a horizontal bar chart showing average physical progress per campus in the Analytics tab.
+
+**Step 1 — Add `campusProgressChart` computed:**
+```ts
+const campusProgressChart = computed(() => {
+  const data = (analyticsSummary.value?.by_campus || []) as Array<{
+    campus: string; avg_progress: number
+  }>
+  const sorted = [...data].sort((a, b) =>
+    (parseFloat(String(b.avg_progress)) || 0) - (parseFloat(String(a.avg_progress)) || 0)
+  )
+  return {
+    series: [{ name: 'Avg Progress %', data: sorted.map(d => +((parseFloat(String(d.avg_progress)) || 0).toFixed(1))) }],
+    options: {
+      chart: { type: 'bar' as const, toolbar: { show: false } },
+      plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
+      xaxis: { max: 100, labels: { formatter: (v: string) => `${v}%` } },
+      yaxis: { categories: sorted.map(d => d.campus || 'Unknown') },
+      colors: ['#7c3aed'],
+      dataLabels: { enabled: true, formatter: (v: any) => `${Number(v).toFixed(1)}%` },
+    },
+  }
+})
+```
+
+**Step 2 — Add chart in Analytics tab after the existing Charts Row:**
+```html
+<!-- III-C + III-D: Campus Progress + Budget Distribution row -->
+<v-row class="mt-4">
+  <v-col cols="12" md="6">
+    <v-card class="pa-4">
+      <v-card-title class="text-body-1 font-weight-bold mb-1">Avg Physical Progress by Campus</v-card-title>
+      <v-card-subtitle class="text-caption pb-2">Which campuses are most advanced in construction delivery?</v-card-subtitle>
+      <VueApexCharts v-if="campusProgressChart.series[0].data.length > 0" type="bar" height="220"
+        :options="campusProgressChart.options" :series="campusProgressChart.series" />
+      <div v-else class="text-center py-4 text-grey">No campus data</div>
+    </v-card>
+  </v-col>
+  <v-col cols="12" md="6">
+    <!-- III-D Budget by Campus donut goes here -->
+  </v-col>
+</v-row>
+```
+
+**Acceptance:**
+- [ ] Horizontal bar chart appears in Analytics tab
+- [ ] Bars reflect backend DB aggregate avg_progress per campus
+- [ ] Subtitle explains decision-support purpose
+
+---
+
+### III-D: Analytics Tab — Budget by Campus Donut + Contract by Status Donut
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Research:** R-079, R-085
+
+Add two contract-value distribution charts using untapped backend fields.
+
+**Step 1 — Add `budgetByCampusChart` computed:**
+```ts
+const budgetByCampusChart = computed(() => {
+  const data = (analyticsSummary.value?.by_campus || []) as Array<{
+    campus: string; total_contract: number
+  }>
+  const labels = data.map(d => d.campus || 'Unknown')
+  const series = data.map(d => parseFloat(String(d.total_contract || 0)))
+  const fmt = (v: number) => {
+    if (v >= 1_000_000_000) return `₱${(v / 1_000_000_000).toFixed(1)}B`
+    if (v >= 1_000_000) return `₱${(v / 1_000_000).toFixed(1)}M`
+    return `₱${v.toLocaleString()}`
+  }
+  return {
+    series,
+    options: {
+      chart: { type: 'donut' as const, toolbar: { show: false } },
+      labels,
+      legend: { position: 'bottom' as const },
+      tooltip: { y: { formatter: fmt } },
+    },
+  }
+})
+```
+
+**Step 2 — Add `contractByStatusChart` computed:**
+```ts
+const contractByStatusChart = computed(() => {
+  const data = (analyticsSummary.value?.by_status || []) as Array<{
+    status: string; total_contract: number
+  }>
+  const STATUS_COLORS: Record<string, string> = {
+    ONGOING: '#3b82f6', COMPLETE: '#059669', COMPLETED: '#059669',
+    ON_HOLD: '#f59e0b', CANCELLED: '#ef4444', PROPOSAL: '#6b7280',
+  }
+  const fmt = (v: number) => {
+    if (v >= 1_000_000_000) return `₱${(v / 1_000_000_000).toFixed(1)}B`
+    if (v >= 1_000_000) return `₱${(v / 1_000_000).toFixed(1)}M`
+    return `₱${v.toLocaleString()}`
+  }
+  return {
+    series: data.map(d => parseFloat(String(d.total_contract || 0))),
+    options: {
+      chart: { type: 'donut' as const, toolbar: { show: false } },
+      labels: data.map(d => d.status),
+      colors: data.map(d => STATUS_COLORS[d.status] || '#9ca3af'),
+      legend: { position: 'bottom' as const },
+      tooltip: { y: { formatter: fmt } },
+    },
+  }
+})
+```
+
+**Step 3 — Add both donuts in a "Financial Distribution" row:**
+```html
+<!-- III-D: Financial Distribution row -->
+<v-row class="mt-4">
+  <v-col cols="12" md="6">
+    <v-card class="pa-4">
+      <v-card-title class="text-body-1 font-weight-bold mb-1">Budget Concentration by Campus</v-card-title>
+      <v-card-subtitle class="text-caption pb-2">Where is infrastructure investment concentrated?</v-card-subtitle>
+      <VueApexCharts v-if="budgetByCampusChart.series.some(v => v > 0)" type="donut" height="240"
+        :options="budgetByCampusChart.options" :series="budgetByCampusChart.series" />
+      <div v-else class="text-center py-4 text-grey">No financial data</div>
+    </v-card>
+  </v-col>
+  <v-col cols="12" md="6">
+    <v-card class="pa-4">
+      <v-card-title class="text-body-1 font-weight-bold mb-1">Contract Value by Status</v-card-title>
+      <v-card-subtitle class="text-caption pb-2">How much budget is allocated per project status?</v-card-subtitle>
+      <VueApexCharts v-if="contractByStatusChart.series.some(v => v > 0)" type="donut" height="240"
+        :options="contractByStatusChart.options" :series="contractByStatusChart.series" />
+      <div v-else class="text-center py-4 text-grey">No data</div>
+    </v-card>
+  </v-col>
+</v-row>
+```
+
+**Acceptance:**
+- [ ] Budget by Campus donut shows contract value share per campus
+- [ ] Contract by Status donut shows budget concentration by status
+- [ ] Tooltips format to ₱M / ₱B
+
+---
+
+### III-E: Analytics Tab — Contractor Chart + Backend Funding Source Upgrade
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Research:** R-085, R-087
+
+After III-A adds `by_contractor` and `by_funding_source`:
+
+**Step 1 — Update `fundingSourceChart` to prefer backend data with client-side fallback:**
+```ts
+const fundingSourceChart = computed(() => {
+  const backendData = (analyticsSummary.value?.by_funding_source || []) as Array<{
+    funding_source_name: string; count: number
+  }>
+  if (backendData.length) {
+    return {
+      series: backendData.map(d => d.count),
+      options: {
+        chart: { type: 'donut' as const, toolbar: { show: false } },
+        labels: backendData.map(d => d.funding_source_name || 'Unknown'),
+        legend: { position: 'bottom' as const },
+      },
+    }
+  }
+  // Fallback: client-side grouping (unchanged from GGG)
+  const map: Record<string, number> = {}
+  projects.value.forEach(p => { const fs = p.fundSource || 'Unknown'; map[fs] = (map[fs] || 0) + 1 })
+  return {
+    series: Object.values(map),
+    options: {
+      chart: { type: 'donut' as const, toolbar: { show: false } },
+      labels: Object.keys(map),
+      legend: { position: 'bottom' as const },
+    },
+  }
+})
+```
+
+**Step 2 — Add `contractorChart` computed:**
+```ts
+const contractorChart = computed(() => {
+  const backendData = (analyticsSummary.value?.by_contractor || []) as Array<{
+    contractor_name: string; count: number
+  }>
+  const data = backendData.length
+    ? backendData
+    : (() => {
+        const map: Record<string, number> = {}
+        projects.value.forEach(p => { if (p.contractor) { map[p.contractor] = (map[p.contractor] || 0) + 1 } })
+        return Object.entries(map).sort(([,a],[,b]) => b - a).slice(0, 10)
+          .map(([contractor_name, count]) => ({ contractor_name, count }))
+      })()
+  const truncate = (s: string) => s.length > 28 ? s.slice(0, 26) + '…' : s
+  return {
+    series: [{ name: 'Projects', data: data.map(d => d.count) }],
+    options: {
+      chart: { type: 'bar' as const, toolbar: { show: false } },
+      plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
+      yaxis: { categories: data.map(d => truncate(d.contractor_name || '')) },
+      colors: ['#0ea5e9'],
+      dataLabels: { enabled: false },
+    },
+  }
+})
+```
+
+**Step 3 — Replace current Funding Source panel placement, add Contractor chart:**
+
+In the Analytics tab (after Physical Progress Distribution), replace the current Funding Source row with:
+```html
+<!-- III-E: Contractor + Funding Source row -->
+<v-row class="mt-4">
+  <v-col cols="12" md="7">
+    <v-card class="pa-4">
+      <v-card-title class="text-body-1 font-weight-bold mb-1">Projects by Contractor</v-card-title>
+      <v-card-subtitle class="text-caption pb-2">Which contractors have the most active projects?</v-card-subtitle>
+      <VueApexCharts v-if="contractorChart.series[0]?.data?.length > 0" type="bar" height="260"
+        :options="contractorChart.options" :series="contractorChart.series" />
+      <div v-else class="text-center py-4 text-grey">No contractor data</div>
+    </v-card>
+  </v-col>
+  <v-col cols="12" md="5">
+    <v-card class="pa-4">
+      <v-card-title class="text-body-1 font-weight-bold mb-1">Funding Source Distribution</v-card-title>
+      <v-card-subtitle class="text-caption pb-2">How projects are distributed by funding source</v-card-subtitle>
+      <VueApexCharts v-if="fundingSourceChart.series.length > 0" type="donut" height="260"
+        :options="fundingSourceChart.options" :series="fundingSourceChart.series" />
+      <div v-else class="text-center py-4 text-grey">No funding source data</div>
+    </v-card>
+  </v-col>
+</v-row>
+```
+
+**Acceptance:**
+- [ ] Funding Source donut uses `by_funding_source` (falls back to client-side if absent)
+- [ ] Contractor horizontal bar shows top-10 contractors by project count
+- [ ] Both charts have subtitle guidance
+
+---
+
+### III-F: Analytics Tab — Section Guidance Banners
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Research:** R-082, R-086
+
+Add one `v-alert` guidance banner at the top of the Analytics tab and contextual subtitles before each chart group.
+
+**Top-of-tab banner:**
+```html
+<v-alert type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-information-outline">
+  <strong>Portfolio Analytics</strong> — Comprehensive analytics across {{ stats.total }} infrastructure projects.
+  Charts use authoritative DB aggregates from the analytics endpoints.
+</v-alert>
+```
+
+**Section dividers with labels (before each chart group):**
+- Before Financial Hero: `<!-- Financial KPIs -->`  + `<v-divider class="mb-3" />`
+- Before Status/Campus charts: small section label "Status & Campus Distribution"
+- Before Progress Distribution: small section label "Physical Accomplishment Analytics"
+- Before Campus Progress/Budget: small section label "Campus Intelligence"
+- Before Contractor/Funding: small section label "Partnership & Funding Analytics"
+
+**Pattern for section label:**
+```html
+<div class="text-caption text-grey-darken-1 font-weight-bold text-uppercase mt-4 mb-2">
+  <v-icon size="14" class="mr-1">mdi-chart-pie</v-icon> Physical Accomplishment Analytics
+</div>
+```
+
+**Acceptance:**
+- [ ] Top-of-tab banner visible when Analytics tab is open
+- [ ] Each chart group is preceded by a section label
+- [ ] No banners use error/warning type for informational content
+
+---
+
+### III Verification Checklist
+
+- [ ] III-A: `analytics/summary` response includes `by_funding_source[]` and `by_contractor[]`
+- [ ] III-A: `tsc --noEmit` passes on backend
+- [ ] III-B: Campus panel shows dual bars (count bar + avg progress bar) per campus
+- [ ] III-B: Avg progress bar uses backend `by_campus[].avg_progress`
+- [ ] III-C: "Avg Physical Progress by Campus" horizontal bar chart in Analytics tab
+- [ ] III-C: Chart has subtitle explaining purpose
+- [ ] III-D: "Budget Concentration by Campus" donut visible
+- [ ] III-D: "Contract Value by Status" donut visible
+- [ ] III-D: Currency tooltips format to ₱M / ₱B
+- [ ] III-E: Funding Source donut uses `by_funding_source` backend field
+- [ ] III-E: "Projects by Contractor" horizontal bar chart visible
+- [ ] III-F: Top-of-tab `v-alert` guidance banner visible
+- [ ] III-F: Section labels visible before each chart group
+- [ ] vue-tsc 0 new errors
+
+---
+
+## PHASE JJJ — CSU CORE Executive Dashboard Analytics
+> **Status:** 🔲 PENDING AUTHORIZATION
+> **Research:** R-078, R-080, R-082, R-083, R-084, R-086
+> **Files:** `pmo-frontend/pages/dashboard.vue`
+> **Scope:** Add UO quarterly trend charts, section guidance banners, and fiscal-year-reactive reloads. All data from existing UO analytics endpoints — no new backend work. No migrations.
+> **Commit style:** `feat(core): <description>` per EEE-D standard
+
+---
+
+### JJJ-A: UO Accomplishment Trend Chart (Q1–Q4 Area)
+
+**File:** `pmo-frontend/pages/dashboard.vue`
+**Research:** R-080
+
+Add Q1–Q4 accomplishment trend area chart in the UO Summary section using the existing `/analytics/quarterly-trend` endpoint. Highest executive value addition — shows trajectory, not just snapshot.
+
+**Step 1 — Import VueApexCharts:**
+```ts
+import VueApexCharts from 'vue3-apexcharts'
+```
+
+**Step 2 — Add refs and load function:**
+```ts
+const uoTrend = ref<any>(null)
+const uoTrendLoading = ref(false)
+
+async function loadUoTrend() {
+  if (!selectedFiscalYear.value) return
+  uoTrendLoading.value = true
+  try {
+    uoTrend.value = await api.get<any>(
+      `/api/university-operations/analytics/quarterly-trend?fiscal_year=${selectedFiscalYear.value}`
+    )
+  } catch {
+    uoTrend.value = null
+  } finally {
+    uoTrendLoading.value = false
+  }
+}
+```
+
+**Step 3 — Add `uoTrendChart` computed:**
+```ts
+const uoTrendChart = computed(() => {
+  const quarters = (uoTrend.value?.quarters || []) as Array<{
+    quarter: string; accomplishment_rate_pct: number | null
+  }>
+  return {
+    series: [{ name: 'Accomplishment Rate', data: quarters.map(q => +(q.accomplishment_rate_pct ?? 0).toFixed(1)) }],
+    options: {
+      chart: { type: 'area' as const, toolbar: { show: false } },
+      xaxis: { categories: quarters.map(q => q.quarter) },
+      yaxis: { max: 100, labels: { formatter: (v: number) => `${v.toFixed(0)}%` } },
+      colors: ['#059669'],
+      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } },
+      stroke: { curve: 'smooth' as const, width: 2 },
+      markers: { size: 5 },
+      dataLabels: { enabled: true, formatter: (v: any) => `${Number(v).toFixed(1)}%` },
+      tooltip: { y: { formatter: (v: number) => `${v.toFixed(1)}%` } },
+    },
+  }
+})
+```
+
+**Step 4 — Add chart in UO Summary card, below pillar cards:**
+```html
+<!-- JJJ-A: Q1-Q4 Accomplishment Trend -->
+<template v-if="uoTrend?.quarters?.length">
+  <v-divider class="my-3" />
+  <div class="text-caption text-grey-darken-1 text-uppercase font-weight-bold mb-1">Q1–Q4 Accomplishment Trend</div>
+  <p class="text-caption text-grey mb-2">University-wide indicator accomplishment rate per quarter</p>
+  <VueApexCharts type="area" height="180"
+    :options="uoTrendChart.options" :series="uoTrendChart.series" />
+</template>
+```
+
+**Acceptance:**
+- [ ] Q1–Q4 area chart visible in UO Summary section
+- [ ] Chart shows `accomplishment_rate_pct` per quarter
+- [ ] Graceful empty state when trend data unavailable
+
+---
+
+### JJJ-B: UO Financial Utilization Trend Chart (Q1–Q4 Area)
+
+**File:** `pmo-frontend/pages/dashboard.vue`
+**Research:** R-080
+
+Add Q1–Q4 financial utilization trend using `/analytics/financial-quarterly-trend`.
+
+**Step 1 — Add ref and load function:**
+```ts
+const uoFinancialTrend = ref<any>(null)
+
+async function loadUoFinancialTrend() {
+  if (!selectedFiscalYear.value) return
+  try {
+    uoFinancialTrend.value = await api.get<any>(
+      `/api/university-operations/analytics/financial-quarterly-trend?fiscal_year=${selectedFiscalYear.value}`
+    )
+  } catch {
+    uoFinancialTrend.value = null
+  }
+}
+```
+
+**Step 2 — Add `uoFinancialTrendChart` computed:**
+```ts
+const uoFinancialTrendChart = computed(() => {
+  const quarters = (uoFinancialTrend.value?.quarters || []) as Array<{
+    quarter: string; utilization_rate: number
+  }>
+  return {
+    series: [{ name: 'Utilization Rate', data: quarters.map(q => +Number(q.utilization_rate).toFixed(1)) }],
+    options: {
+      chart: { type: 'area' as const, toolbar: { show: false } },
+      xaxis: { categories: quarters.map(q => q.quarter) },
+      yaxis: { max: 100, labels: { formatter: (v: number) => `${v.toFixed(0)}%` } },
+      colors: ['#7c3aed'],
+      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } },
+      stroke: { curve: 'smooth' as const, width: 2 },
+      markers: { size: 5 },
+      dataLabels: { enabled: true, formatter: (v: any) => `${Number(v).toFixed(1)}%` },
+    },
+  }
+})
+```
+
+**Step 3 — Add chart below JJJ-A in UO Summary card:**
+```html
+<!-- JJJ-B: Q1-Q4 Financial Utilization Trend -->
+<template v-if="uoFinancialTrend?.quarters?.length">
+  <v-divider class="my-3" />
+  <div class="text-caption text-grey-darken-1 text-uppercase font-weight-bold mb-1">Q1–Q4 Financial Utilization</div>
+  <p class="text-caption text-grey mb-2">Fund utilization rate per quarter — how efficiently appropriations are being obligated</p>
+  <VueApexCharts type="area" height="160"
+    :options="uoFinancialTrendChart.options" :series="uoFinancialTrendChart.series" />
+</template>
+```
+
+**Acceptance:**
+- [ ] Q1–Q4 financial utilization area chart visible in UO Summary
+- [ ] Shows `utilization_rate` per quarter
+
+---
+
+### JJJ-C: Fiscal Year Watcher — Reload All Charts
+
+**File:** `pmo-frontend/pages/dashboard.vue`
+**Research:** R-080
+
+Extend the existing fiscal year watcher to reload trend charts alongside pillar summary.
+
+**Update `watch(selectedFiscalYear, ...)`:**
+```ts
+watch(selectedFiscalYear, async () => {
+  await Promise.allSettled([
+    loadUoSummary(),
+    loadUoTrend(),
+    loadUoFinancialTrend(),
+  ])
+}, { immediate: true })
+```
+
+Also call both in `onMounted` for non-contractor users.
+
+**Acceptance:**
+- [ ] Fiscal year change triggers reload of pillar cards + both trend charts
+- [ ] No stale data shown after switching fiscal years
+
+---
+
+### JJJ-D: Dashboard Section Guidance — Subtitles and Captions
+
+**File:** `pmo-frontend/pages/dashboard.vue`
+**Research:** R-082, R-086
+
+Add descriptive subtitles and captions to every major dashboard section.
+
+**UO Summary card — verify subtitle from HHH:**
+- "Physical and financial performance by pillar" (added in HHH) — verify present
+
+**Quick Actions card — add subtitle:**
+```html
+<p class="text-caption text-grey-darken-1 mb-3">Frequently used workflows across CSU CORE modules</p>
+```
+
+**Other Modules row — add section heading:**
+```html
+<div class="mb-2 mt-4" v-if="statCards.length">
+  <h2 class="text-subtitle-1 font-weight-bold">Other Modules</h2>
+  <p class="text-caption text-grey-darken-1">Navigate to other university management modules</p>
+</div>
+```
+
+**Infrastructure Portfolio card — verify click-affordance caption is present from HHH.**
+
+**Acceptance:**
+- [ ] UO Summary has descriptive subtitle
+- [ ] Quick Actions has descriptive subtitle
+- [ ] Module cards section has section heading
+- [ ] Infrastructure card click affordance is present
+
+---
+
+### JJJ Verification Checklist
+
+- [ ] JJJ-A: `VueApexCharts` imported in dashboard.vue
+- [ ] JJJ-A: Q1–Q4 UO Accomplishment Trend area chart visible in UO Summary
+- [ ] JJJ-A: Chart shows `accomplishment_rate_pct` per quarter
+- [ ] JJJ-A: Graceful hide when trend data unavailable
+- [ ] JJJ-B: Q1–Q4 Financial Utilization area chart visible in UO Summary
+- [ ] JJJ-B: Chart shows `utilization_rate` per quarter
+- [ ] JJJ-C: Fiscal year change triggers reload of all 3 UO datasets
+- [ ] JJJ-D: Quick Actions has subtitle caption
+- [ ] JJJ-D: Module cards section has heading
+- [ ] vue-tsc 0 new errors

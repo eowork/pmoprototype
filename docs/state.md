@@ -5,7 +5,19 @@
 
 ## Current Phase
 
-**Phase GGG + HHH** — ✅ Phase 3 complete (not yet committed). vue-tsc + tsc 0 new errors. No migrations. No backend changes.
+**Phase III + JJJ Planning** — ✅ Phase 1 + Phase 2 complete. Pending Phase 3 authorization.
+
+**Research delivered (R-077–R-087):** Full COI/CORE dashboard post-GGG/HHH inventory; untapped backend field audit (`by_campus.avg_progress`, `by_campus.total_contract`, `by_status.total_contract`); UO analytics endpoints data map; missing backend analytics gap analysis; HCI assessment; chart library evaluation (ApexCharts confirmed); executive KPI taxonomy; backend extension plan (`by_funding_source` + `by_contractor` additions to `getAnalyticsSummary()`).
+
+**Plan delivered:**
+- **Phase III (COI):** 6 sub-steps — backend `getAnalyticsSummary()` extension (III-A); dual-bar campus panel (III-B); per-campus avg progress horizontal bar chart (III-C); budget by campus + contract by status donuts (III-D); contractor chart + backend funding source upgrade (III-E); analytics tab guidance banners (III-F). Zero new endpoints. One backend method extension.
+- **Phase JJJ (Core Dashboard):** 4 sub-steps — Q1–Q4 UO Accomplishment Trend area chart (JJJ-A); Q1–Q4 Financial Utilization Trend chart (JJJ-B); fiscal year watcher extended to reload charts (JJJ-C); section guidance subtitles (JJJ-D). Zero new endpoints.
+
+---
+
+## Archived Previous Phase
+
+**Phase GGG + HHH** — ✅ Phase 3 complete. Committed `324f217`. Pushed to `pmo-coi`.
 
 **GGG delivered:** COI Infrastructure Portfolio Dashboard — 8-card KPI row (added On Hold + Cost Utilized); Quick Actions strip; Executive Monitoring panel (Upcoming Completions + Slow-Moving Projects); Physical Progress Distribution bar chart + Funding Source donut chart in Analytics tab; label corrections (Budget Utilization→Cost Utilization, Obligation→Cost Incurred, removed duplicate Disbursement card); interactive chart drill-down (click campus bar/status chip → auto-filter Projects tab).
 
@@ -60,10 +72,10 @@
 
 ## Current Priorities
 
-1. **Commit GGG + HHH** — commit dashboard changes to `pmo-coi` and push
-2. **Run pending DB migrations** — 7 migrations (sdg_goals, custom_supporting_sections, war fields, mpr fields, notes_banking, concerns_list, billing fields)
-3. **Backend restart** — activates `/templates/SD_ECO_*.docx` static serving
-4. **Implement Phase FFF** — DTO persistence fix + compliance donut (already planned, pending Phase 3 auth)
+1. **Authorize Phase III** — COI Dashboard Analytics Tier 2 (backend extension + 5 new charts). Issue `RUN_ACE PHASE 3` for III.
+2. **Authorize Phase JJJ** — CSU CORE Executive Dashboard (Q1–Q4 trend charts + guidance). Issue `RUN_ACE PHASE 3` for JJJ.
+3. **Run pending DB migrations** — 7 migrations (sdg_goals, custom_supporting_sections, war fields, mpr fields, notes_banking, concerns_list, billing fields)
+4. **Backend restart** — activates `/templates/SD_ECO_*.docx` static serving
 
 ---
 
@@ -71,7 +83,7 @@
 
 | Blocker | Resolution |
 |---|---|
-| Uncommitted GGG + HHH dashboard work | `git add ... && git commit && git push origin pmo-coi` |
+| Phase III + JJJ await Phase 3 authorization | Issue `RUN_ACE PHASE 3` for III (COI analytics tier 2) and JJJ (CORE trend charts) |
 | 7 pending migrations | `npx mikro-orm migration:up` — sdg_goals, custom_supporting_sections, **GGG: project_notes_banking, war fields, mpr fields**, **ZZZ: concerns_list** |
 | `/templates/*.docx` 404 | Backend hard restart (`Ctrl+C` → `npm run start:dev`) |
 | Backend restart required for GGG | New DTO fields (war/mpr/notes_banking) need recompiled DTO or `forbidNonWhitelisted` rejects them |
