@@ -294,6 +294,7 @@ export interface BackendProjectDetail extends BackendProject {
   // MI: Progress snapshot
   as_of_date?: string
   cost_incurred_to_date?: number | null
+  cost_incurred_this_period?: number | null
   date_completed?: string
   remarks_log?: { text: string; author?: string; created_at?: string }[]
   physical_progress?: number
@@ -303,6 +304,14 @@ export interface BackendProjectDetail extends BackendProject {
   subcategory?: { id: string; name: string }
   milestones?: BackendMilestone[]
   financials?: BackendFinancial[]
+  // AAA-A: latest-first progress reports (nested by findOne) — source of cost_incurred_this_period
+  progress_reports?: Array<{
+    id: string
+    cost_incurred_this_period?: string | number | null
+    cost_incurred_to_date?: string | number | null
+    report_date?: string
+    report_number?: string | null
+  }>
   // KC-C: Project Profile fields
   strategic_alignment?: string
   output_indicators?: string[]
@@ -323,6 +332,7 @@ export interface BackendProjectDetail extends BackendProject {
   rdp_alignment?: any[]
   socioeconomic_agenda?: any[]
   csu_likha_goals?: any[]
+  sdg_goals?: string[]
   personnel_groups?: {
     csu?: { name: string; position: string; role: string }[]
     contractor?: { name: string; position: string; company: string }[]
@@ -402,6 +412,10 @@ export interface UIProjectDetail extends UIProject {
   // MI: Progress snapshot
   asOfDate: string
   costIncurredToDate: number | null
+  costIncurredThisPeriod: number | null
+  // AAA-A: source reference for the latest progress report (analytics drill-down)
+  latestProgressReportId: string | null
+  latestProgressReportDate: string | null
   dateCompleted: string
   remarksLog: { text: string; author?: string; createdAt?: string }[]
   projectEngineer: string
@@ -426,6 +440,7 @@ export interface UIProjectDetail extends UIProject {
   rdpAlignment: any[]
   socioeconomicAgenda: any[]
   csuLikhaGoals: any[]
+  sdgGoals: string[]
   implementingAgency: string
   projectStatusCategory: string
   statusUpdates: Record<string, any>[]
@@ -437,6 +452,16 @@ export interface UIProjectDetail extends UIProject {
   incidentLog: Record<string, any>[]
   riskRegister: Record<string, any>[]
   escalationRecords: Record<string, any>[]
+  projectNotesBanking: {
+    additionalNotes?: string
+    projectReferences?: { label: string; url?: string; notes?: string }[]
+    specialInstructions?: string
+    historicalReferences?: { date: string; description: string }[]
+    customMetadata?: Record<string, string>
+    // ZZZ-D Extension: lightweight construction-project support functions
+    lessonsLearned?: { phase: string; observation: string; recommendation: string; addedBy?: string; addedAt?: string }[]
+    siteObservations?: { date: string; observer: string; observation: string; location?: string; actionRequired: boolean }[]
+  } | null
   personnelGroups: {
     csu: { name: string; position: string; role: string }[]
     contractor: { name: string; position: string; company: string }[]
@@ -511,6 +536,30 @@ export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDeta
     revisedProjectDuration: backend.revised_project_duration || '',
     asOfDate: backend.as_of_date || '',
     costIncurredToDate: backend.cost_incurred_to_date ?? null,
+    // CCC-A: progress_reports are MikroORM entities (camelCase) at runtime, not snake_case.
+    // Read camelCase first, snake_case as fallback (covers both ORM and any future raw-SQL path).
+    costIncurredThisPeriod: (() => {
+      const r0 = Array.isArray(backend.progress_reports) && backend.progress_reports.length > 0
+        ? (backend.progress_reports[0] as any)
+        : null
+      const val = r0?.costIncurredThisPeriod ?? r0?.cost_incurred_this_period
+      return val != null ? Number(val) : null
+    })(),
+    latestProgressReportId: (() => {
+      const r0 = Array.isArray(backend.progress_reports) && backend.progress_reports.length > 0
+        ? (backend.progress_reports[0] as any)
+        : null
+      return r0?.id ?? null
+    })(),
+    latestProgressReportDate: (() => {
+      const r0 = Array.isArray(backend.progress_reports) && backend.progress_reports.length > 0
+        ? (backend.progress_reports[0] as any)
+        : null
+      if (!r0) return null
+      // MikroORM returns reportDate as a JS Date object; raw-SQL path returns a string
+      const d = r0.reportDate ?? r0.report_date
+      return d ? (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10)) : null
+    })(),
     dateCompleted: backend.date_completed || '',
     remarksLog: (backend.remarks_log || []).map((r: any) => ({
       text: r.text || '',
@@ -538,6 +587,7 @@ export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDeta
     rdpAlignment: backend.rdp_alignment || [],
     socioeconomicAgenda: backend.socioeconomic_agenda || [],
     csuLikhaGoals: backend.csu_likha_goals || [],
+    sdgGoals: backend.sdg_goals || [],
     implementingAgency: backend.implementing_agency || '',
     projectStatusCategory: backend.project_status_category || '',
     statusUpdates: (backend.status_updates || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
@@ -550,6 +600,7 @@ export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDeta
     incidentLog: (backend.incident_log || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
     riskRegister: (backend.risk_register || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
     escalationRecords: (backend.escalation_records || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    projectNotesBanking: (backend as any).project_notes_banking || null,
     personnelGroups: {
       csu: (backend.personnel_groups?.csu || []) as { name: string; position: string; role: string }[],
       contractor: (backend.personnel_groups?.contractor || []) as { name: string; position: string; company: string }[],

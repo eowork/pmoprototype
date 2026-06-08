@@ -118,8 +118,8 @@ async function handleLogin() {
           <v-img
             src="/csu-logo.svg"
             alt="CSU"
-            width="80"
-            class="mx-auto mb-4"
+            width="40"
+            class="mx-auto mb-2"
           />
         </div>
 
@@ -139,7 +139,7 @@ async function handleLogin() {
           v-if="errorMessage"
           type="error"
           variant="tonal"
-          class="mb-6"
+          class="mb-4"
           density="compact"
           closable
           @click:close="errorMessage = ''"
@@ -302,7 +302,7 @@ async function handleLogin() {
   background-size: cover;
   background-position: center;
   color: white;
-  padding: 3rem;
+  padding: 1rem;
   position: relative;
   overflow: hidden;
 }
@@ -374,7 +374,6 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
   background: #f8f9fa;
   overflow-x: hidden;
   max-width: 100%;

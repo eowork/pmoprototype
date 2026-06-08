@@ -19,6 +19,16 @@ interface TimelogEntry {
   issuesEncountered?: string | null
   photosCount?: number | null
   createdByName?: string | null
+  // BBB-C: WAR/MPR financial billing fields
+  billingAmountThisPeriod?: number | null
+  financialAccomplishmentPercent?: number | null
+  // ZZZ-G: structured Project Concerns list
+  concernsList?: Array<{
+    title?: string; description?: string; category?: string
+    severity?: string; status?: string; responsibleParty?: string
+    resolutionTargetDate?: string; actualResolutionDate?: string
+    mitigationAction?: string; createdBy?: string; createdAt?: string
+  }>
 }
 
 const props = withDefaults(defineProps<{
@@ -45,6 +55,9 @@ async function fetchEntries() {
     )
     const list = Array.isArray(res) ? res : (res?.data || [])
     entries.value = list.map((e: any) => ({
+      // ZZZ-G: preserve all raw fields (warNumber/accomplishments/workItems/concernsList/…)
+      // so the edit modal can hydrate WAR/MPR/concerns; normalized fields below override.
+      ...e,
       id: e.id,
       entryType: e.entryType || e.entry_type || 'WEEKLY',
       entryDate: typeof e.entryDate === 'string'
@@ -60,6 +73,9 @@ async function fetchEntries() {
       issuesEncountered: e.issuesEncountered ?? e.issues_encountered ?? null,
       photosCount: e.photosCount ?? e.photos_count ?? 0,
       createdByName: e.createdByName ?? e.created_by_name ?? null,
+      concernsList: e.concernsList ?? e.concerns_list ?? [],
+      billingAmountThisPeriod: e.billingAmountThisPeriod ?? e.billing_amount_this_period ?? null,
+      financialAccomplishmentPercent: e.financialAccomplishmentPercent ?? e.financial_accomplishment_percent ?? null,
     }))
   } catch (err) {
     console.error('[CiTimelogsContainer] fetch failed:', err)
@@ -195,6 +211,21 @@ const editing = ref<TimelogEntry | null>(null)
 const submitting = ref(false)
 const entryDateMenu = ref(false)
 
+// ZZZ-E/F: dismissible guidance banner, persisted per project
+const bannerKey = computed(() => `coi-timelog-banner-${props.projectId}`)
+const bannerDismissed = ref(false)
+onMounted(() => { if (import.meta.client) bannerDismissed.value = localStorage.getItem(bannerKey.value) === '1' })
+function dismissBanner() {
+  bannerDismissed.value = true
+  if (import.meta.client) localStorage.setItem(bannerKey.value, '1')
+}
+
+const WAR_SIGNATORY_ROLES = ['Prepared By', 'Reviewed By', 'Noted By']
+const MPR_SIGNATORY_ROLES = ['Prepared By', 'Checked & Reviewed By', 'Noted By', 'Recommending Approval', 'Approved By']
+function blankSignatories(roles: string[]) {
+  return roles.map(role => ({ userId: '', userName: '', position: '', role, date: '' }))
+}
+
 const blank = () => ({
   entry_type: 'WEEKLY',
   entry_date: '',
@@ -202,11 +233,98 @@ const blank = () => ({
   title: '',
   work_accomplished: '',
   issues_encountered: '',
+  description: '',          // EEE-F: next-period plan / corrective actions (DTO-supported)
   weather: '',
   manpower_count: null as number | null,
   equipment_used: '',
+  // GGG-F: WAR fields
+  war_number: '',
+  reporting_period_start: '',
+  reporting_period_end: '',
+  personnel_equipment_constraints: '',
+  mitigation_measures: '',
+  look_ahead_activities: '',
+  accomplishments: [] as Array<{ description: string; category: string; date: string; percentage: number | null; remarks: string }>,
+  // GGG-F: MPR fields
+  mpr_number: '',
+  reporting_period_month: '',
+  percent_time_elapsed: null as number | null,
+  accomplishment_summary_percent: null as number | null,
+  original_contract_amount: null as number | null,
+  revised_contract_amount: null as number | null,
+  work_items: [] as Array<Record<string, any>>,
+  // Shared signatories (role set depends on entry_type)
+  signatories: blankSignatories(WAR_SIGNATORY_ROLES) as Array<{ userId: string; userName: string; position: string; role: string; date: string }>,
+  // BBB-C: WAR/MPR financial billing
+  billing_amount_this_period: null as number | null,
+  financial_accomplishment_percent: null as number | null,
+  // CCC-C: MOV attachment — transient fields (not persisted on timelog, filed to document repository)
+  mov_file: null as File | null,
+  mov_link: '',
+  mov_link_title: '',
+  // ZZZ-G: structured Project Concerns list
+  concerns_list: [] as Array<{ title: string; description: string; category: string; severity: string; status: string; responsibleParty: string; resolutionTargetDate: string; actualResolutionDate: string; mitigationAction: string; createdBy?: string; createdAt?: string }>,
 })
 const form = ref(blank())
+
+function addAccomplishment() { form.value.accomplishments.push({ description: '', category: '', date: '', percentage: null, remarks: '' }) }
+function removeAccomplishment(i: number) { form.value.accomplishments.splice(i, 1) }
+function addWorkItem() { form.value.work_items.push({ itemNumber: '', description: '', unit: '', quantity: null, unitCost: null, weightNumber: null, actualPercentToDate: null, costToDate: null }) }
+function removeWorkItem(i: number) { form.value.work_items.splice(i, 1) }
+
+// ZZZ-G: Project Concerns helpers + option lists
+const authStore = useAuthStore()
+const CONCERN_CATEGORIES = ['SAFETY', 'SCHEDULE', 'FINANCIAL', 'ENVIRONMENTAL', 'QUALITY', 'OTHER']
+const CONCERN_SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
+const CONCERN_STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED']
+function concernSeverityColor(s: string): string {
+  return s === 'CRITICAL' ? 'error' : s === 'HIGH' ? 'deep-orange' : s === 'MEDIUM' ? 'warning' : 'grey'
+}
+function concernStatusColor(s: string): string {
+  return s === 'RESOLVED' ? 'success' : s === 'IN_PROGRESS' ? 'info' : 'grey'
+}
+function addConcern() {
+  form.value.concerns_list.push({
+    title: '', description: '', category: 'OTHER', severity: 'MEDIUM', status: 'OPEN',
+    responsibleParty: '', resolutionTargetDate: '', actualResolutionDate: '', mitigationAction: '',
+    createdBy: authStore.user?.id || '', createdAt: new Date().toISOString(),
+  })
+}
+function removeConcern(i: number) { form.value.concerns_list.splice(i, 1) }
+
+// GGG-F: user search for signatories
+const userSearchResults = ref<Array<{ id: string; fullName: string; position?: string }>>([])
+const userSearchLoading = ref(false)
+let userSearchDebounce: ReturnType<typeof setTimeout> | null = null
+function searchUsers(q: string) {
+  if (userSearchDebounce) clearTimeout(userSearchDebounce)
+  if (!q || q.length < 2) { userSearchResults.value = []; return }
+  userSearchDebounce = setTimeout(async () => {
+    userSearchLoading.value = true
+    try {
+      const res = await api.get<any>(`/api/users?search=${encodeURIComponent(q)}&limit=10`)
+      const rows = res?.data ?? res ?? []
+      userSearchResults.value = (Array.isArray(rows) ? rows : []).map((u: any) => ({
+        id: u.id,
+        fullName: u.displayName || u.fullName || [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email,
+        position: u.position || u.role,
+      }))
+    } catch { userSearchResults.value = [] }
+    finally { userSearchLoading.value = false }
+  }, 300)
+}
+function onSignatorySelect(sig: { userId: string; userName: string; position: string }, userId: string) {
+  const u = userSearchResults.value.find(x => x.id === userId)
+  if (u) { sig.userName = u.fullName; sig.position = u.position || sig.position }
+}
+// Reset signatory role set when entry type changes (only when creating)
+watch(() => form.value.entry_type, (t) => {
+  if (editing.value) return
+  const desired = t === 'MONTHLY' ? MPR_SIGNATORY_ROLES : WAR_SIGNATORY_ROLES
+  // preserve already-selected users by role where possible
+  const existing = new Map(form.value.signatories.map(s => [s.role, s]))
+  form.value.signatories = desired.map(role => existing.get(role) || { userId: '', userName: '', position: '', role, date: '' })
+})
 
 function toIsoDate(d: Date | string | null | undefined): string {
   if (!d) return ''
@@ -224,6 +342,11 @@ function openCreate() {
 }
 function openEdit(e: TimelogEntry) {
   editing.value = e
+  const ea = e as any
+  const isMonthly = (e.entryType || 'WEEKLY') === 'MONTHLY'
+  const roleSet = isMonthly ? MPR_SIGNATORY_ROLES : WAR_SIGNATORY_ROLES
+  const existingSigs: any[] = Array.isArray(ea.signatories) ? ea.signatories : []
+  const sigByRole = new Map(existingSigs.map((s: any) => [s.role, s]))
   form.value = {
     entry_type: e.entryType || 'WEEKLY',
     entry_date: e.entryDate || '',
@@ -231,9 +354,42 @@ function openEdit(e: TimelogEntry) {
     title: e.title || '',
     work_accomplished: e.workAccomplished || '',
     issues_encountered: e.issuesEncountered || '',
+    description: ea.description || '',
     weather: e.weather || '',
     manpower_count: e.manpowerCount ?? null,
     equipment_used: e.equipmentUsed || '',
+    war_number: ea.warNumber || '',
+    reporting_period_start: ea.reportingPeriodStart ? toIsoDate(ea.reportingPeriodStart) : '',
+    reporting_period_end: ea.reportingPeriodEnd ? toIsoDate(ea.reportingPeriodEnd) : '',
+    personnel_equipment_constraints: ea.personnelEquipmentConstraints || '',
+    mitigation_measures: ea.mitigationMeasures || '',
+    look_ahead_activities: ea.lookAheadActivities || '',
+    accomplishments: Array.isArray(ea.accomplishments) ? ea.accomplishments.map((a: any) => ({ description: a.description || '', category: a.category || '', date: a.date || '', percentage: a.percentage ?? null, remarks: a.remarks || '' })) : [],
+    mpr_number: ea.mprNumber || '',
+    reporting_period_month: ea.reportingPeriodMonth ? toIsoDate(ea.reportingPeriodMonth) : '',
+    percent_time_elapsed: ea.percentTimeElapsed ?? null,
+    accomplishment_summary_percent: ea.accomplishmentSummaryPercent ?? null,
+    original_contract_amount: ea.originalContractAmount ?? null,
+    revised_contract_amount: ea.revisedContractAmount ?? null,
+    work_items: Array.isArray(ea.workItems) ? ea.workItems : [],
+    signatories: roleSet.map(role => {
+      const s: any = sigByRole.get(role)
+      return s ? { userId: s.userId || '', userName: s.userName || '', position: s.position || '', role, date: s.date || '' } : { userId: '', userName: '', position: '', role, date: '' }
+    }),
+    // BBB-C: hydrate financial billing
+    billing_amount_this_period: ea.billingAmountThisPeriod ?? null,
+    financial_accomplishment_percent: ea.financialAccomplishmentPercent ?? null,
+    // ZZZ-G: hydrate concerns
+    concerns_list: Array.isArray(ea.concernsList) ? ea.concernsList.map((c: any) => ({
+      title: c.title || '', description: c.description || '', category: c.category || 'OTHER',
+      severity: c.severity || 'MEDIUM', status: c.status || 'OPEN', responsibleParty: c.responsibleParty || '',
+      resolutionTargetDate: c.resolutionTargetDate || '', actualResolutionDate: c.actualResolutionDate || '',
+      mitigationAction: c.mitigationAction || '', createdBy: c.createdBy || '', createdAt: c.createdAt || '',
+    })) : [],
+    // CCC-C: MOV fields reset on edit open (transient)
+    mov_file: null,
+    mov_link: '',
+    mov_link_title: '',
   }
   dialogOpen.value = true
 }
@@ -245,9 +401,21 @@ async function save() {
   }
   submitting.value = true
   try {
+    // CCC-C: Strip MOV transient fields — they are NOT sent to the timelog endpoint
+    const { mov_file, mov_link, mov_link_title, ...formRest } = form.value
     const payload: Record<string, any> = Object.fromEntries(
-      Object.entries(form.value).filter(([, v]) => v !== '' && v !== null),
+      Object.entries(formRest).filter(([, v]) => v !== '' && v !== null),
     )
+    // GGG-F: drop empty nested rows; keep only signatories with a selected user
+    if (Array.isArray(payload.accomplishments))
+      payload.accomplishments = payload.accomplishments.filter((a: any) => a.description?.trim())
+    if (Array.isArray(payload.work_items))
+      payload.work_items = payload.work_items.filter((w: any) => w.description?.trim())
+    if (Array.isArray(payload.signatories))
+      payload.signatories = payload.signatories.filter((s: any) => s.userId || s.userName)
+    // ZZZ-G: keep only concerns with a title or description
+    if (Array.isArray(payload.concerns_list))
+      payload.concerns_list = payload.concerns_list.filter((c: any) => c.title?.trim() || c.description?.trim())
     if (editing.value) {
       await api.patch(`/api/construction-projects/${props.projectId}/timeline-entries/${editing.value.id}`, payload)
       toast.success('Timelog updated')
@@ -255,6 +423,40 @@ async function save() {
       await api.post(`/api/construction-projects/${props.projectId}/timeline-entries`, payload)
       toast.success('Timelog created')
     }
+
+    // CCC-C: File MOV into the correct Supporting Documents repository after timelog save
+    const typeCode = form.value.entry_type === 'MONTHLY' ? 'SD_ECO_010' : 'SD_ECO_009'
+    const sourceRef = form.value.entry_type === 'MONTHLY'
+      ? `MPR — ${form.value.mpr_number || form.value.title}`
+      : `WAR — ${form.value.war_number || form.value.title}`
+    const sourceDesc = `Submitted from ${form.value.entry_type === 'MONTHLY' ? 'MPR' : 'WAR'} timelog: ${sourceRef}`
+
+    if (mov_file) {
+      const fd = new FormData()
+      fd.append('file', mov_file)
+      fd.append('documentType', typeCode)
+      fd.append('description', sourceDesc)
+      try {
+        await api.upload(`/api/construction-projects/${props.projectId}/documents`, fd)
+        toast.success('MOV document filed to repository')
+      } catch {
+        toast.error('Timelog saved but MOV upload failed — try uploading via Attachments tab')
+      }
+    }
+    if (mov_link && mov_link.startsWith('http')) {
+      try {
+        await api.post(`/api/construction-projects/${props.projectId}/documents`, {
+          documentType: typeCode,
+          externalLink: mov_link,
+          title: mov_link_title || sourceRef,
+          description: sourceDesc,
+        })
+        toast.success('MOV link filed to repository')
+      } catch {
+        toast.error('Timelog saved but MOV link failed — try adding via Attachments tab')
+      }
+    }
+
     dialogOpen.value = false
     await fetchEntries()
   } catch (err: any) {
@@ -453,26 +655,27 @@ watch(() => props.projectId, fetchEntries)
                       </v-list>
                     </v-menu>
                   </div>
-                  <div class="text-subtitle-1 font-weight-medium mb-1">{{ e.title || 'Untitled log' }}</div>
+                  <div class="text-subtitle-2 font-weight-medium mb-1">{{ e.title || 'Untitled log' }}</div>
                   <div v-if="e.workAccomplished" class="mb-2">
                     <div class="d-flex align-center ga-1 mb-1">
                       <v-icon size="16" color="success">mdi-progress-check</v-icon>
                       <span class="text-body-2 font-weight-medium text-grey-darken-2">Work Accomplished</span>
                     </div>
-                    <div class="text-body-1 text-pre-line pl-2">{{ e.workAccomplished }}</div>
+                    <div class="text-body-2 text-pre-line pl-2">{{ e.workAccomplished }}</div>
                   </div>
                   <div v-if="e.issuesEncountered" class="mb-2">
                     <div class="d-flex align-center ga-1 mb-1">
                       <v-icon size="16" color="warning">mdi-alert-circle-outline</v-icon>
                       <span class="text-body-2 font-weight-medium text-grey-darken-2">Issues / Risks</span>
                     </div>
-                    <div class="text-body-1 text-pre-line pl-2">{{ e.issuesEncountered }}</div>
+                    <div class="text-body-2 text-pre-line pl-2">{{ e.issuesEncountered }}</div>
                   </div>
                   <div class="d-flex flex-wrap ga-2 mt-2">
                     <v-chip v-if="e.manpowerCount != null" size="small" variant="outlined" prepend-icon="mdi-account-hard-hat">{{ e.manpowerCount }} personnel</v-chip>
                     <v-chip v-if="e.weather" size="small" variant="outlined" prepend-icon="mdi-weather-partly-cloudy">{{ e.weather }}</v-chip>
                     <v-chip v-if="e.equipmentUsed" size="small" variant="outlined" prepend-icon="mdi-excavator">{{ e.equipmentUsed }}</v-chip>
                     <v-chip v-if="e.photosCount" size="small" variant="outlined" prepend-icon="mdi-camera">{{ e.photosCount }} photos</v-chip>
+                    <v-chip v-if="(e.concernsList?.length ?? 0) > 0" size="small" color="error" variant="tonal" prepend-icon="mdi-alert-circle-outline">{{ e.concernsList!.length }} concern{{ e.concernsList!.length > 1 ? 's' : '' }}</v-chip>
                     <v-chip v-if="e.createdByName" size="small" variant="text" prepend-icon="mdi-account-outline">{{ e.createdByName }}</v-chip>
                   </div>
                 </v-card-text>
@@ -510,6 +713,7 @@ watch(() => props.projectId, fetchEntries)
                   <v-chip v-if="e.manpowerCount != null" size="x-small" variant="outlined" prepend-icon="mdi-account-hard-hat">{{ e.manpowerCount }}</v-chip>
                   <v-chip v-if="e.weather" size="x-small" variant="outlined" prepend-icon="mdi-weather-partly-cloudy">{{ e.weather }}</v-chip>
                   <v-chip v-if="e.photosCount" size="x-small" variant="outlined" prepend-icon="mdi-camera">{{ e.photosCount }} photos</v-chip>
+                  <v-chip v-if="(e.concernsList?.length ?? 0) > 0" size="x-small" color="error" variant="tonal" prepend-icon="mdi-alert-circle-outline">{{ e.concernsList!.length }}</v-chip>
                 </div>
               </v-col>
               <v-col cols="12" sm="2" class="d-flex justify-end">
@@ -566,7 +770,7 @@ watch(() => props.projectId, fetchEntries)
     </template>
 
     <!-- Add / edit dialog -->
-    <v-dialog v-model="dialogOpen" max-width="720" scrollable persistent>
+    <v-dialog v-model="dialogOpen" max-width="960" scrollable persistent>
       <v-card rounded="lg">
         <v-card-title class="d-flex align-center ga-2 bg-grey-lighten-4 py-3">
           <v-icon icon="mdi-calendar-text-outline" color="deep-purple" />
@@ -576,7 +780,34 @@ watch(() => props.projectId, fetchEntries)
         </v-card-title>
         <v-divider />
         <v-card-text class="pa-4">
+          <!-- ZZZ-E/F: Upgraded, dismissible WAR/MPR guidance banner (persists per project) -->
+          <v-alert
+            v-if="!bannerDismissed"
+            :color="form.entry_type === 'MONTHLY' ? 'success' : 'primary'"
+            variant="tonal" class="mb-4" :icon="form.entry_type === 'MONTHLY' ? 'mdi-calendar-month' : 'mdi-calendar-week'"
+            closable
+            @click:close="dismissBanner"
+          >
+            <div class="text-subtitle-2 font-weight-bold">
+              {{ form.entry_type === 'MONTHLY'
+                ? 'Monthly Progress Report (MPR — SD-ECO-ECO-010)'
+                : 'Weekly Accomplishment Report (WAR — SD-ECO-ECO-009)' }}
+            </div>
+            <div class="text-body-2 mt-1">
+              {{ form.entry_type === 'MONTHLY'
+                ? 'Record the month\'s accomplishments, time performance, work status, project concerns, and program for next month. Physical & financial completion percentages are maintained in the Progress Reports tab.'
+                : 'Record this week\'s accomplishments, physical completion, project concerns, delays, and actions taken during the reporting period. Physical & financial percentages are maintained in the Progress Reports tab.' }}
+            </div>
+          </v-alert>
+
           <v-row dense>
+            <!-- ───────── SECTION 1: Project Information / Overview ───────── -->
+            <v-col cols="12">
+              <div class="d-flex align-center ga-2 mb-1">
+                <v-icon size="18" :color="form.entry_type === 'MONTHLY' ? 'success' : 'primary'">mdi-information-outline</v-icon>
+                <span class="text-subtitle-2 font-weight-semibold">{{ form.entry_type === 'MONTHLY' ? 'Project Overview' : 'Project Information' }}</span>
+              </div>
+            </v-col>
             <v-col cols="12" sm="4">
               <v-select
                 v-model="form.entry_type" label="Type *"
@@ -606,20 +837,277 @@ watch(() => props.projectId, fetchEntries)
             <v-col cols="12">
               <v-text-field v-model="form.title" label="Title *" density="compact" variant="outlined" hide-details="auto" />
             </v-col>
+            <!-- Report number + period -->
+            <template v-if="form.entry_type === 'WEEKLY'">
+              <v-col cols="12" sm="4"><v-text-field v-model="form.war_number" label="WAR Number" density="compact" variant="outlined" hide-details="auto" /></v-col>
+              <v-col cols="12" sm="4"><v-text-field v-model="form.reporting_period_start" label="Period Start" type="date" density="compact" variant="outlined" hide-details="auto" /></v-col>
+              <v-col cols="12" sm="4"><v-text-field v-model="form.reporting_period_end" label="Period End" type="date" density="compact" variant="outlined" hide-details="auto" /></v-col>
+            </template>
+            <template v-else>
+              <v-col cols="12" sm="6"><v-text-field v-model="form.mpr_number" label="MPR Number" density="compact" variant="outlined" hide-details="auto" /></v-col>
+              <v-col cols="12" sm="6"><v-text-field v-model="form.reporting_period_month" label="Reporting Month" type="date" density="compact" variant="outlined" hide-details="auto" /></v-col>
+            </template>
+
+            <!-- ───────── SECTION 2: Weekly / Monthly Accomplishments ───────── -->
             <v-col cols="12">
-              <v-textarea v-model="form.work_accomplished" label="Work Accomplished" rows="3" auto-grow density="compact" variant="outlined" hide-details="auto" />
+              <div class="d-flex align-center ga-2 mb-1 mt-2">
+                <v-icon size="18" color="indigo">mdi-clipboard-check-outline</v-icon>
+                <span class="text-subtitle-2 font-weight-semibold">{{ form.entry_type === 'MONTHLY' ? 'Monthly Accomplishments' : 'Weekly Accomplishments' }}</span>
+              </div>
+            </v-col>
+            <v-col cols="12">
+              <v-textarea v-model="form.work_accomplished" :label="form.entry_type === 'MONTHLY' ? 'Accomplishments This Month' : 'Accomplishments This Week'" rows="3" auto-grow density="compact" variant="outlined" hide-details="auto" />
+            </v-col>
+            <!-- WAR itemized accomplishments list -->
+            <template v-if="form.entry_type === 'WEEKLY'">
+              <v-col cols="12" class="d-flex align-center justify-space-between">
+                <span class="text-caption text-grey font-weight-medium text-uppercase">Itemized Accomplishments</span>
+                <v-btn size="x-small" color="primary" variant="tonal" prepend-icon="mdi-plus" @click="addAccomplishment">Add</v-btn>
+              </v-col>
+              <v-col v-for="(a, i) in form.accomplishments" :key="'acc'+i" cols="12">
+                <v-row dense class="align-center">
+                  <v-col cols="12" sm="4"><v-text-field v-model="a.description" label="Description" density="compact" variant="outlined" hide-details /></v-col>
+                  <v-col cols="6" sm="2"><v-text-field v-model="a.category" label="Category" density="compact" variant="outlined" hide-details /></v-col>
+                  <v-col cols="6" sm="2"><v-text-field v-model="a.date" label="Date" type="date" density="compact" variant="outlined" hide-details /></v-col>
+                  <v-col cols="5" sm="2"><v-text-field v-model.number="a.percentage" label="%" type="number" density="compact" variant="outlined" hide-details /></v-col>
+                  <v-col cols="5" sm="1"><v-text-field v-model="a.remarks" label="Remarks" density="compact" variant="outlined" hide-details /></v-col>
+                  <v-col cols="2" sm="1" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeAccomplishment(i)" /></v-col>
+                </v-row>
+              </v-col>
+            </template>
+
+            <!-- ───────── SECTION 3: Physical Accomplishment ───────── -->
+            <v-col cols="12">
+              <div class="d-flex align-center ga-2 mb-1 mt-2">
+                <v-icon size="18" color="primary">mdi-progress-check</v-icon>
+                <span class="text-subtitle-2 font-weight-semibold">{{ form.entry_type === 'MONTHLY' ? 'Physical Accomplishment Summary' : 'Physical Accomplishment' }}</span>
+              </div>
+            </v-col>
+            <!-- AAA-F: physical accomplishment input available for both WAR and MPR -->
+            <v-col cols="12" sm="4">
+              <v-text-field
+                v-model.number="form.accomplishment_summary_percent"
+                :label="form.entry_type === 'MONTHLY' ? '% Accomplished' : 'Physical Accomplishment This Week (%)'"
+                type="number" min="0" max="100" step="0.1"
+                density="compact" variant="outlined" hide-details="auto"
+              />
+            </v-col>
+            <v-col cols="12">
+              <v-alert type="info" variant="tonal" density="compact" class="text-caption">
+                Cumulative physical completion percentage is the official record in the <strong>Progress Reports</strong> tab. This field captures the reported accomplishment for this period's documentation.
+              </v-alert>
+            </v-col>
+
+            <!-- ───────── SECTION 4: Financial Accomplishment ───────── -->
+            <v-col cols="12">
+              <div class="d-flex align-center ga-2 mb-1 mt-2">
+                <v-icon size="18" color="success">mdi-cash-multiple</v-icon>
+                <span class="text-subtitle-2 font-weight-semibold">{{ form.entry_type === 'MONTHLY' ? 'Financial Accomplishment Summary' : 'Financial Accomplishment' }}</span>
+              </div>
+            </v-col>
+            <!-- BBB-C: Financial billing fields shared by WAR and MPR (operational records) -->
+            <v-col cols="6" sm="4">
+              <v-text-field
+                v-model.number="form.financial_accomplishment_percent"
+                :label="form.entry_type === 'MONTHLY' ? 'Financial Accomplishment (%)' : 'Financial Accomplishment This Week (%)'"
+                type="number" min="0" max="100" step="0.1"
+                density="compact" variant="outlined" hide-details="auto"
+              />
+            </v-col>
+            <v-col cols="6" sm="4">
+              <v-text-field
+                v-model.number="form.billing_amount_this_period"
+                :label="form.entry_type === 'MONTHLY' ? 'Billing This Month (₱)' : 'Billing This Period (₱)'"
+                type="number" min="0" prefix="₱"
+                density="compact" variant="outlined" hide-details="auto"
+              />
+            </v-col>
+            <template v-if="form.entry_type === 'MONTHLY'">
+              <v-col cols="6" sm="4"><v-text-field v-model.number="form.percent_time_elapsed" label="% Time Elapsed" type="number" density="compact" variant="outlined" hide-details="auto" /></v-col>
+              <v-col cols="6" sm="4"><v-text-field v-model.number="form.original_contract_amount" label="Original Contract (₱)" type="number" prefix="₱" density="compact" variant="outlined" hide-details="auto" /></v-col>
+              <v-col cols="6" sm="4"><v-text-field v-model.number="form.revised_contract_amount" label="Revised Contract (₱)" type="number" prefix="₱" density="compact" variant="outlined" hide-details="auto" /></v-col>
+            </template>
+            <v-col cols="12">
+              <v-alert type="info" variant="tonal" density="compact" class="text-caption">
+                Official financial accomplishment is recorded in <strong>Progress Reports</strong>. These fields capture the site-level operational reference for WAR/MPR documentation.
+              </v-alert>
+            </v-col>
+
+            <!-- ───────── SECTION 5: Work Activities / Work Status ───────── -->
+            <v-col cols="12">
+              <div class="d-flex align-center ga-2 mb-1 mt-2">
+                <v-icon size="18" color="teal">mdi-hammer-wrench</v-icon>
+                <span class="text-subtitle-2 font-weight-semibold">{{ form.entry_type === 'MONTHLY' ? 'Work Status' : 'Work Activities' }}</span>
+              </div>
             </v-col>
             <v-col cols="12">
               <v-textarea v-model="form.issues_encountered" label="Issues / Risks Encountered" rows="2" auto-grow density="compact" variant="outlined" hide-details="auto" />
             </v-col>
-            <v-col cols="12" sm="4">
-              <v-text-field v-model.number="form.manpower_count" label="Personnel" type="number" min="0" density="compact" variant="outlined" hide-details="auto" />
+            <template v-if="form.entry_type === 'WEEKLY'">
+              <v-col cols="12"><span class="text-caption text-grey font-weight-medium text-uppercase">Field Operations</span></v-col>
+              <v-col cols="12" sm="4"><v-text-field v-model.number="form.manpower_count" label="Personnel On-Site" type="number" min="0" density="compact" variant="outlined" hide-details="auto" /></v-col>
+              <v-col cols="12" sm="4"><v-text-field v-model="form.weather" label="Weather" density="compact" variant="outlined" hide-details="auto" /></v-col>
+              <v-col cols="12" sm="4"><v-text-field v-model="form.equipment_used" label="Equipment On-Site" density="compact" variant="outlined" hide-details="auto" /></v-col>
+            </template>
+            <template v-else>
+              <v-col cols="12" class="d-flex align-center justify-space-between">
+                <span class="text-caption text-grey font-weight-medium text-uppercase">Work Accomplishment Items</span>
+                <v-btn size="x-small" color="success" variant="tonal" prepend-icon="mdi-plus" @click="addWorkItem">Add</v-btn>
+              </v-col>
+              <v-col v-for="(w, i) in form.work_items" :key="'wi'+i" cols="12">
+                <v-row dense class="align-center">
+                  <v-col cols="6" sm="3"><v-text-field v-model="w.description" label="Description" density="compact" variant="outlined" hide-details /></v-col>
+                  <v-col cols="6" sm="2"><v-text-field v-model="w.unit" label="Unit" density="compact" variant="outlined" hide-details /></v-col>
+                  <v-col cols="6" sm="2"><v-text-field v-model.number="w.quantity" label="Qty" type="number" density="compact" variant="outlined" hide-details /></v-col>
+                  <v-col cols="6" sm="2"><v-text-field v-model.number="w.weightNumber" label="Weight" type="number" density="compact" variant="outlined" hide-details /></v-col>
+                  <v-col cols="10" sm="2"><v-text-field v-model.number="w.actualPercentToDate" label="% To Date" type="number" density="compact" variant="outlined" hide-details /></v-col>
+                  <v-col cols="2" sm="1" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeWorkItem(i)" /></v-col>
+                </v-row>
+              </v-col>
+            </template>
+
+            <!-- ───────── SECTION 6: Project Concerns (ZZZ-G structured list) ───────── -->
+            <v-col cols="12">
+              <div class="d-flex align-center justify-space-between mb-1 mt-2">
+                <div class="d-flex align-center ga-2">
+                  <v-icon size="18" color="error">mdi-alert-circle-outline</v-icon>
+                  <span class="text-subtitle-2 font-weight-semibold">Project Concerns</span>
+                  <v-chip v-if="form.concerns_list.length" size="x-small" color="error" variant="tonal">{{ form.concerns_list.length }}</v-chip>
+                </div>
+                <v-btn size="x-small" color="error" variant="tonal" prepend-icon="mdi-plus" @click="addConcern">Add Concern</v-btn>
+              </div>
             </v-col>
-            <v-col cols="12" sm="4">
-              <v-text-field v-model="form.weather" label="Weather" density="compact" variant="outlined" hide-details="auto" />
+            <v-col v-for="(c, i) in form.concerns_list" :key="'concern'+i" cols="12">
+              <v-card variant="tonal" :color="concernSeverityColor(c.severity)" class="pa-3 mb-1" rounded="lg">
+                <v-row dense align="center">
+                  <v-col cols="12" sm="7"><v-text-field v-model="c.title" label="Title" density="compact" variant="outlined" hide-details bg-color="surface" /></v-col>
+                  <v-col cols="9" sm="4"><v-select v-model="c.category" :items="CONCERN_CATEGORIES" label="Category" density="compact" variant="outlined" hide-details bg-color="surface" /></v-col>
+                  <v-col cols="3" sm="1" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeConcern(i)" /></v-col>
+                  <v-col cols="12"><v-textarea v-model="c.description" label="Description" rows="2" auto-grow density="compact" variant="outlined" hide-details bg-color="surface" /></v-col>
+                  <v-col cols="6" sm="3"><v-select v-model="c.severity" :items="CONCERN_SEVERITIES" label="Severity" density="compact" variant="outlined" hide-details bg-color="surface" /></v-col>
+                  <v-col cols="6" sm="3"><v-select v-model="c.status" :items="CONCERN_STATUSES" label="Status" density="compact" variant="outlined" hide-details bg-color="surface" /></v-col>
+                  <v-col cols="12" sm="6"><v-text-field v-model="c.responsibleParty" label="Responsible Party" density="compact" variant="outlined" hide-details bg-color="surface" /></v-col>
+                  <v-col cols="6" sm="3"><v-text-field v-model="c.resolutionTargetDate" label="Target Resolution" type="date" density="compact" variant="outlined" hide-details bg-color="surface" /></v-col>
+                  <v-col cols="6" sm="3"><v-text-field v-model="c.actualResolutionDate" label="Actual Resolution" type="date" density="compact" variant="outlined" hide-details bg-color="surface" /></v-col>
+                  <v-col cols="12"><v-text-field v-model="c.mitigationAction" label="Mitigation Action" density="compact" variant="outlined" hide-details bg-color="surface" /></v-col>
+                </v-row>
+              </v-card>
             </v-col>
-            <v-col cols="12" sm="4">
-              <v-text-field v-model="form.equipment_used" label="Equipment Used" density="compact" variant="outlined" hide-details="auto" />
+            <!-- Legacy concern textareas (preserved per ZZZ-G) -->
+            <v-col cols="12"><v-textarea v-model="form.personnel_equipment_constraints" label="Personnel / Equipment Constraints (legacy)" rows="2" auto-grow density="compact" variant="outlined" hide-details="auto" /></v-col>
+
+            <!-- ───────── SECTION 7: Recommendations / Corrective Actions ───────── -->
+            <v-col cols="12">
+              <div class="d-flex align-center ga-2 mb-1 mt-2">
+                <v-icon size="18" color="deep-orange">mdi-clipboard-arrow-right-outline</v-icon>
+                <span class="text-subtitle-2 font-weight-semibold">{{ form.entry_type === 'MONTHLY' ? 'Corrective Actions' : 'Recommendations / Actions Taken' }}</span>
+              </div>
+            </v-col>
+            <v-col cols="12"><v-textarea v-model="form.mitigation_measures" :label="form.entry_type === 'MONTHLY' ? 'Corrective Actions' : 'Mitigation / Contingency Measures'" rows="2" auto-grow density="compact" variant="outlined" hide-details="auto" /></v-col>
+            <v-col v-if="form.entry_type === 'WEEKLY'" cols="12"><v-textarea v-model="form.look_ahead_activities" label="Look-Ahead Activities (Next Week)" rows="2" auto-grow density="compact" variant="outlined" hide-details="auto" /></v-col>
+
+            <!-- ───────── SECTION 8: Forecast / Next Period ───────── -->
+            <v-col cols="12">
+              <div class="d-flex align-center ga-2 mb-1 mt-2">
+                <v-icon size="18" color="blue-grey">mdi-calendar-arrow-right</v-icon>
+                <span class="text-subtitle-2 font-weight-semibold">{{ form.entry_type === 'MONTHLY' ? 'Program for Next Month / Forecast' : 'Plan for Next Week' }}</span>
+              </div>
+            </v-col>
+            <v-col cols="12">
+              <v-textarea v-model="form.description" :label="form.entry_type === 'MONTHLY' ? 'Program for Next Month / Forecast' : 'Plan for Next Week'" rows="2" auto-grow density="compact" variant="outlined" hide-details="auto" />
+            </v-col>
+
+            <!-- ───────── Signatories / Approval Workflow (user search) ───────── -->
+            <v-col cols="12">
+              <div class="d-flex align-center ga-2 mb-1 mt-2">
+                <v-icon size="18" color="purple">mdi-draw-pen</v-icon>
+                <span class="text-subtitle-2 font-weight-semibold">{{ form.entry_type === 'MONTHLY' ? 'Approval Workflow' : 'Signatories' }}</span>
+              </div>
+            </v-col>
+            <v-col v-for="(sig, i) in form.signatories" :key="'sig'+i" cols="12">
+              <v-row dense class="align-center">
+                <v-col cols="12" sm="3"><v-chip size="small" variant="tonal" color="blue-grey">{{ sig.role }}</v-chip></v-col>
+                <v-col cols="12" sm="5">
+                  <v-autocomplete
+                    v-model="sig.userId"
+                    :items="userSearchResults"
+                    :loading="userSearchLoading"
+                    item-title="fullName" item-value="id"
+                    label="Search system user…" density="compact" variant="outlined" hide-details
+                    clearable no-filter
+                    @update:search="searchUsers"
+                    @update:model-value="(v: any) => onSignatorySelect(sig, v)"
+                  >
+                    <template #selection>{{ sig.userName || 'Search…' }}</template>
+                  </v-autocomplete>
+                </v-col>
+                <v-col cols="6" sm="2"><v-text-field v-model="sig.position" label="Position" density="compact" variant="outlined" hide-details /></v-col>
+                <v-col cols="6" sm="2"><v-text-field v-model="sig.date" label="Date" type="date" density="compact" variant="outlined" hide-details /></v-col>
+              </v-row>
+            </v-col>
+
+            <!-- ───────── SECTION 8/9: Supporting Evidence & MOV (DDD-C) ───────── -->
+            <!-- Row 0: Section banner -->
+            <v-col cols="12">
+              <v-alert type="info" variant="tonal" density="compact" class="mb-2" icon="mdi-paperclip">
+                <div class="text-subtitle-2 font-weight-semibold">Supporting Evidence &amp; Means of Verification (MOV)</div>
+                <div class="text-caption mt-1">
+                  Upload supporting evidence, photos, reports, links, and documentation related to this accomplishment report.
+                  Files will be automatically filed to
+                  <strong>Supporting Documents → Reports &amp; Monitoring →
+                  {{ form.entry_type === 'MONTHLY' ? 'Monthly Progress Report' : 'Weekly Accomplishment Report' }}</strong>.
+                </div>
+              </v-alert>
+            </v-col>
+            <!-- Row 1: Upload + Link side-by-side -->
+            <v-col cols="12" sm="6">
+              <v-file-input
+                :model-value="form.mov_file ? [form.mov_file] : []"
+                label="Upload MOV Document"
+                prepend-icon="mdi-file-upload-outline"
+                density="compact" variant="outlined" hide-details="auto"
+                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                @update:model-value="(f: File | File[] | null | undefined) => form.mov_file = (Array.isArray(f) ? f[0] : f) ?? null"
+              />
+            </v-col>
+            <v-col cols="12" sm="6">
+              <v-text-field
+                v-model="form.mov_link"
+                label="Or paste a document link"
+                prepend-inner-icon="mdi-link-variant"
+                density="compact" variant="outlined" hide-details="auto"
+                placeholder="https://..."
+                clearable
+              />
+            </v-col>
+            <v-col v-if="form.mov_link" cols="12" sm="6" class="offset-sm-6">
+              <v-text-field
+                v-model="form.mov_link_title"
+                label="Link title (optional)"
+                density="compact" variant="outlined" hide-details="auto"
+              />
+            </v-col>
+            <!-- Row 2: Status feedback -->
+            <v-col v-if="form.mov_file || form.mov_link" cols="12">
+              <v-alert type="success" variant="tonal" density="compact" icon="mdi-check-circle-outline" class="text-caption">
+                <span v-if="form.mov_file">File <strong>{{ form.mov_file.name }}</strong> ready to upload.</span>
+                <span v-if="form.mov_file && form.mov_link"> · </span>
+                <span v-if="form.mov_link">Link ready to file.</span>
+                Will be automatically filed to the repository on submit.
+              </v-alert>
+            </v-col>
+            <!-- Row 3: Repository destination -->
+            <v-col cols="12">
+              <v-card variant="tonal" color="blue-grey" class="pa-2" rounded="lg">
+                <div class="d-flex align-center ga-2 flex-wrap">
+                  <v-icon size="14" color="blue-grey">mdi-folder-open-outline</v-icon>
+                  <span class="text-caption font-weight-medium">Repository destination:</span>
+                  <v-chip size="x-small" variant="outlined">
+                    Supporting Documents → Reports &amp; Monitoring →
+                    {{ form.entry_type === 'MONTHLY' ? 'Monthly Progress Report (SD_ECO_010)' : 'Weekly Accomplishment Report (SD_ECO_009)' }}
+                  </v-chip>
+                </div>
+              </v-card>
             </v-col>
           </v-row>
         </v-card-text>

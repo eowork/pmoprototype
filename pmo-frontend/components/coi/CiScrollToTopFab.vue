@@ -41,7 +41,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .coi-scroll-fab {
   position: fixed;
-  bottom: 24px;
+  /* AAA-D: 80px clears the ~48px action footer (Save/Next) + margin on edit/new pages */
+  bottom: 80px;
   right: 24px;
   z-index: 1100;
 }

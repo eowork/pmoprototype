@@ -6,6 +6,7 @@
  */
 import VueApexCharts from 'vue3-apexcharts'
 import type { UIProjectDetail } from '~/utils/adapters'
+import { useCoiProgressReports } from '~/composables/useCoiProgressReports'
 
 interface Props {
   projectId: string
@@ -15,6 +16,10 @@ const props = defineProps<Props>()
 
 const api = useApi()
 // ME: POW removed — analytics no longer references POW items
+
+// AAA-J: self-contained progress-report fetch for the physical progress trend chart
+const projectIdRef = computed(() => props.projectId)
+const { items: progressReports } = useCoiProgressReports(projectIdRef)
 
 function fmtCurrency(v: number | null): string {
   if (v == null) return '—'
@@ -50,10 +55,11 @@ const healthStatusLabel = computed(() => {
 const revisedCost = computed(() => {
   const fins = (props.project.financials || []) as any[]
   const total = fins.reduce((s, f) => s + Number(f.appropriation ?? 0), 0)
-  return total || Number((props.project as any).contractAmount || 0)
+  return total || Number(props.project.totalContractAmount || 0)
 })
-const originalCost = computed(() => Number((props.project as any).contractAmount || 0))
-const costToDate = computed(() => Number((props.project as any).costIncurredToDate || 0))
+const originalCost = computed(() => Number(props.project.totalContractAmount || 0))
+const costToDate = computed(() => Number(props.project.costIncurredToDate || 0))
+const costThisPeriod = computed(() => Number(props.project.costIncurredThisPeriod || 0))
 const remainingBalance = computed(() => revisedCost.value - costToDate.value)
 const budgetUtilPct = computed(() => revisedCost.value > 0 ? (costToDate.value / revisedCost.value) * 100 : 0)
 const projectStage = computed(() => {
@@ -70,12 +76,47 @@ function fmtDate(iso?: string | null): string {
   catch { return iso }
 }
 
-const milestoneCompletionRate = computed(() => {
-  const ms = props.project.milestones || []
-  if (!ms.length) return 0
-  const completed = ms.filter((m: any) => (m.status || '').toUpperCase() === 'COMPLETED').length
-  return (completed / ms.length) * 100
+// GGG-C: Executive analytics — time performance + gauge configs
+const totalContractDays = computed<number | null>(() => {
+  const start = (props.project as any).startDate || (props.project as any).originalStartDate
+  const end = (props.project as any).revisedCompletionDate || props.project.targetCompletionDate
+  if (!start || !end) return null
+  const d = Math.ceil((new Date(end as string).getTime() - new Date(start as string).getTime()) / (1000 * 60 * 60 * 24))
+  return d > 0 ? d : null
 })
+const daysElapsed = computed<number | null>(() => {
+  const start = (props.project as any).startDate || (props.project as any).originalStartDate
+  if (!start) return null
+  const d = Math.ceil((Date.now() - new Date(start as string).getTime()) / (1000 * 60 * 60 * 24))
+  return d > 0 ? d : 0
+})
+const timeElapsedPct = computed(() => {
+  if (!totalContractDays.value || daysElapsed.value == null) return 0
+  return Math.min(100, (daysElapsed.value / totalContractDays.value) * 100)
+})
+
+function gaugeOptions(label: string, color: string) {
+  return {
+    chart: { type: 'radialBar' as const, sparkline: { enabled: true } },
+    plotOptions: {
+      radialBar: {
+        hollow: { size: '58%' },
+        dataLabels: {
+          name: { show: true, offsetY: 22, fontSize: '12px', color: '#888' },
+          value: { offsetY: -12, fontSize: '22px', fontWeight: 700, formatter: (v: number) => `${v.toFixed(0)}%` },
+        },
+      },
+    },
+    colors: [color],
+    labels: [label],
+    stroke: { lineCap: 'round' as const },
+  }
+}
+const physicalGauge = computed(() => ({ series: [Number(avgPhysicalProgress.value.toFixed(1))], options: gaugeOptions('Physical', '#1976D2') }))
+// ZZZ-A: Financial Utilization gauge uses computed obligation/appropriation ratio; falls back to financialProgress
+const financialGauge = computed(() => ({ series: [Number((financialUtilization.value ?? Number(props.project.financialProgress) ?? 0).toFixed(1))], options: gaugeOptions('Financial', '#43A047') }))
+
+// BBB-A: milestoneCompletionRate removed (milestone CRUD removed from edit page per ADR-011)
 
 const financialUtilization = computed(() => {
   const fins = (props.project.financials || []) as any[]
@@ -83,6 +124,19 @@ const financialUtilization = computed(() => {
   const totalApp = fins.reduce((s, f) => s + Number(f.appropriation ?? 0), 0)
   const totalObl = fins.reduce((s, f) => s + Number(f.obligation ?? f.obligations ?? 0), 0)
   return totalApp > 0 ? (totalObl / totalApp) * 100 : 0
+})
+
+// ZZZ-B: Financial Utilization % with fallback to financialProgress (for Performance Indicators + Financial Summary)
+const financialUtilPct = computed(() => financialUtilization.value ?? Number(props.project.financialProgress) ?? 0)
+
+// ZZZ-B: Current reporting period — latest fiscal year present in financials
+const latestReportingPeriod = computed<string>(() => {
+  const fins = (props.project.financials || []) as any[]
+  if (!fins.length) return '—'
+  const years = fins
+    .map((f) => Number(f.fiscalYear ?? f.fiscal_year ?? 0))
+    .filter((y) => y > 0)
+  return years.length ? `FY ${Math.max(...years)}` : '—'
 })
 
 // ───────────────────────────────────────────────
@@ -105,6 +159,8 @@ async function fetchChecklist() {
 }
 
 onMounted(() => { fetchChecklist() })
+// FFF-D: Re-fetch checklist when analytics tab is re-activated (e.g. after uploading docs)
+onActivated(() => { fetchChecklist() })
 
 const hasChecklistData = computed(() => checklist.value.length > 0)
 
@@ -112,87 +168,48 @@ const hasChecklistData = computed(() => checklist.value.length > 0)
 // KE-E-1: Empty-state detection
 // ───────────────────────────────────────────────
 const hasPowData = computed(() => false) // ME: POW removed
-// NI (2026-05-21): Repointed from project.financials → project.progress_reports
-const hasFinancialData = computed(() => ((props.project as any).progress_reports || (props.project as any).financials || []).length > 0)
-const hasMilestoneData = computed(() => (props.project.milestones || []).length > 0)
+// BBB-A: hasFinancialData driven by progress_reports (financials array permanently empty per NI-2026-05-21)
+const hasFinancialData = computed(() => ((props.project as any).progress_reports || []).length > 0)
+// BBB-A: hasMilestoneData removed — milestone charts removed per R-052
 
 const allEmpty = computed(() =>
-  !hasFinancialData.value && !hasMilestoneData.value && !hasChecklistData.value,
+  !hasFinancialData.value && !hasChecklistData.value,
 )
 
+// BBB-A: fyUtilizationGauges removed — project.financials[] permanently empty (ConstructionProjectFinancial archived NI-2026-05-21)
+// BBB-A: milestoneSlippageChart removed — milestone CRUD removed from edit page per ADR-011
+
 // ───────────────────────────────────────────────
-// KE-E-2: Per-FY utilization gauges
+// EEE-A: Compliance Scorecard (group-level bars, replaces status donut)
 // ───────────────────────────────────────────────
-const fyUtilizationGauges = computed(() => {
-  const fins = (props.project.financials || []) as any[]
-  const sorted = [...fins].sort((a, b) => (a.fiscalYear ?? a.fiscal_year ?? 0) - (b.fiscalYear ?? b.fiscal_year ?? 0))
-  return sorted.map(f => {
-    const app = Number(f.appropriation ?? 0)
-    const obl = Number(f.obligation ?? f.obligations ?? 0)
-    const rate = app > 0 ? Math.min(100, (obl / app) * 100) : 0
-    const fy = f.fiscalYear ?? f.fiscal_year ?? '—'
-    const color = rate >= 80 ? '#43A047' : rate >= 50 ? '#FB8C00' : '#E53935'
-    return {
-      fy,
-      series: [+rate.toFixed(1)],
-      options: {
-        chart: { type: 'radialBar', sparkline: { enabled: true } },
-        plotOptions: {
-          radialBar: {
-            hollow: { size: '50%' },
-            dataLabels: {
-              name: { show: true, offsetY: -6, fontSize: '11px' },
-              value: { fontSize: '14px', fontWeight: 'bold', formatter: (v: number) => `${v}%` },
-            },
-          },
-        },
-        colors: [color],
-        labels: [`FY ${fy}`],
-      },
-    }
-  })
+const complianceScorecard = computed(() => {
+  if (!checklist.value.length) return []
+  const groups = new Map<string, { label: string; total: number; approved: number }>()
+  for (const item of checklist.value) {
+    const code: string = (item as any).documentType?.groupCode || 'OTHER'
+    const label: string = (item as any).documentType?.groupLabel || code.replace(/_/g, ' ')
+    const entry = groups.get(code) || { label, total: 0, approved: 0 }
+    entry.total++
+    const status: string = (item as any).submissionStatus || (item as any).submission_status || 'NOT_SUBMITTED'
+    if (status === 'APPROVED') entry.approved++
+    groups.set(code, entry)
+  }
+  return Array.from(groups.values()).map(g => ({
+    ...g,
+    pct: g.total > 0 ? Math.round((g.approved / g.total) * 100) : 0,
+    color: g.approved === g.total ? 'success' : g.approved === 0 ? 'error' : 'warning',
+  }))
 })
 
-// ───────────────────────────────────────────────
-// KE-E-3: Milestone slippage histogram
-// ───────────────────────────────────────────────
-const SLIPPAGE_BINS = ['On time', '1-7 days late', '8-30 days late', '30+ days late'] as const
-
-const milestoneSlippageChart = computed(() => {
-  const ms = (props.project.milestones || []) as any[]
-  const counts = { 'On time': 0, '1-7 days late': 0, '8-30 days late': 0, '30+ days late': 0 }
-  let hasData = false
-  for (const m of ms) {
-    const target = m.targetDate || m.target_completion_date
-    const actual = m.actualDate || m.actual_completion_date
-    if (!target || !actual) continue
-    hasData = true
-    const diff = Math.floor(
-      (new Date(actual).getTime() - new Date(target).getTime()) / 86_400_000,
-    )
-    if (diff <= 0) counts['On time']++
-    else if (diff <= 7) counts['1-7 days late']++
-    else if (diff <= 30) counts['8-30 days late']++
-    else counts['30+ days late']++
-  }
-  return {
-    hasData,
-    series: [{ name: 'Milestones', data: SLIPPAGE_BINS.map(b => counts[b]) }],
-    options: {
-      chart: { type: 'bar' as const },
-      plotOptions: { bar: { distributed: true, borderRadius: 4 } },
-      xaxis: { categories: [...SLIPPAGE_BINS] },
-      yaxis: { title: { text: 'Count' }, labels: { formatter: (v: number) => String(v) } },
-      colors: ['#43A047', '#FB8C00', '#E53935', '#B71C1C'],
-      dataLabels: { enabled: true },
-      legend: { show: false },
-    },
-  }
+const overallCompliancePct = computed(() => {
+  if (!checklist.value.length) return 0
+  const approved = checklist.value.filter(
+    (i: any) => (i.submissionStatus || i.submission_status) === 'APPROVED',
+  ).length
+  return Math.round((approved / checklist.value.length) * 100)
 })
 
-// ───────────────────────────────────────────────
-// KE-E-4: Document compliance donut
-// ───────────────────────────────────────────────
+// FFF-D: Compliance donut — restored alongside scorecard (status breakdown)
 const STATUS_ORDER = ['NOT_SUBMITTED', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'REJECTED'] as const
 const STATUS_COLORS: Record<string, string> = {
   NOT_SUBMITTED: '#9E9E9E',
@@ -201,11 +218,10 @@ const STATUS_COLORS: Record<string, string> = {
   APPROVED: '#43A047',
   REJECTED: '#E53935',
 }
-
 const complianceDonutChart = computed(() => {
   const counts: Record<string, number> = {}
   for (const item of checklist.value) {
-    const s = item.submissionStatus || item.submission_status || 'NOT_SUBMITTED'
+    const s: string = (item as any).submissionStatus || (item as any).submission_status || 'NOT_SUBMITTED'
     counts[s] = (counts[s] || 0) + 1
   }
   const present = STATUS_ORDER.filter(s => counts[s])
@@ -223,60 +239,65 @@ const complianceDonutChart = computed(() => {
   }
 })
 
-// ME: POW status/category charts removed
+// BBB-A: financialChart (FY bar), hasNonZeroFinancials, milestoneChart, hasNonZeroMilestones removed
+// BBB-A: fyTotals, fyObligationRate removed — project.financials[] permanently empty (R-051)
 
-// Financial stacked bar (per FY)
-const financialChart = computed(() => {
-  const fins = (props.project.financials || []) as any[]
-  const sorted = [...fins].sort((a, b) => (a.fiscalYear || a.fiscal_year) - (b.fiscalYear || b.fiscal_year))
-  const years = sorted.map(f => String(f.fiscalYear ?? f.fiscal_year))
+// BBB-A: Cost Incurred Progression chart — replaces FY bar chart; uses actual progress report data
+const costProgressionChart = computed(() => {
+  const sorted = [...progressReports.value]
+    .filter(r => r.costIncurredToDate != null && Number(r.costIncurredToDate) > 0)
+    .sort((a, b) => new Date(a.reportDate).getTime() - new Date(b.reportDate).getTime())
+  const categories = sorted.map(r => r.reportDate.slice(0, 7))
+  const data = sorted.map(r => Number(r.costIncurredToDate || 0))
   return {
-    series: [
-      { name: 'Appropriation', data: sorted.map(f => Number(f.appropriation ?? 0)) },
-      { name: 'Obligations',   data: sorted.map(f => Number(f.obligation ?? f.obligations ?? 0)) },
-      { name: 'Disbursement',  data: sorted.map(f => Number(f.disbursement ?? 0)) },
-    ],
+    hasData: sorted.length >= 2,
+    series: [{ name: 'Cost Incurred to Date (₱)', data }],
     options: {
-      chart: { type: 'bar' as const, stacked: false },
-      xaxis: { categories: years, title: { text: 'Fiscal Year' } },
-      yaxis: { labels: { formatter: (v: number) => fmtCurrency(v) } },
-      colors: ['#1976D2', '#FB8C00', '#43A047'],
-      dataLabels: { enabled: false },
-      tooltip: { y: { formatter: (v: number) => fmtCurrency(v) } },
-    },
-  }
-})
-
-// KK-B: Financial series guard — suppress when ALL FY values across all series are zero
-const hasNonZeroFinancials = computed(() =>
-  financialChart.value.series.some(s => (s.data ?? []).some((v: number) => v > 0)),
-)
-
-// Milestone progress bar
-const milestoneChart = computed(() => {
-  const ms = (props.project.milestones || []) as any[]
-  return {
-    series: [{ name: 'Progress %', data: ms.map(m => Number(m.progress || 0)) }],
-    options: {
-      chart: { type: 'bar' as const },
-      plotOptions: { bar: { horizontal: true } },
-      // KG-B: ApexCharts horizontal bar uses xaxis.categories for category labels
-      xaxis: {
-        categories: ms.map(m => m.title || m.name || '—'),
-        max: 100,
-        title: { text: 'Progress %' },
-      },
-      yaxis: {},
+      chart: { type: 'area' as const, toolbar: { show: false } },
+      stroke: { curve: 'smooth' as const, width: 2 },
+      fill: { type: 'gradient', gradient: { shadeIntensity: 0.3, opacityFrom: 0.4, opacityTo: 0.05 } },
       colors: ['#43A047'],
-      dataLabels: { enabled: true, formatter: (v: number) => `${v}%` },
+      xaxis: { categories, labels: { rotate: -30, style: { fontSize: '10px' } }, title: { text: 'Report Period' } },
+      yaxis: { labels: { formatter: (v: number) => fmtCurrency(v) }, title: { text: 'Cost (₱)' } },
+      tooltip: { y: { formatter: (v: number) => fmtCurrency(v) } },
+      markers: { size: 4 },
     },
   }
 })
 
-// KK-B: Milestone series guard
-const hasNonZeroMilestones = computed(() =>
-  (milestoneChart.value.series[0]?.data ?? []).some((v: number) => v > 0),
-)
+// ───────────────────────────────────────────────
+// AAA-J: Physical progress trend (actual vs planned per reporting period)
+// ───────────────────────────────────────────────
+const physicalTrendChart = computed(() => {
+  const sorted = [...progressReports.value]
+    .filter(r => r.reportDate)
+    .sort((a, b) => new Date(a.reportDate).getTime() - new Date(b.reportDate).getTime())
+  const categories = sorted.map(r => r.reportDate.slice(0, 7)) // YYYY-MM
+  const actual = sorted.map(r => Number(r.percentageCompletion || 0))
+  const planned = sorted.map(r => (r.plannedAccomplishment != null ? Number(r.plannedAccomplishment) : null))
+  const hasPlanned = planned.some(v => v != null)
+  const series: { name: string; type: string; data: (number | null)[] }[] = [
+    { name: 'Actual Physical %', type: 'area', data: actual },
+  ]
+  if (hasPlanned) series.push({ name: 'Planned %', type: 'line', data: planned })
+  return {
+    hasData: sorted.length >= 2,
+    series,
+    options: {
+      chart: { type: 'line' as const, toolbar: { show: false } },
+      stroke: { curve: 'smooth' as const, width: hasPlanned ? [2, 2] : [2], dashArray: hasPlanned ? [0, 5] : [0] },
+      fill: { type: hasPlanned ? ['gradient', 'solid'] : ['gradient'], gradient: { shadeIntensity: 0.3, opacityFrom: 0.4, opacityTo: 0.05 } },
+      colors: ['#1976D2', '#9E9E9E'],
+      xaxis: { categories, labels: { rotate: -30, style: { fontSize: '10px' } }, title: { text: 'Report Period' } },
+      yaxis: { min: 0, max: 100, labels: { formatter: (v: number) => `${v}%` }, title: { text: 'Physical %' } },
+      tooltip: { y: { formatter: (v: number) => `${v}%` } },
+      legend: { show: hasPlanned },
+      markers: { size: 4 },
+    },
+  }
+})
+
+// BBB-A: milestoneDonutChart removed — milestone CRUD removed from edit page per ADR-011 (R-052)
 
 </script>
 
@@ -288,7 +309,7 @@ const hasNonZeroMilestones = computed(() =>
         <v-icon icon="mdi-chart-bar" size="64" color="grey-lighten-2" class="d-block mx-auto mb-4" />
         <div class="text-h6 font-weight-medium text-grey mb-2">No Analytics Data Yet</div>
         <div class="text-body-2 text-grey mb-4">
-          Analytics will appear once this project has financial entries, milestones, or compliance data.
+          Analytics will appear once this project has progress reports or compliance data.
         </div>
         <v-btn variant="tonal" color="primary" size="small" prepend-icon="mdi-pencil" @click="$emit('go-to-edit')">
           Add Data via Edit Project
@@ -297,42 +318,173 @@ const hasNonZeroMilestones = computed(() =>
     </template>
 
     <template v-if="!allEmpty">
-    <!-- DDD-D: Stakeholder Analytics Dashboard — 4 KPI sections before existing charts -->
+    <!-- GGG-C: Executive Analytics Dashboard -->
 
-    <!-- SECTION 1: PROJECT STATUS -->
-    <div class="text-overline text-medium-emphasis mb-2">Project Status</div>
-    <v-row dense class="mb-4">
-      <v-col cols="6" sm="3">
+    <!-- ROW 1: PROJECT SNAPSHOT -->
+    <v-alert variant="tonal" color="blue-grey" density="compact" class="mb-3" icon="mdi-information-outline">
+      <span class="text-subtitle-2 font-weight-semibold">Project Snapshot</span>
+      <div class="text-caption">High-level project performance, schedule standing, and financial position at a glance.</div>
+    </v-alert>
+    <v-row dense class="mb-5">
+      <v-col cols="6" sm="4" md="2">
+        <v-card variant="tonal" :color="healthStatusColor" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Project Status</div>
+          <div class="text-subtitle-2 font-weight-bold mt-1">{{ healthStatusLabel }}</div>
+          <div class="text-caption text-grey">{{ projectStage }}</div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="4" md="2">
         <v-card variant="tonal" color="primary" class="pa-3 h-100" rounded="lg">
           <div class="text-caption text-grey">Physical Progress</div>
-          <div class="text-h5 font-weight-bold">{{ avgPhysicalProgress.toFixed(1) }}%</div>
+          <div class="text-h6 font-weight-bold">{{ avgPhysicalProgress.toFixed(1) }}%</div>
           <v-progress-linear :model-value="avgPhysicalProgress" height="4" rounded class="mt-1" />
         </v-card>
       </v-col>
-      <v-col cols="6" sm="3">
-        <v-card variant="tonal" color="info" class="pa-3 h-100" rounded="lg">
-          <div class="text-caption text-grey">Financial Progress</div>
-          <div class="text-h5 font-weight-bold">{{ (Number(props.project.financialProgress) || 0).toFixed(1) }}%</div>
-          <v-progress-linear :model-value="Number(props.project.financialProgress) || 0" height="4" color="info" rounded class="mt-1" />
+      <v-col cols="6" sm="4" md="2">
+        <v-card variant="tonal" color="success" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Financial Utilization</div>
+          <div class="text-h6 font-weight-bold">{{ budgetUtilPct.toFixed(1) }}%</div>
+          <v-progress-linear :model-value="budgetUtilPct" height="4" color="success" rounded class="mt-1" />
         </v-card>
       </v-col>
-      <v-col cols="6" sm="3">
+      <v-col cols="6" sm="4" md="2">
+        <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Original Cost</div>
+          <div class="text-subtitle-2 font-weight-bold">{{ fmtCurrency(originalCost) }}</div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="4" md="2">
+        <v-card variant="tonal" color="info" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Cost Incurred</div>
+          <div class="text-subtitle-2 font-weight-bold">{{ fmtCurrency(costToDate) }}</div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="4" md="2">
         <v-card variant="tonal" :color="isDelayed ? 'error' : 'success'" class="pa-3 h-100" rounded="lg">
           <div class="text-caption text-grey">{{ isDelayed ? 'Days Overdue' : 'Days Remaining' }}</div>
-          <div class="text-h5 font-weight-bold">{{ daysRemaining != null ? Math.abs(daysRemaining) : '—' }}</div>
-        </v-card>
-      </v-col>
-      <v-col cols="6" sm="3">
-        <v-card variant="tonal" color="secondary" class="pa-3 h-100" rounded="lg">
-          <div class="text-caption text-grey">Current Stage</div>
-          <div class="text-body-1 font-weight-bold mt-1">{{ projectStage }}</div>
-          <v-chip size="x-small" :color="healthStatusColor" variant="tonal" class="mt-1">{{ healthStatusLabel }}</v-chip>
+          <div class="text-h6 font-weight-bold">{{ daysRemaining != null ? Math.abs(daysRemaining) : '—' }}</div>
         </v-card>
       </v-col>
     </v-row>
 
-    <!-- SECTION 2: PROJECT COST -->
-    <div class="text-overline text-medium-emphasis mb-2">Project Cost</div>
+    <!-- ROW 2: PROJECT DATES + PROJECT COST -->
+    <v-row class="mb-2">
+      <v-col cols="12" md="6">
+        <v-alert variant="tonal" color="blue-grey" density="compact" class="mb-3" icon="mdi-calendar-range">
+          <span class="text-subtitle-2 font-weight-semibold">Project Dates</span>
+          <div class="text-caption">Key schedule dates and any approved contract time extensions.</div>
+        </v-alert>
+        <v-row dense>
+          <v-col v-for="(item, i) in [
+            { label: 'Original Start Date', value: (props.project as any).originalStartDate || (props.project as any).startDate },
+            { label: 'Original End Date', value: (props.project as any).originalCompletionDate || props.project.targetCompletionDate },
+            { label: 'Revised Start Date', value: (props.project as any).revisedStartDate },
+            { label: 'Revised End Date', value: (props.project as any).revisedCompletionDate },
+          ]" :key="i" cols="6">
+            <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
+              <div class="text-caption text-grey">{{ item.label }}</div>
+              <div class="text-body-2 font-weight-medium">{{ item.value ? fmtDate(item.value) : '—' }}</div>
+            </v-card>
+          </v-col>
+        </v-row>
+      </v-col>
+      <v-col cols="12" md="6">
+        <v-alert variant="tonal" color="blue-grey" density="compact" class="mb-3" icon="mdi-cash-multiple">
+          <span class="text-subtitle-2 font-weight-semibold">Project Cost</span>
+          <div class="text-caption">Contract commitments and current expenditure status.</div>
+        </v-alert>
+        <v-row dense>
+          <v-col cols="6">
+            <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
+              <div class="text-caption text-grey">Original Contract Amount</div>
+              <div class="text-body-2 font-weight-bold">{{ fmtCurrency(originalCost) }}</div>
+            </v-card>
+          </v-col>
+          <v-col cols="6">
+            <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
+              <div class="text-caption text-grey">Revised Contract Amount</div>
+              <div class="text-body-2 font-weight-bold">{{ fmtCurrency(revisedCost) }}</div>
+            </v-card>
+          </v-col>
+          <v-col cols="6">
+            <v-card variant="tonal" color="blue-grey" class="pa-3 h-100" rounded="lg">
+              <div class="text-caption text-grey">Cost This Period</div>
+              <div class="text-body-2 font-weight-bold">{{ fmtCurrency(costThisPeriod) }}</div>
+              <div v-if="costThisPeriod > 0 && props.project.latestProgressReportDate" class="text-grey" style="font-size:10px">from {{ fmtDate(props.project.latestProgressReportDate) }}</div>
+              <div v-else-if="costThisPeriod <= 0" class="text-grey-lighten-1" style="font-size:10px">No progress report filed</div>
+            </v-card>
+          </v-col>
+          <v-col cols="6">
+            <v-card variant="tonal" color="info" class="pa-3 h-100" rounded="lg">
+              <div class="text-caption text-grey">Cost To Date</div>
+              <div class="text-body-2 font-weight-bold">{{ fmtCurrency(costToDate) }}</div>
+            </v-card>
+          </v-col>
+        </v-row>
+      </v-col>
+    </v-row>
+
+    <!-- ROW 3: EXECUTIVE VISUALIZATIONS -->
+    <v-alert variant="tonal" color="blue-grey" density="compact" class="mb-3" icon="mdi-chart-arc">
+      <span class="text-subtitle-2 font-weight-semibold">Performance Indicators</span>
+      <div class="text-caption">Visual gauges for rapid assessment of physical, financial, and schedule performance.</div>
+    </v-alert>
+    <v-row dense class="mb-4">
+      <v-col cols="12" sm="4">
+        <v-card variant="outlined" class="pa-3 h-100 text-center" rounded="lg">
+          <div class="text-caption text-grey mb-1">Physical Progress</div>
+          <VueApexCharts type="radialBar" :series="physicalGauge.series" :options="physicalGauge.options" height="180" />
+        </v-card>
+      </v-col>
+      <v-col cols="12" sm="4">
+        <v-card variant="outlined" class="pa-3 h-100 text-center" rounded="lg">
+          <div class="text-caption text-grey mb-1">Financial Utilization</div>
+          <VueApexCharts type="radialBar" :series="financialGauge.series" :options="financialGauge.options" height="180" />
+        </v-card>
+      </v-col>
+      <v-col cols="12" sm="4">
+        <!-- ZZZ-B: 6-stat performance information card (replaces single time-elapsed bar) -->
+        <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey mb-2 text-center">Key Performance Stats</div>
+          <v-row dense>
+            <v-col cols="6">
+              <div class="text-caption text-grey">Physical Progress</div>
+              <div class="text-body-2 font-weight-bold">{{ avgPhysicalProgress.toFixed(1) }}%</div>
+            </v-col>
+            <v-col cols="6">
+              <div class="text-caption text-grey">Financial Utilization</div>
+              <div class="text-body-2 font-weight-bold">{{ financialUtilPct.toFixed(1) }}%</div>
+            </v-col>
+            <v-col cols="6">
+              <div class="text-caption text-grey">Days Elapsed</div>
+              <div class="text-body-2 font-weight-bold">{{ daysElapsed != null ? daysElapsed : '—' }}</div>
+            </v-col>
+            <v-col cols="6">
+              <div class="text-caption text-grey">{{ isDelayed ? 'Days Overdue' : 'Days Remaining' }}</div>
+              <div class="text-body-2 font-weight-bold" :class="isDelayed ? 'text-error' : ''">{{ daysRemaining != null ? Math.abs(daysRemaining) : '—' }}</div>
+            </v-col>
+            <v-col cols="6">
+              <div class="text-caption text-grey">Reporting Period</div>
+              <div class="text-body-2 font-weight-bold">{{ latestReportingPeriod }}</div>
+            </v-col>
+            <v-col cols="6">
+              <div class="text-caption text-grey">Project Stage</div>
+              <div class="text-body-2 font-weight-bold">{{ projectStage }}</div>
+            </v-col>
+          </v-row>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <!-- DDD-A: Financial Summary banner with data source attribution -->
+    <v-alert variant="tonal" color="blue-grey" density="compact" class="mb-3" icon="mdi-cash-multiple">
+      <span class="text-subtitle-2 font-weight-semibold">Financial Summary</span>
+      <div class="text-caption">Contract cost positions, fund source, and current expenditure utilization.</div>
+      <div class="text-caption text-grey-darken-1 mt-1 d-flex align-center ga-1">
+        <v-icon size="11">mdi-database-outline</v-icon>
+        Sources: Project Profile (contract amounts) · Progress Reports (cost incurred) · Funding Source record
+      </div>
+    </v-alert>
     <v-row dense class="mb-4">
       <v-col cols="6" sm="4" md="2">
         <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
@@ -347,191 +499,142 @@ const hasNonZeroMilestones = computed(() =>
         </v-card>
       </v-col>
       <v-col cols="6" sm="4" md="2">
+        <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Fund Source</div>
+          <div class="text-body-2 font-weight-medium">{{ props.project.fundSource || '—' }}</div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="4" md="2">
+        <v-card variant="tonal" color="blue-grey" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Cost This Period</div>
+          <div class="text-body-2 font-weight-bold">{{ fmtCurrency(costThisPeriod) }}</div>
+          <div v-if="costThisPeriod > 0 && props.project.latestProgressReportDate" class="text-grey" style="font-size:10px">from {{ fmtDate(props.project.latestProgressReportDate) }}</div>
+          <div v-else-if="costThisPeriod <= 0" class="text-grey-lighten-1" style="font-size:10px">No progress report filed</div>
+        </v-card>
+      </v-col>
+      <v-col cols="6" sm="4" md="2">
         <v-card variant="tonal" color="info" class="pa-3 h-100" rounded="lg">
           <div class="text-caption text-grey">Cost To Date</div>
           <div class="text-body-2 font-weight-bold">{{ fmtCurrency(costToDate) }}</div>
         </v-card>
       </v-col>
       <v-col cols="6" sm="4" md="2">
-        <v-card variant="tonal" :color="remainingBalance < 0 ? 'error' : 'success'" class="pa-3 h-100" rounded="lg">
-          <div class="text-caption text-grey">Remaining</div>
-          <div class="text-body-2 font-weight-bold">{{ fmtCurrency(remainingBalance) }}</div>
-        </v-card>
-      </v-col>
-      <v-col cols="6" sm="4" md="2">
-        <v-card variant="tonal" color="warning" class="pa-3 h-100" rounded="lg">
-          <div class="text-caption text-grey">Utilization</div>
-          <div class="text-body-2 font-weight-bold">{{ budgetUtilPct.toFixed(1) }}%</div>
-          <v-progress-linear :model-value="budgetUtilPct" height="4" color="warning" rounded class="mt-1" />
+        <v-card variant="tonal" color="success" class="pa-3 h-100" rounded="lg">
+          <div class="text-caption text-grey">Financial Utilization</div>
+          <div class="text-body-2 font-weight-bold">{{ financialUtilPct.toFixed(1) }}%</div>
         </v-card>
       </v-col>
     </v-row>
 
-    <!-- SECTION 3: PROJECT DATES -->
-    <div class="text-overline text-medium-emphasis mb-2">Project Dates</div>
-    <v-row dense class="mb-4">
-      <v-col v-for="(item, i) in [
-        { label: 'Original Start', value: (props.project as any).originalStartDate },
-        { label: 'Original End', value: (props.project as any).originalCompletionDate },
-        { label: 'Revised Start', value: (props.project as any).revisedStartDate },
-        { label: 'Revised End', value: (props.project as any).revisedCompletionDate },
-      ]" :key="i" cols="6" sm="3">
-        <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
-          <div class="text-caption text-grey">{{ item.label }}</div>
-          <div class="text-body-2 font-weight-medium">{{ item.value ? fmtDate(item.value) : '—' }}</div>
-        </v-card>
-      </v-col>
-    </v-row>
-
-    <!-- SECTION 4: PROJECT SNAPSHOT -->
-    <div class="text-overline text-medium-emphasis mb-2">Project Snapshot</div>
-    <v-row dense class="mb-4">
-      <v-col v-for="(item, i) in [
-        { label: 'Contractor', value: (props.project as any).contractor, icon: 'mdi-hard-hat' },
-        { label: 'Campus', value: props.project.campus, icon: 'mdi-school-outline' },
-        { label: 'Building Type', value: (props.project as any).buildingType, icon: 'mdi-office-building-outline' },
-        { label: 'Duration', value: (props.project as any).projectDuration, icon: 'mdi-timer-outline' },
-      ]" :key="i" cols="6" sm="3">
-        <v-card variant="outlined" class="pa-3 h-100" rounded="lg">
-          <div class="d-flex align-center ga-1 mb-1">
-            <v-icon size="14" color="grey">{{ item.icon }}</v-icon>
-            <div class="text-caption text-grey">{{ item.label }}</div>
+    <!-- DDD-A: Physical Progress Trend — upgraded to v-alert banner with data source -->
+    <v-row v-if="physicalTrendChart.hasData" dense class="mb-1">
+      <v-col cols="12">
+        <v-alert variant="tonal" color="primary" density="compact" class="mb-2" icon="mdi-trending-up">
+          <span class="text-subtitle-2 font-weight-semibold">Physical Progress Trend</span>
+          <div class="text-caption mt-1">Actual vs planned physical accomplishment per reporting period. Displays project trajectory and slippage.</div>
+          <div class="text-caption text-grey-darken-1 mt-1 d-flex align-center ga-1">
+            <v-icon size="11">mdi-database-outline</v-icon>
+            Source: Progress Reports (percentageCompletion, plannedAccomplishment)
           </div>
-          <div class="text-body-2 font-weight-medium">{{ item.value || '—' }}</div>
-        </v-card>
-      </v-col>
-    </v-row>
-
-    <v-divider class="mb-4" />
-    <!-- AAA-C: Project Health Summary row (retained for quick reference) -->
-    <v-card variant="tonal" color="primary" class="mb-4 pa-3" rounded="lg">
-      <div class="text-overline text-medium-emphasis mb-2">Project Health</div>
-      <v-row dense>
-        <v-col cols="6" sm="3">
-          <div class="text-caption text-grey">Physical Progress</div>
-          <div class="text-h5 font-weight-bold">{{ avgPhysicalProgress.toFixed(1) }}%</div>
-        </v-col>
-        <v-col cols="6" sm="3">
-          <div class="text-caption text-grey">Status</div>
-          <v-chip size="small" :color="healthStatusColor" variant="tonal" class="mt-1">{{ healthStatusLabel }}</v-chip>
-        </v-col>
-        <v-col v-if="daysRemaining != null" cols="6" sm="3">
-          <div class="text-caption text-grey">{{ isDelayed ? 'Days Overdue' : 'Days Remaining' }}</div>
-          <div class="text-h5 font-weight-bold" :class="isDelayed ? 'text-error' : ''">
-            {{ Math.abs(daysRemaining) }}
-          </div>
-        </v-col>
-        <v-col v-if="scheduleVarianceDays != null" cols="6" sm="3">
-          <div class="text-caption text-grey">Schedule Extension</div>
-          <div class="text-body-1 font-weight-bold" :class="scheduleVarianceDays > 0 ? 'text-warning' : 'text-success'">
-            {{ scheduleVarianceDays > 0 ? `+${scheduleVarianceDays}d` : scheduleVarianceDays === 0 ? 'On schedule' : `${scheduleVarianceDays}d` }}
-          </div>
-        </v-col>
-      </v-row>
-    </v-card>
-
-    <!-- KPI summary -->
-    <v-row dense class="mb-2">
-      <v-col cols="6" md="3">
-        <v-card variant="tonal" color="primary" class="pa-3">
-          <div class="text-caption">Avg Physical Progress</div>
-          <div class="text-h6 font-weight-bold">{{ avgPhysicalProgress.toFixed(1) }}%</div>
-        </v-card>
-      </v-col>
-      <v-col cols="6" md="3">
-        <v-card variant="tonal" color="success" class="pa-3">
-          <div class="text-caption">Financial Utilization</div>
-          <div class="text-h6 font-weight-bold">
-            {{ financialUtilization == null ? '—' : `${financialUtilization.toFixed(1)}%` }}
-          </div>
-        </v-card>
-      </v-col>
-      <v-col cols="6" md="3">
-        <v-card variant="tonal" color="warning" class="pa-3">
-          <div class="text-caption">Milestone Completion</div>
-          <div class="text-h6 font-weight-bold">{{ milestoneCompletionRate.toFixed(0) }}%</div>
-        </v-card>
-      </v-col>
-    </v-row>
-
-    <!-- KE-E-2: Per-FY utilization gauges -->
-    <v-card v-if="hasFinancialData" class="pa-3 mb-3">
-      <div class="text-subtitle-2 mb-2">Utilization Rate by Fiscal Year</div>
-      <v-row dense justify="center">
-        <v-col
-          v-for="gauge in fyUtilizationGauges"
-          :key="gauge.fy"
-          cols="6"
-          sm="4"
-          md="3"
-          lg="2"
-        >
+        </v-alert>
+        <v-card class="pa-3" variant="outlined" rounded="lg">
           <VueApexCharts
-            type="radialBar"
-            :series="gauge.series"
-            :options="gauge.options"
-            height="160"
+            type="line"
+            :series="physicalTrendChart.series"
+            :options="physicalTrendChart.options"
+            height="240"
           />
-        </v-col>
-      </v-row>
-    </v-card>
+        </v-card>
+      </v-col>
+    </v-row>
 
+    <!-- DDD-A: Cost Utilization compact KPI (not half-screen) + Cost Incurred Progression full-width -->
     <v-row dense>
-      <!-- ME: POW Status and POW Category charts removed -->
-      <v-col cols="12" md="6">
-        <v-card class="pa-3 mb-3">
-          <div class="text-subtitle-2 mb-2">Financial Summary by Fiscal Year</div>
-          <div v-if="!hasFinancialData" class="text-center py-6 text-grey">No financial data</div>
-          <div v-else-if="!hasNonZeroFinancials" class="text-center py-6 text-grey">All financial values are zero</div>
-          <VueApexCharts
-            v-else
-            type="bar"
-            :series="financialChart.series"
-            :options="financialChart.options"
-            height="320"
-          />
+      <!-- Compact Cost Utilization KPI card -->
+      <v-col cols="12" md="4">
+        <v-card class="pa-3 mb-3 h-100" variant="outlined" rounded="lg">
+          <div class="text-caption text-grey mb-1">Cost Utilization</div>
+          <div class="text-h5 font-weight-bold" :class="budgetUtilPct > 100 ? 'text-error' : 'text-success'">{{ budgetUtilPct.toFixed(1) }}%</div>
+          <v-progress-linear :model-value="budgetUtilPct" :color="budgetUtilPct > 100 ? 'error' : 'success'" height="6" rounded class="mt-1 mb-1" />
+          <div class="text-caption text-grey">{{ fmtCurrency(costToDate) }} spent</div>
+          <div class="text-caption text-grey">{{ fmtCurrency(remainingBalance) }} remaining</div>
+          <div class="text-caption text-grey-lighten-1 mt-1 d-flex align-center ga-1">
+            <v-icon size="10">mdi-database-outline</v-icon>
+            Progress Reports · Project Profile
+          </div>
         </v-card>
       </v-col>
-      <v-col cols="12" md="6">
-        <v-card class="pa-3 mb-3">
-          <div class="text-subtitle-2 mb-2">Milestone Progress</div>
-          <div v-if="!hasMilestoneData" class="text-center py-6 text-grey">No milestone data</div>
-          <div v-else-if="!hasNonZeroMilestones" class="text-center py-6 text-grey">No milestone progress recorded yet</div>
-          <VueApexCharts
-            v-else
-            type="bar"
-            :series="milestoneChart.series"
-            :options="milestoneChart.options"
-            height="320"
-          />
-        </v-card>
-      </v-col>
-
-      <!-- KE-E-3: Milestone slippage histogram -->
-      <v-col cols="12" md="6">
-        <v-card class="pa-3 mb-3">
-          <div class="text-subtitle-2 mb-2">Milestone Slippage Distribution</div>
-          <div v-if="!milestoneSlippageChart.hasData" class="text-center py-6 text-grey">
-            No milestones with completion dates
+      <!-- DDD-A: Cost Incurred Progression — expanded to 8 cols with full banner -->
+      <v-col cols="12" md="8">
+        <v-alert variant="tonal" color="success" density="compact" class="mb-2" icon="mdi-cash-clock">
+          <span class="text-subtitle-2 font-weight-semibold">Cost Incurred Progression</span>
+          <div class="text-caption mt-1">Cumulative cost incurred per reporting period. Shows financial burn rate over the project timeline.</div>
+          <div class="text-caption text-grey-darken-1 mt-1 d-flex align-center ga-1">
+            <v-icon size="11">mdi-database-outline</v-icon>
+            Source: Progress Reports
+          </div>
+        </v-alert>
+        <v-card class="pa-2" variant="outlined" rounded="lg">
+          <div v-if="!costProgressionChart.hasData" class="text-center py-6 text-grey text-body-2">
+            No cost data recorded yet — file Progress Reports with cost amounts to see the progression.
           </div>
           <VueApexCharts
             v-else
-            type="bar"
-            :series="milestoneSlippageChart.series"
-            :options="milestoneSlippageChart.options"
-            height="320"
+            type="area"
+            :series="costProgressionChart.series"
+            :options="costProgressionChart.options"
+            height="220"
           />
         </v-card>
       </v-col>
 
-      <!-- KE-E-4: Document compliance donut -->
+      <!-- AAA-H: Governance & Compliance section separator -->
+      <v-col cols="12">
+        <v-alert variant="tonal" color="blue-grey" density="compact" class="mb-1 mt-2" icon="mdi-shield-check-outline">
+          <span class="text-subtitle-2 font-weight-semibold">Governance &amp; Compliance</span>
+          <div class="text-caption">Document submission and compliance checklist status for this project.</div>
+        </v-alert>
+      </v-col>
+
+      <!-- EEE-A: Compliance Scorecard (left) + FFF-D: Donut restored (right) -->
       <v-col cols="12" md="6">
-        <v-card class="pa-3 mb-3">
-          <div class="text-subtitle-2 mb-2">Document Compliance Status</div>
+        <v-card class="pa-3 mb-3 h-100" variant="outlined" rounded="lg">
+          <div class="d-flex align-center justify-space-between mb-3">
+            <span class="text-subtitle-2 font-weight-semibold">Compliance by Category</span>
+            <v-chip
+              v-if="!checklistLoading && hasChecklistData"
+              :color="overallCompliancePct === 100 ? 'success' : overallCompliancePct > 50 ? 'warning' : 'error'"
+              size="small" variant="tonal"
+            >
+              {{ overallCompliancePct }}% Overall
+            </v-chip>
+          </div>
+          <div v-if="checklistLoading" class="text-center py-4">
+            <v-progress-circular indeterminate size="20" />
+          </div>
+          <div v-else-if="!hasChecklistData" class="text-center py-4 text-grey text-body-2">
+            No checklist data
+          </div>
+          <template v-else>
+            <div v-for="g in complianceScorecard" :key="g.label" class="mb-3">
+              <div class="d-flex justify-space-between align-center mb-1">
+                <span class="text-body-2 text-grey-darken-2">{{ g.label }}</span>
+                <v-chip size="x-small" :color="g.color" variant="tonal">{{ g.approved }}/{{ g.total }}</v-chip>
+              </div>
+              <v-progress-linear :model-value="g.pct" :color="g.color" height="8" rounded />
+            </div>
+          </template>
+        </v-card>
+      </v-col>
+
+      <!-- FFF-D: Submission Status Breakdown (restored donut) -->
+      <v-col cols="12" md="6">
+        <v-card class="pa-3 mb-3 h-100" variant="outlined" rounded="lg">
+          <div class="text-subtitle-2 font-weight-semibold mb-2">Submission Status Breakdown</div>
           <div v-if="checklistLoading" class="text-center py-6 text-grey">
             <v-progress-circular indeterminate size="24" />
           </div>
-          <div v-else-if="!hasChecklistData" class="text-center py-6 text-grey">
+          <div v-else-if="!hasChecklistData" class="text-center py-6 text-grey text-body-2">
             No checklist data
           </div>
           <template v-else>
@@ -542,7 +645,7 @@ const hasNonZeroMilestones = computed(() =>
               type="donut"
               :series="complianceDonutChart.series"
               :options="complianceDonutChart.options"
-              height="320"
+              height="260"
             />
           </template>
         </v-card>

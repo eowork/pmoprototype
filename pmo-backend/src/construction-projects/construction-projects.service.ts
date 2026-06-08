@@ -700,8 +700,9 @@ export class ConstructionProjectsService {
             as_of_date, cost_incurred_to_date,
             rdp_alignment, socioeconomic_agenda, csu_likha_goals, sdg_goals, beneficiary_list,
             funding_source_type, additional_funding_sources,
-            remarks_log, personnel_groups)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            remarks_log, personnel_groups,
+            status_updates, readiness_documents, signatories, risk_register, escalation_records)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`,
           [
             projectId,
@@ -766,6 +767,12 @@ export class ConstructionProjectsService {
             dto.additional_funding_sources ? JSON.stringify(dto.additional_funding_sources) : null,
             dto.remarks_log ? JSON.stringify(dto.remarks_log) : '[]',
             dto.personnel_groups ? JSON.stringify(dto.personnel_groups) : null,
+            // FFF-B: Others-tab JSONB fields — persist at creation so edit reload shows correct data
+            dto.status_updates ? JSON.stringify(dto.status_updates) : '[]',
+            dto.readiness_documents ? JSON.stringify(dto.readiness_documents) : '[]',
+            dto.signatories ? JSON.stringify(dto.signatories) : '[]',
+            dto.risk_register ? JSON.stringify(dto.risk_register) : '[]',
+            dto.escalation_records ? JSON.stringify(dto.escalation_records) : '[]',
           ],
         );
       } catch (err: any) {
@@ -910,10 +917,16 @@ export class ConstructionProjectsService {
 
     // KY-B1: exclude undefined AND empty arrays — empty arrays must not overwrite
     // existing JSONB data (prevents [[]] double-wrapping corruption).
+    // EEE-B: Others-tab scalar JSONB arrays (status_updates, risk_register, etc.) CAN be
+    // set to [] to clear all entries — they do not suffer from [[]] wrapping, so exempt them.
+    const clearableArrayFields = new Set([
+      'status_updates', 'readiness_documents', 'signatories',
+      'risk_register', 'escalation_records',
+    ])
     const fields = Object.keys(dto).filter(
       (k) =>
         dto[k] !== undefined &&
-        !(Array.isArray(dto[k]) && (dto[k] as any[]).length === 0) &&
+        (clearableArrayFields.has(k) || !(Array.isArray(dto[k]) && (dto[k] as any[]).length === 0)) &&
         k !== 'assigned_user_ids' &&
         k !== 'assignments',
     );
@@ -946,6 +959,7 @@ export class ConstructionProjectsService {
       'rdp_alignment', 'socioeconomic_agenda', 'csu_likha_goals', 'sdg_goals',
       'beneficiary_list', 'additional_funding_sources',
       'remarks_log', 'personnel_groups',
+      'project_notes_banking', // GGG-E
     ];
     let setClause = fields.map((f) => `${f} = ?`).join(', ');
     const values = fields.map((f) =>
@@ -1387,6 +1401,28 @@ export class ConstructionProjectsService {
       workAccomplished: dto.work_accomplished,
       issuesEncountered: dto.issues_encountered,
       reporterType: dto.reporter_type,
+      // GGG-F: WAR fields
+      warNumber: dto.war_number,
+      reportingPeriodStart: dto.reporting_period_start ? new Date(dto.reporting_period_start) : undefined,
+      reportingPeriodEnd: dto.reporting_period_end ? new Date(dto.reporting_period_end) : undefined,
+      personnelEquipmentConstraints: dto.personnel_equipment_constraints,
+      mitigationMeasures: dto.mitigation_measures,
+      lookAheadActivities: dto.look_ahead_activities,
+      accomplishments: dto.accomplishments,
+      signatories: dto.signatories,
+      // GGG-F: MPR fields
+      mprNumber: dto.mpr_number,
+      reportingPeriodMonth: dto.reporting_period_month ? new Date(dto.reporting_period_month) : undefined,
+      workItems: dto.work_items,
+      accomplishmentSummaryPercent: dto.accomplishment_summary_percent,
+      percentTimeElapsed: dto.percent_time_elapsed,
+      originalContractAmount: dto.original_contract_amount,
+      revisedContractAmount: dto.revised_contract_amount,
+      // ZZZ-G: structured Project Concerns list
+      concernsList: dto.concerns_list,
+      // BBB-C: WAR/MPR financial billing fields
+      billingAmountThisPeriod: dto.billing_amount_this_period,
+      financialAccomplishmentPercent: dto.financial_accomplishment_percent,
       createdBy: userId,
     });
     await this.em.persist(entity).flush();
@@ -1432,6 +1468,38 @@ export class ConstructionProjectsService {
       entity.issuesEncountered = dto.issues_encountered;
     if (dto.reporter_type !== undefined)
       entity.reporterType = dto.reporter_type;
+    // GGG-F: WAR fields
+    if (dto.war_number !== undefined) entity.warNumber = dto.war_number;
+    if (dto.reporting_period_start !== undefined)
+      entity.reportingPeriodStart = dto.reporting_period_start ? new Date(dto.reporting_period_start) : undefined;
+    if (dto.reporting_period_end !== undefined)
+      entity.reportingPeriodEnd = dto.reporting_period_end ? new Date(dto.reporting_period_end) : undefined;
+    if (dto.personnel_equipment_constraints !== undefined)
+      entity.personnelEquipmentConstraints = dto.personnel_equipment_constraints;
+    if (dto.mitigation_measures !== undefined)
+      entity.mitigationMeasures = dto.mitigation_measures;
+    if (dto.look_ahead_activities !== undefined)
+      entity.lookAheadActivities = dto.look_ahead_activities;
+    if (dto.accomplishments !== undefined) entity.accomplishments = dto.accomplishments;
+    if (dto.signatories !== undefined) entity.signatories = dto.signatories;
+    // GGG-F: MPR fields
+    if (dto.mpr_number !== undefined) entity.mprNumber = dto.mpr_number;
+    if (dto.reporting_period_month !== undefined)
+      entity.reportingPeriodMonth = dto.reporting_period_month ? new Date(dto.reporting_period_month) : undefined;
+    if (dto.work_items !== undefined) entity.workItems = dto.work_items;
+    if (dto.accomplishment_summary_percent !== undefined)
+      entity.accomplishmentSummaryPercent = dto.accomplishment_summary_percent;
+    if (dto.percent_time_elapsed !== undefined)
+      entity.percentTimeElapsed = dto.percent_time_elapsed;
+    if (dto.original_contract_amount !== undefined)
+      entity.originalContractAmount = dto.original_contract_amount;
+    if (dto.revised_contract_amount !== undefined)
+      entity.revisedContractAmount = dto.revised_contract_amount;
+    // ZZZ-G: structured Project Concerns list
+    if (dto.concerns_list !== undefined) entity.concernsList = dto.concerns_list;
+    // BBB-C: WAR/MPR financial billing fields
+    if (dto.billing_amount_this_period !== undefined) entity.billingAmountThisPeriod = dto.billing_amount_this_period;
+    if (dto.financial_accomplishment_percent !== undefined) entity.financialAccomplishmentPercent = dto.financial_accomplishment_percent;
     await this.em.flush();
 
     this.logger.log(

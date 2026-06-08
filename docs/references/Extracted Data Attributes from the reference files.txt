@@ -1,0 +1,328 @@
+=========================================================
+WEEKLY ACCOMPLISHMENT REPORT (WAR)
+=========================================================
+
+REPORT INFORMATION
+------------------
+warNumber
+reportingPeriodStart
+reportingPeriodEnd
+reportDateCreated
+reportStatus
+submissionDate
+
+PROJECT DETAILS
+---------------
+projectId
+projectTitle
+projectLocation
+projectCost
+startDate
+contractorBuilder
+dateOfCompletion
+contractId
+projectDuration
+projectStatus
+  - ongoing
+  - completed
+  - suspended
+
+WEEKLY ACCOMPLISHMENTS
+----------------------
+majorAccomplishments[]
+  - accomplishmentId
+  - accomplishmentDescription
+  - accomplishmentCategory
+  - accomplishmentDate
+  - accomplishmentPercentage
+  - remarks
+
+PROJECT CONCERNS
+----------------
+issuesRisks
+personnelEquipmentConstraints
+mitigationContingencyMeasures
+lookAheadActivities
+
+PHOTO DOCUMENTATION
+-------------------
+photos[]
+  - photoId
+  - fileName
+  - filePath
+  - photoTitle
+  - photoDescription
+  - photoDateTaken
+  - photoLocation
+  - uploadedBy
+  - uploadDate
+
+SIGNATORIES
+------------
+preparedByName
+preparedByPosition
+preparedBySignature
+preparedByDate
+
+reviewedByName
+reviewedByPosition
+reviewedBySignature
+reviewedByDate
+
+notedByName
+notedByPosition
+notedBySignature
+notedByDate
+
+SYSTEM / AUDIT FIELDS
+---------------------
+createdBy
+createdAt
+updatedBy
+updatedAt
+isSubmitted
+submissionTimestamp
+remarksHistory
+
+=========================================================
+MONTHLY PROGRESS REPORT (MPR)
+=========================================================
+
+REPORT INFORMATION
+------------------
+mprNumber
+reportingPeriod
+reportDateCreated
+reportStatus
+submissionDate
+
+PROJECT DETAILS
+---------------
+projectId
+projectTitle
+projectLocation
+projectCost
+startDate
+contractorBuilder
+dateOfCompletion
+contractId
+projectDuration
+projectStatus
+  - ongoing
+  - completed
+  - suspended
+
+=========================================================
+STATEMENT OF TIME ELAPSED AND WORK ACCOMPLISHED
+=========================================================
+
+CONTRACT INFORMATION
+--------------------
+originalContractAmount
+revisedContractAmount
+contractEffectivityDate
+shutdownTimeDueToSuspension
+approvedContractTimeExtensions
+revisedContractTime
+originalExpiryDate
+revisedExpiryDate
+
+TIME PERFORMANCE
+----------------
+totalContractTimeElapsed
+totalCalendarDaysElapsedToDate
+percentTimeElapsed
+
+WORK PERFORMANCE
+----------------
+plannedAccomplishment
+actualAccomplishment
+slippage
+
+REMARKS
+-------
+remarks
+
+=========================================================
+PROJECT CONCERNS
+=========================================================
+
+issuesRisks
+personnelEquipmentConstraints
+mitigationContingencyMeasures
+remarks
+
+=========================================================
+STATEMENT OF WORK ACCOMPLISHED
+=========================================================
+
+HEADER INFORMATION
+------------------
+reportingPeriod
+projectId
+projectTitle
+projectLocation
+projectCost
+projectStatus
+startDate
+dateOfCompletion
+projectDuration
+contractorBuilder
+contractId
+
+WORK ACCOMPLISHMENT ITEMS
+-------------------------
+workItems[]
+
+FOR EACH WORK ITEM:
+
+itemNumber
+description
+unit
+quantity
+unitCost
+totalContractCost
+weightNumber
+
+ACTUAL QUANTITY ACCOMPLISHMENT
+------------------------------
+actualQtyPrevious
+actualQtyThisPeriod
+actualQtyToDate
+
+ACTUAL ACCOMPLISHMENT PERCENTAGE
+--------------------------------
+actualPercentPrevious
+actualPercentThisPeriod
+actualPercentToDate
+actualPercentBalanceToDate
+
+COST ACCOMPLISHMENT
+-------------------
+costPrevious
+costThisPeriod
+costToDate
+costBalanceToDate
+
+=========================================================
+WORK ACCOMPLISHMENT SUMMARY
+=========================================================
+
+accomplishmentToDatePercent
+previousAccomplishmentPercent
+totalAccomplishmentToDatePercent
+
+=========================================================
+PHOTO DOCUMENTATION
+=========================================================
+
+photos[]
+  - photoId
+  - fileName
+  - filePath
+  - photoTitle
+  - photoDescription
+  - photoDateTaken
+  - photoLocation
+  - uploadedBy
+  - uploadDate
+
+=========================================================
+APPROVAL WORKFLOW
+=========================================================
+
+PREPARED BY
+-----------
+preparedByName
+preparedByPosition
+preparedBySignature
+preparedByDate
+
+CHECKED AND REVIEWED BY
+-----------------------
+checkedReviewedByName
+checkedReviewedByPosition
+checkedReviewedBySignature
+checkedReviewedByDate
+
+NOTED BY
+--------
+notedByName
+notedByPosition
+notedBySignature
+notedByDate
+
+RECOMMENDING APPROVAL
+---------------------
+recommendingApprovalName
+recommendingApprovalPosition
+recommendingApprovalSignature
+recommendingApprovalDate
+
+APPROVED BY
+-----------
+approvedByName
+approvedByPosition
+approvedBySignature
+approvedByDate
+
+=========================================================
+MASTER PROJECT ATTRIBUTES
+(RECOMMENDED SHARED TABLE)
+=========================================================
+
+projectId
+projectCode
+projectTitle
+projectDescription
+projectLocation
+campus
+municipality
+province
+region
+
+projectCost
+contractAmountOriginal
+contractAmountRevised
+
+contractId
+contractorId
+contractorName
+contractorAddress
+
+startDate
+targetCompletionDate
+actualCompletionDate
+
+projectDurationDays
+revisedDurationDays
+
+projectStatus
+
+plannedAccomplishmentPercent
+actualAccomplishmentPercent
+slippagePercent
+
+totalTimeElapsedDays
+totalCalendarDaysElapsed
+
+createdAt
+updatedAt
+
+=========================================================
+RECOMMENDED DATABASE RELATIONSHIPS
+=========================================================
+
+Projects
+  ├── WeeklyReports
+  │     ├── WeeklyAccomplishments
+  │     ├── WeeklyConcerns
+  │     └── WeeklyPhotos
+  │
+  ├── MonthlyReports
+  │     ├── TimeElapsedStatements
+  │     ├── WorkAccomplishmentItems
+  │     ├── MonthlyConcerns
+  │     └── MonthlyPhotos
+  │
+  └── ApprovalWorkflow

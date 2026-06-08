@@ -105,6 +105,15 @@ function addCustomFundingSource() {
 function removeCustomFundingSource(i: number) {
   form.value.additional_funding_sources.splice(i, 1)
 }
+
+// ZZZ-H: HCI — collapsible custom-funding sub-form + alignment count for expansion panel
+const showAddFundingSource = ref(false)
+const totalAlignmentCount = computed(() =>
+  (form.value.sdg_goals?.length || 0) +
+  (form.value.rdp_alignment?.length || 0) +
+  (form.value.socioeconomic_agenda?.length || 0) +
+  (form.value.csu_likha_goals?.length || 0),
+)
 </script>
 
 <template>
@@ -123,7 +132,19 @@ function removeCustomFundingSource(i: number) {
     <v-divider />
     <v-card-text class="py-3">
       <v-row dense>
-        <v-col cols="12" sm="3">
+        <!-- ZZZ-H: Project Title promoted to full-width primary field -->
+        <v-col cols="12">
+          <v-text-field
+            v-model="form.title"
+            label="Project Title *"
+            placeholder="e.g., College of Engineering Building"
+            :rules="[r.required]"
+            density="compact"
+            variant="outlined"
+            hide-details="auto"
+          />
+        </v-col>
+        <v-col cols="12" sm="4">
           <v-text-field
             v-model="form.project_code"
             label="Project Code *"
@@ -134,7 +155,7 @@ function removeCustomFundingSource(i: number) {
             hide-details="auto"
           />
         </v-col>
-        <v-col cols="12" sm="3">
+        <v-col cols="12" sm="4">
           <v-select
             v-model="form.campus"
             label="Campus *"
@@ -145,22 +166,11 @@ function removeCustomFundingSource(i: number) {
             hide-details="auto"
           />
         </v-col>
-        <v-col cols="12" sm="3">
+        <v-col cols="12" sm="4">
           <v-select
             v-model="form.status"
             label="Project Status *"
             :items="statusOptions"
-            :rules="[r.required]"
-            density="compact"
-            variant="outlined"
-            hide-details="auto"
-          />
-        </v-col>
-        <v-col cols="12" sm="3">
-          <v-text-field
-            v-model="form.title"
-            label="Project Title *"
-            placeholder="e.g., College of Engineering Building"
             :rules="[r.required]"
             density="compact"
             variant="outlined"
@@ -184,9 +194,9 @@ function removeCustomFundingSource(i: number) {
   </v-card>
 
   <!-- XXX-F: Section overline header for Row B -->
-  <div class="d-flex align-center ga-2 mb-1 mt-2">
-    <v-icon size="16" color="grey-darken-1">mdi-map-marker-outline</v-icon>
-    <span class="text-overline text-grey-darken-1">Location &amp; Implementation</span>
+  <div class="d-flex align-center ga-2 mb-2 mt-3">
+    <v-icon size="18" color="grey-darken-2">mdi-map-marker-outline</v-icon>
+    <span class="text-subtitle-2 font-weight-semibold text-grey-darken-2">Location &amp; Implementation</span>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════════════
@@ -289,9 +299,9 @@ function removeCustomFundingSource(i: number) {
   </v-row>
 
   <!-- XXX-F: Section overline header for Row C -->
-  <div class="d-flex align-center ga-2 mb-1 mt-2">
-    <v-icon size="16" color="grey-darken-1">mdi-cash-multiple</v-icon>
-    <span class="text-overline text-grey-darken-1">Funding &amp; Project Details</span>
+  <div class="d-flex align-center ga-2 mb-2 mt-3">
+    <v-icon size="18" color="grey-darken-2">mdi-cash-multiple</v-icon>
+    <span class="text-subtitle-2 font-weight-semibold text-grey-darken-2">Funding &amp; Project Details</span>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════════════
@@ -367,48 +377,54 @@ function removeCustomFundingSource(i: number) {
 
           <v-divider class="my-3" />
 
-          <p class="text-caption text-grey font-weight-medium text-uppercase mb-2">
-            Add Custom / Additional Funding Source
-          </p>
-          <v-row dense align="end">
-            <v-col cols="4" sm="3">
-              <v-select
-                v-model="newCustomFundType"
-                label="Type"
-                :items="[
-                  { title: 'Internal', value: 'INTERNAL' },
-                  { title: 'External', value: 'EXTERNAL' },
-                  { title: 'Custom',   value: 'CUSTOM'   },
-                ]"
-                density="compact"
-                variant="outlined"
-                hide-details
-              />
-            </v-col>
-            <v-col cols="8" sm="6">
-              <v-text-field
-                v-model="newCustomFundName"
-                label="Source Name"
-                placeholder="e.g., DPWH Counterpart Fund"
-                density="compact"
-                variant="outlined"
-                hide-details
-                @keydown.enter.prevent="addCustomFundingSource"
-              />
-            </v-col>
-            <v-col cols="12" sm="3">
-              <v-btn
-                color="primary"
-                variant="tonal"
-                block
-                :disabled="!newCustomFundName.trim()"
-                prepend-icon="mdi-plus"
-                @click="addCustomFundingSource"
-              >
-                Add
-              </v-btn>
-            </v-col>
-          </v-row>
+          <!-- ZZZ-H: collapsible custom funding sub-form -->
+          <v-btn
+            size="x-small" variant="text" color="primary" prepend-icon="mdi-plus"
+            @click="showAddFundingSource = !showAddFundingSource"
+          >
+            Add another funding source
+          </v-btn>
+          <v-expand-transition>
+            <v-row v-if="showAddFundingSource" dense align="end" class="mt-1">
+              <v-col cols="4" sm="3">
+                <v-select
+                  v-model="newCustomFundType"
+                  label="Type"
+                  :items="[
+                    { title: 'Internal', value: 'INTERNAL' },
+                    { title: 'External', value: 'EXTERNAL' },
+                    { title: 'Custom',   value: 'CUSTOM'   },
+                  ]"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="8" sm="6">
+                <v-text-field
+                  v-model="newCustomFundName"
+                  label="Source Name"
+                  placeholder="e.g., DPWH Counterpart Fund"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  @keydown.enter.prevent="addCustomFundingSource"
+                />
+              </v-col>
+              <v-col cols="12" sm="3">
+                <v-btn
+                  color="primary"
+                  variant="tonal"
+                  block
+                  :disabled="!newCustomFundName.trim()"
+                  prepend-icon="mdi-plus"
+                  @click="addCustomFundingSource"
+                >
+                  Add
+                </v-btn>
+              </v-col>
+            </v-row>
+          </v-expand-transition>
         </v-card-text>
       </v-card>
     </v-col>
@@ -474,9 +490,9 @@ function removeCustomFundingSource(i: number) {
   </v-row>
 
   <!-- XXX-F: Section overline header for Row D -->
-  <div class="d-flex align-center ga-2 mb-1 mt-2">
-    <v-icon size="16" color="grey-darken-1">mdi-target</v-icon>
-    <span class="text-overline text-grey-darken-1">Objectives &amp; Beneficiaries</span>
+  <div class="d-flex align-center ga-2 mb-2 mt-3">
+    <v-icon size="18" color="grey-darken-2">mdi-target</v-icon>
+    <span class="text-subtitle-2 font-weight-semibold text-grey-darken-2">Objectives &amp; Beneficiaries</span>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════════════
@@ -538,9 +554,9 @@ function removeCustomFundingSource(i: number) {
   </v-row>
 
   <!-- XXX-F: Section overline header for Row E -->
-  <div class="d-flex align-center ga-2 mb-1 mt-2">
-    <v-icon size="16" color="grey-darken-1">mdi-strategy</v-icon>
-    <span class="text-overline text-grey-darken-1">Strategic Alignment</span>
+  <div class="d-flex align-center ga-2 mb-2 mt-3">
+    <v-icon size="18" color="grey-darken-2">mdi-strategy</v-icon>
+    <span class="text-subtitle-2 font-weight-semibold text-grey-darken-2">Strategic Alignment</span>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════════════════
@@ -569,12 +585,11 @@ function removeCustomFundingSource(i: number) {
         variant="outlined"
         hide-details="auto"
         :readonly="readOnly"
-        counter
-        maxlength="2000"
       />
     </v-card-text>
   </v-card>
 
+  <!-- ZZZ-H: Collapsible Strategic Framework Alignment (SDG / RDP / SEA / LIKHA) -->
   <!-- Row 2: SDG + RDP -->
   <v-row dense class="mb-1">
     <v-col cols="12" md="6">

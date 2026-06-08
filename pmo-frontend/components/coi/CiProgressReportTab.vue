@@ -186,7 +186,7 @@ const headers = [
     <v-card-title class="d-flex align-center justify-space-between py-2 px-4 bg-grey-lighten-4">
       <div class="d-flex align-center ga-2">
         <v-icon size="small" icon="mdi-chart-timeline-variant" color="info" />
-        <span class="text-subtitle-1 font-weight-medium">Progress Reports</span>
+        <span class="text-subtitle-1 font-weight-medium">A. Progress Reports</span>
         <v-chip size="x-small" variant="tonal" color="info">{{ items.length }}</v-chip>
       </div>
       <div class="d-flex align-center ga-2">
@@ -274,15 +274,17 @@ const headers = [
             style="border-left: 3px solid rgba(var(--v-theme-info), 0.7)"
           >
             <v-row no-gutters align="stretch">
-              <!-- LEFT: Identity -->
+              <!-- LEFT: Identity — BBB-E: Report Date now has explicit label -->
               <v-col cols="12" sm="3" class="pa-3 d-flex flex-column ga-1 bg-grey-lighten-5" style="border-right: 1px solid rgba(0,0,0,0.08)">
                 <v-chip size="small" variant="tonal" color="info" class="align-self-start">{{ r.reportType }}</v-chip>
-                <div class="text-subtitle-1 font-weight-medium mt-1">{{ r.reportNumber || r.reportDate }}</div>
-                <div v-if="r.reportNumber" class="text-body-2 text-grey-darken-1">{{ r.reportDate }}</div>
+                <div class="text-subtitle-1 font-weight-medium mt-1">{{ r.reportNumber || '—' }}</div>
+                <div class="text-caption text-grey-darken-1 mt-1">Report Date</div>
+                <div class="text-body-2 font-weight-medium">{{ r.reportDate }}</div>
               </v-col>
-              <!-- CENTER: 2×2 CSS grid + expand -->
+              <!-- CENTER: Always-visible summary + expandable 4-section detail (BBB-E) -->
               <v-col cols="12" sm="7" class="pa-3" style="border-right: 1px solid rgba(0,0,0,0.08)">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px;">
+                <!-- Always-visible: 3 key stats (completion, planned, slippage) -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px 12px;" class="mb-2">
                   <div>
                     <div class="text-body-2 text-grey-darken-1">% Completion</div>
                     <div class="text-h6 font-weight-bold text-info">{{ fmtPct(r.percentageCompletion) }}</div>
@@ -297,19 +299,26 @@ const headers = [
                       {{ fmtPct(r.slippage) }}
                     </div>
                   </div>
-                  <div>
-                    <div class="text-body-2 text-grey-darken-1">Cost to Date</div>
-                    <div class="text-subtitle-1 font-weight-medium">{{ fmtPHP(r.costIncurredToDate) }}</div>
-                  </div>
                 </div>
-                <!-- Expandable detail inside center col -->
+                <!-- Expandable 4-section detail -->
                 <v-expand-transition>
-                  <div v-if="expandedCards.has(r.id)" class="mt-3">
-                    <v-divider class="mb-2" />
+                  <div v-if="expandedCards.has(r.id)" class="mt-1">
+
+                    <!-- Section 1: Progress Summary -->
+                    <v-divider class="my-2" />
+                    <div class="text-caption font-weight-medium text-uppercase text-grey mb-1">Progress Summary</div>
                     <div class="d-flex flex-wrap ga-3 text-body-2 mb-2">
-                      <div v-if="r.costIncurredThisPeriod != null">
-                        <div class="text-caption text-grey-darken-1">Cost This Period</div>
-                        <div>{{ fmtPHP(r.costIncurredThisPeriod) }}</div>
+                      <div>
+                        <div class="text-caption text-grey-darken-1">% Completion</div>
+                        <div class="font-weight-medium text-info">{{ fmtPct(r.percentageCompletion) }}</div>
+                      </div>
+                      <div>
+                        <div class="text-caption text-grey-darken-1">Planned %</div>
+                        <div>{{ fmtPct(r.plannedAccomplishment) }}</div>
+                      </div>
+                      <div>
+                        <div class="text-caption text-grey-darken-1">Slippage</div>
+                        <div :class="r.slippage != null && Number(r.slippage) < 0 ? 'text-error' : ''">{{ fmtPct(r.slippage) }}</div>
                       </div>
                       <div v-if="r.calendarDaysElapsed != null">
                         <div class="text-caption text-grey-darken-1">Calendar Days</div>
@@ -320,44 +329,68 @@ const headers = [
                         <div>{{ fmtPct(r.percentTimeElapsed) }}</div>
                       </div>
                     </div>
-                    <!-- OW (2026-05-22): full descriptive labels + icons, consistent with dialog -->
-                    <div v-if="r.remarks || (r.remarksList && r.remarksList.length)" class="mb-2">
-                      <div class="d-flex align-center ga-1 mb-1">
-                        <v-icon size="12" color="info">mdi-comment-text-outline</v-icon>
-                        <span class="text-caption font-weight-medium text-grey-darken-2">Remarks</span>
+
+                    <!-- Section 2: Financial Summary — BBB-E: Cost This Period + Cost To Date side-by-side -->
+                    <v-divider class="my-2" />
+                    <div class="text-caption font-weight-medium text-uppercase text-grey mb-1">Financial Summary</div>
+                    <div class="d-flex flex-wrap ga-3 text-body-2 mb-2">
+                      <div>
+                        <div class="text-caption text-grey-darken-1">Cost This Period</div>
+                        <div class="font-weight-medium">{{ r.costIncurredThisPeriod != null ? fmtPHP(r.costIncurredThisPeriod) : '—' }}</div>
                       </div>
-                      <div v-if="r.remarksList && r.remarksList.length">
-                        <div v-for="(item, i) in r.remarksList" :key="i" class="text-body-2 pl-2">• {{ item.text }}</div>
+                      <div>
+                        <div class="text-caption text-grey-darken-1">Cost To Date</div>
+                        <div class="font-weight-medium">{{ fmtPHP(r.costIncurredToDate) }}</div>
                       </div>
-                      <div v-else class="text-body-2 pl-2">{{ r.remarks }}</div>
                     </div>
-                    <div v-if="r.issuesEncountered || (r.issuesEncounteredList && r.issuesEncounteredList.length)" class="mb-2">
-                      <div class="d-flex align-center ga-1 mb-1">
-                        <v-icon size="12" color="warning">mdi-alert-circle-outline</v-icon>
-                        <span class="text-caption font-weight-medium text-grey-darken-2">Issues / Risks Encountered</span>
+
+                    <!-- Section 3: Narrative & Issues -->
+                    <template v-if="(r.remarks || (r.remarksList && r.remarksList.length)) || (r.issuesEncountered || (r.issuesEncounteredList && r.issuesEncounteredList.length)) || (r.narrativeList && r.narrativeList.length)">
+                      <v-divider class="my-2" />
+                      <div class="text-caption font-weight-medium text-uppercase text-grey mb-1">Narrative &amp; Issues</div>
+                      <div v-if="r.remarks || (r.remarksList && r.remarksList.length)" class="mb-2">
+                        <div class="d-flex align-center ga-1 mb-1">
+                          <v-icon size="12" color="info">mdi-comment-text-outline</v-icon>
+                          <span class="text-caption font-weight-medium text-grey-darken-2">Remarks</span>
+                        </div>
+                        <div v-if="r.remarksList && r.remarksList.length">
+                          <div v-for="(item, i) in r.remarksList" :key="i" class="text-body-2 pl-2">• {{ item.text }}</div>
+                        </div>
+                        <div v-else class="text-body-2 pl-2">{{ r.remarks }}</div>
                       </div>
-                      <div v-if="r.issuesEncounteredList && r.issuesEncounteredList.length">
-                        <div v-for="(item, i) in r.issuesEncounteredList" :key="i" class="text-body-2 pl-2">• {{ item.text }}</div>
+                      <div v-if="r.issuesEncountered || (r.issuesEncounteredList && r.issuesEncounteredList.length)" class="mb-2">
+                        <div class="d-flex align-center ga-1 mb-1">
+                          <v-icon size="12" color="warning">mdi-alert-circle-outline</v-icon>
+                          <span class="text-caption font-weight-medium text-grey-darken-2">Issues / Risks Encountered</span>
+                        </div>
+                        <div v-if="r.issuesEncounteredList && r.issuesEncounteredList.length">
+                          <div v-for="(item, i) in r.issuesEncounteredList" :key="i" class="text-body-2 pl-2">• {{ item.text }}</div>
+                        </div>
+                        <div v-else class="text-body-2 pl-2">{{ r.issuesEncountered }}</div>
                       </div>
-                      <div v-else class="text-body-2 pl-2">{{ r.issuesEncountered }}</div>
-                    </div>
-                    <div v-if="r.mitigationActions || (r.mitigationActionsList && r.mitigationActionsList.length)" class="mb-2">
+                      <div v-if="r.narrativeList && r.narrativeList.length" class="mb-2">
+                        <div class="d-flex align-center ga-1 mb-1">
+                          <v-icon size="12" color="primary">mdi-text-long</v-icon>
+                          <span class="text-caption font-weight-medium text-grey-darken-2">General Narrative Notes</span>
+                        </div>
+                        <div v-for="(item, i) in r.narrativeList" :key="i" class="text-body-2 pl-2">• {{ item.text }}</div>
+                      </div>
+                    </template>
+
+                    <!-- Section 4: Mitigation Actions -->
+                    <template v-if="r.mitigationActions || (r.mitigationActionsList && r.mitigationActionsList.length)">
+                      <v-divider class="my-2" />
+                      <div class="text-caption font-weight-medium text-uppercase text-grey mb-1">Mitigation Actions</div>
                       <div class="d-flex align-center ga-1 mb-1">
                         <v-icon size="12" color="success">mdi-shield-check-outline</v-icon>
-                        <span class="text-caption font-weight-medium text-grey-darken-2">Mitigation Actions</span>
+                        <span class="text-caption font-weight-medium text-grey-darken-2">Actions Taken</span>
                       </div>
                       <div v-if="r.mitigationActionsList && r.mitigationActionsList.length">
                         <div v-for="(item, i) in r.mitigationActionsList" :key="i" class="text-body-2 pl-2">• {{ item.text }}</div>
                       </div>
                       <div v-else class="text-body-2 pl-2">{{ r.mitigationActions }}</div>
-                    </div>
-                    <div v-if="r.narrativeList && r.narrativeList.length" class="mb-2">
-                      <div class="d-flex align-center ga-1 mb-1">
-                        <v-icon size="12" color="primary">mdi-text-long</v-icon>
-                        <span class="text-caption font-weight-medium text-grey-darken-2">General Narrative Notes</span>
-                      </div>
-                      <div v-for="(item, i) in r.narrativeList" :key="i" class="text-body-2 pl-2">• {{ item.text }}</div>
-                    </div>
+                    </template>
+
                   </div>
                 </v-expand-transition>
               </v-col>

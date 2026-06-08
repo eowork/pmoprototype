@@ -9,6 +9,7 @@ import {
   Min,
   IsDateString,
   IsArray,
+  IsObject,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -227,6 +228,11 @@ export class CreateConstructionProjectDto {
   @IsOptional()
   @IsArray()
   escalation_records?: Record<string, any>[];
+
+  // GGG-E: Others-tab data banking
+  @IsOptional()
+  @IsObject()
+  project_notes_banking?: Record<string, any>;
 
   // MC: Location
   @IsOptional()

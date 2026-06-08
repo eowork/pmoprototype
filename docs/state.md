@@ -1,13 +1,47 @@
 # PMO Dashboard — Project State
-> **Last Updated:** 2026-06-02 | **Branch:** `pmo-coi` | **Governance:** ACE v2.4
+> **Last Updated:** 2026-06-04 | **Branch:** `pmo-coi` | **Governance:** ACE v2.4
 
 ---
 
 ## Current Phase
 
-**Phase DDD** — ✅ Complete (not yet committed to git)
+**Phase EEE** — ✅ Phase 3 complete (not yet committed). vue-tsc + tsc 0 new errors. 1 backend fix. No migrations.
 
-**Next:** Pending operator direction. No authorized phase after DDD.
+**EEE delivered:** Compliance scorecard (group-level bars replace status donut); KY-B1 backend fix (risk register and Others tab arrays can now be cleared); Readiness Documents balanced layout; git commit message standard documented.
+
+---
+
+## Archived Previous Phase
+
+**Phase DDD** — ✅ Phase 3 complete (not yet committed). vue-tsc 0 new errors. No migrations.
+
+**DDD delivered:** Analytics hierarchy (Cost Utilization compact KPI; Cost Incurred Progression full-width with banner; Physical Progress Trend upgraded banner; data source attribution on all visualizations); Others tab detail-[id].vue restructured to match edit/new 4-section IA (A=Governance, B=Admin, C=Knowledge Bank, D=Lessons) with guidance banners on all 3 pages; MOV section layout refinement (v-alert banner, upload+link side-by-side, confirmation alert, repository destination chip).
+
+---
+
+## Archived Previous Phase
+
+**Phase CCC** — ✅ Phase 3 complete (not yet committed). vue-tsc 0 new errors. No migrations.
+
+**Previous:** DDD ✅ committed (`36b53bc`); EEE/FFF/GGG/ZZZ/AAA/BBB ✅.
+
+**CCC delivered:** costIncurredThisPeriod camelCase fix (definitive root cause resolved); Others tab 4-section UX restructure (edit + new); Timelog MOV auto-file to SD_ECO_009/010 repositories.
+
+---
+
+## Archived Current Phase
+
+**Phase BBB** — ✅ Phase 3 complete (not yet committed). vue-tsc + tsc 0 new errors. 1 new backend migration.
+
+**Previous:** DDD ✅ committed (`36b53bc`); EEE ✅; FFF ✅; GGG ✅; ZZZ ✅; AAA ✅.
+
+**AAA delivered (AAA-A→L):** cost_incurred_this_period root-cause fix (sourced from progress_reports[0]); Audit Log tab wired (admin-gated); Overview Expand/Collapse All; FAB overlap fix; new.vue Others fully synced with edit (Data Banking + Lessons Learned + Site Observations + FAB); WAR physical accomplishment input; strategic alignment maxlength removed; analytics FY totals + Governance separator; guidance banners (Basic/Schedule/Documents); **Physical Progress Trend chart**; **Milestone Health donut**; **Others tab IA restructure** (Section B/C/D).
+
+**ZZZ (prior):** analytics data fixes + 6-stat + Financial Summary; Team Institutional/External split (ADR-020); Notes Banking grid + Lessons Learned + Site Observations; WAR/MPR sections + banner; Project Concerns (1 migration); CiBasicInfoForm HCI; Progress tab UX.
+
+**⚠️ Still requires 1 new migration** (`Migration20260604000000_AddConcernsListToTimelineEntries`) **plus the 5 still-pending earlier migrations** to run before use (see Blockers).
+
+**Deferred:** Candidate 3 (per-repo RBAC); Candidate 5 (rate limiting); Candidate 6 (server-side MIME validation).
 
 ---
 
@@ -24,11 +58,12 @@
 
 ## Current Priorities
 
-1. **Git backup** — commit DDD changes to `pmo-coi`
-2. **Run pending DB migrations** — sdg_goals + custom_supporting_sections
+1. **Git backup** — commit DDD/EEE changes to `pmo-coi`
+2. **Run pending DB migrations** — 7 migrations (sdg_goals, custom_supporting_sections, war fields, mpr fields, notes_banking, concerns_list, billing fields)
 3. **Backend restart** — activates `/templates/SD_ECO_*.docx` static serving
-4. **Operator smoke test** — upload to 2+ repos, verify persistence after refresh
-5. **Documentation refactor** — this current task
+4. **Implement Phase FFF** — DTO persistence fix + compliance donut (already planned, pending Phase 3 auth)
+5. **Phase GGG auth** — COI Infrastructure Portfolio Dashboard modernization (Phase 1+2 complete — awaiting RUN_ACE for GGG)
+6. **Phase HHH auth** — CSU CORE Executive Dashboard modernization (Phase 1+2 complete — awaiting RUN_ACE for HHH)
 
 ---
 
@@ -36,9 +71,10 @@
 
 | Blocker | Resolution |
 |---|---|
-| DDD uncommitted | `git add ... && git commit && git push origin pmo-coi` |
-| 3 pending migrations | `npx mikro-orm migration:up` in pmo-backend |
+| Uncommitted work (DDD/EEE/FFF/GGG/ZZZ) | `git add ... && git commit && git push origin pmo-coi` |
+| 7 pending migrations | `npx mikro-orm migration:up` — sdg_goals, custom_supporting_sections, **GGG: project_notes_banking, war fields, mpr fields**, **ZZZ: concerns_list** |
 | `/templates/*.docx` 404 | Backend hard restart (`Ctrl+C` → `npm run start:dev`) |
+| Backend restart required for GGG | New DTO fields (war/mpr/notes_banking) need recompiled DTO or `forbidNonWhitelisted` rejects them |
 | Pre-existing ApexOptions TS2322 | Deferred — not introduced by recent work |
 
 ---
@@ -88,6 +124,22 @@
 | File upload MIME validation (server-side) | ⚠️ Pending |
 | Rate limiting | ⚠️ Not implemented |
 | Section-level permission enforcement | ⚠️ Design only |
+
+---
+
+## Git Commit Message Standard (EEE-D)
+
+Use Conventional Commits format with `(coi)` scope. Describe WHAT changed, not the phase code.
+
+| Format | When |
+|---|---|
+| `feat(coi): <description>` | New features |
+| `fix(coi): <description>` | Bug fixes |
+| `refactor(coi): <description>` | Restructure without behaviour change |
+| `style(coi): <description>` | UI/CSS only |
+
+**Avoid:** `feat: COI Phase AAA` — meaningless in git history.
+**Use:** `feat(coi): add physical progress trend chart and compact cost KPI`
 
 ---
 

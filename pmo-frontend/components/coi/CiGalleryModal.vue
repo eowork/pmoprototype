@@ -54,7 +54,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   COMPLETED: 'Completed', DOCUMENTATION: 'Documentation',
 }
 
-const viewMode = ref<'grid' | 'list'>('grid')
+const viewMode = ref<'grid' | 'list' | 'timeline'>('grid')
 const filterCategory = ref('')
 const searchText = ref('')
 
@@ -66,6 +66,24 @@ const filteredImages = computed(() => {
     imgs = imgs.filter((i) => (i.caption ?? '').toLowerCase().includes(q))
   }
   return imgs
+})
+
+// FFF-C: Timeline view — group filtered images by year-month, newest first
+function imageDate(img: GalleryImage): Date | null {
+  const raw = img.imageTakenDate || (img as any).uploadedAt || img.createdAt
+  return raw ? new Date(raw) : null
+}
+const timelineGroups = computed(() => {
+  const groups = new Map<string, { label: string; sortKey: number; images: GalleryImage[] }>()
+  for (const img of filteredImages.value) {
+    const d = imageDate(img)
+    const key = d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : 'undated'
+    const label = d ? d.toLocaleString('en-PH', { month: 'long', year: 'numeric' }) : 'Undated'
+    const sortKey = d ? d.getFullYear() * 100 + d.getMonth() : -1
+    if (!groups.has(key)) groups.set(key, { label, sortKey, images: [] })
+    groups.get(key)!.images.push(img)
+  }
+  return Array.from(groups.values()).sort((a, b) => b.sortKey - a.sortKey)
 })
 
 // XXX-E: "this month" count for gallery analytics
@@ -141,6 +159,7 @@ function handleDrop(e: DragEvent) {
         <v-btn-toggle v-model="viewMode" mandatory density="compact" variant="outlined">
           <v-btn value="grid" icon="mdi-view-grid" size="small" />
           <v-btn value="list" icon="mdi-view-list" size="small" />
+          <v-btn value="timeline" icon="mdi-timeline-clock-outline" size="small" />
         </v-btn-toggle>
         <v-btn v-if="canUpload" color="primary" variant="tonal" size="small" :prepend-icon="showUpload ? 'mdi-chevron-up' : 'mdi-upload'" @click="showUpload = !showUpload">
           {{ showUpload ? 'Hide Upload' : 'Upload' }}
@@ -224,7 +243,7 @@ function handleDrop(e: DragEvent) {
         </v-row>
 
         <!-- List view -->
-        <v-list v-else density="comfortable">
+        <v-list v-else-if="viewMode === 'list'" density="comfortable">
           <v-list-item v-for="img in filteredImages" :key="img.id" class="px-2">
             <template #prepend>
               <v-img :src="img.imageUrl" width="64" height="48" cover class="rounded cursor-pointer mr-2" @click="openLightbox(img)" />
@@ -241,6 +260,33 @@ function handleDrop(e: DragEvent) {
             </template>
           </v-list-item>
         </v-list>
+
+        <!-- FFF-C: Timeline view — images grouped by month, newest first -->
+        <div v-else>
+          <div v-for="group in timelineGroups" :key="group.label" class="mb-4">
+            <div class="d-flex align-center ga-2 mb-2">
+              <v-icon size="18" color="primary">mdi-calendar-month-outline</v-icon>
+              <span class="text-subtitle-2 font-weight-semibold">{{ group.label }}</span>
+              <v-chip size="x-small" variant="tonal" color="primary">{{ group.images.length }}</v-chip>
+              <v-divider class="flex-grow-1" />
+            </div>
+            <v-row dense>
+              <v-col v-for="img in group.images" :key="img.id" cols="6" sm="4" md="3">
+                <v-card variant="outlined" class="h-100">
+                  <v-img :src="img.imageUrl" height="140" cover class="cursor-pointer" loading="lazy" @click="openLightbox(img)">
+                    <template #placeholder>
+                      <div class="d-flex align-center justify-center fill-height"><v-progress-circular indeterminate size="24" /></div>
+                    </template>
+                  </v-img>
+                  <v-card-text class="pa-2">
+                    <v-chip v-if="img.category" size="x-small" variant="tonal" color="primary" class="mb-1">{{ CATEGORY_LABELS[img.category] ?? img.category }}</v-chip>
+                    <div class="text-caption text-truncate">{{ img.caption || 'No caption' }}</div>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
+          </div>
+        </div>
       </v-card-text>
     </v-card>
 

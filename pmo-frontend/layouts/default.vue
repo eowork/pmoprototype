@@ -152,15 +152,15 @@ async function handleLogout() {
     <!-- Navigation Drawer -->
     <v-navigation-drawer v-model="drawer" elevation="1">
       <!-- Logo Header - Horizontal Layout -->
-      <div class="d-flex align-center pa-3 ga-2">
+      <div class="d-flex align-center px-2 py-2">
         <v-img
           src="/csu-logo.svg"
           alt="CSU Logo"
           width="44"
           height="44"
-          class="flex-shrink-0"
+          class="flex-shrink-0 me-2"
         />
-        <span class="font-weight-bold text-grey-darken-2 text-align-left sidebar-header-text">
+        <span class="font-weight-bold text-grey-darken-2 text-align-right sidebar-header-text">
         Caraga State University
         </span>
       </div>

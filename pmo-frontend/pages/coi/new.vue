@@ -2,11 +2,12 @@
 import { type CsuPersonnelRow, type ContractorPersonnelRow, type OthersPersonnelRow, type StagedQueue } from '~/utils/coiFormState'
 import CiPersonnelAccessCard from '~/components/coi/CiPersonnelAccessCard.vue'
 import CiAttachmentHub from '~/components/coi/CiAttachmentHub.vue'
+import CiScrollToTopFab from '~/components/coi/CiScrollToTopFab.vue'
 definePageMeta({
   middleware: ['auth', 'permission'],
 })
 
-// TC: Defense-in-depth behind TB middleware â€” contractors must never access project creation
+// TC: Defense-in-depth behind TB middleware â€" contractors must never access project creation
 const { isContractor } = usePermissions()
 if (isContractor.value) {
   await navigateTo('/dashboard')
@@ -48,7 +49,7 @@ const form = ref({
   contractor: '',
   // Objectives (dynamic, MG)
   objectives_list: [] as string[],
-  // Beneficiaries (MG â€” aggregate count removed per ECO directive 2026-05-21)
+  // Beneficiaries (MG â€" aggregate count removed per ECO directive 2026-05-21)
   beneficiary_list: [] as string[],
   // Strategic Alignment (MG)
   rdp_alignment: [] as string[],
@@ -66,13 +67,13 @@ const form = ref({
   project_engineer: '',
   building_type: '',
   floor_area: null as number | null,
-  // Schedule â€” Primary Dates (Schedule tab)
+  // Schedule â€" Primary Dates (Schedule tab)
   start_date: '',
   target_completion_date: '',
   actual_completion_date: '',
   project_duration: '',
   project_duration_days: null as number | null,
-  // Schedule â€” Revision Orders (MH)
+  // Schedule â€" Revision Orders (MH)
   original_start_date: '',
   revised_start_date: '',
   original_completion_date: '',
@@ -114,8 +115,8 @@ const form = ref({
 const statusUpdateRows  = ref<Array<{ date: string; text: string }>>([])
 const readinessDocRows  = ref<Array<{ type: string; status: string; remarks: string }>>([])
 const signatoryRows     = ref<Array<{ name: string; position: string; date: string }>>([])
-// LX-A: Others tab â€” mirrors edit-[id].vue administrative records
-const incidentLogRows   = ref<Array<{ date: string; severity: string; description: string; status: string }>>([])
+// LX-A: Others tab â€" mirrors edit-[id].vue administrative records
+// BBB-B: incidentLogRows removed per R-055
 const riskRegisterRows  = ref<Array<{ risk: string; likelihood: string; impact: string; mitigation: string; status: string }>>([])
 const escalationRows    = ref<Array<{ escalatedTo: string; date: string; issue: string; resolution: string }>>([])
 // MJ: Non-system personnel group rows (JSONB)
@@ -127,7 +128,7 @@ const othersPersonnelRows     = ref<OthersPersonnelRow[]>([])
 const fundingSources = ref<{ id: string; name: string }[]>([])
 const contractors = ref<{ id: string; name: string }[]>([])
 
-// MG: Relaxed project code validation â€” free-form per ECO directive.
+// MG: Relaxed project code validation â€" free-form per ECO directive.
 const rules = {
   required: (v: string) => !!v || 'This field is required',
   positiveNumber: (v: number | null) => v === null || v >= 0 || 'Must be a positive number',
@@ -149,23 +150,41 @@ const origStartDateMenu          = ref(false)
 const revStartDateMenu           = ref(false)
 const origCompletionDateMenu     = ref(false)
 const revCompletionDateMenu      = ref(false)
-// MI: progress tab date menus
-const progAsOfDateMenu           = ref(false)
-const progDateCompletedMenu      = ref(false)
+// BBB-D: progAsOfDateMenu/progDateCompletedMenu removed — progress tab now uses type="date" text inputs
 
-// LX-A: Others tab helpers â€” mirrors edit-[id].vue
+// LX-A: Others tab helpers â€" mirrors edit-[id].vue
 function addStatusUpdate()            { statusUpdateRows.value.push({ date: '', text: '' }) }
 function removeStatusUpdate(i: number){ statusUpdateRows.value.splice(i, 1) }
 function addReadinessDoc()            { readinessDocRows.value.push({ type: '', status: '', remarks: '' }) }
 function removeReadinessDoc(i: number){ readinessDocRows.value.splice(i, 1) }
 function addSignatory()               { signatoryRows.value.push({ name: '', position: '', date: '' }) }
 function removeSignatory(i: number)   { signatoryRows.value.splice(i, 1) }
-function addIncident()                { incidentLogRows.value.push({ date: '', severity: 'MEDIUM', description: '', status: 'OPEN' }) }
-function removeIncident(i: number)    { incidentLogRows.value.splice(i, 1) }
+
 function addRisk()                    { riskRegisterRows.value.push({ risk: '', likelihood: 'MEDIUM', impact: 'MEDIUM', mitigation: '', status: 'OPEN' }) }
 function removeRisk(i: number)        { riskRegisterRows.value.splice(i, 1) }
 function addEscalation()              { escalationRows.value.push({ escalatedTo: '', date: '', issue: '', resolution: '' }) }
 function removeEscalation(i: number)  { escalationRows.value.splice(i, 1) }
+
+// AAA-E: Others tab — Data Banking + Institutional Knowledge (mirrors edit-[id].vue)
+const notesAdditional   = ref('')
+const notesSpecial      = ref('')
+const notesReferences   = ref<Array<{ label: string; url: string; notes: string }>>([])
+const notesHistorical   = ref<Array<{ date: string; description: string }>>([])
+const notesMetadataRows = ref<Array<{ key: string; value: string }>>([])
+function addNoteReference()       { notesReferences.value.push({ label: '', url: '', notes: '' }) }
+function removeNoteReference(i: number) { notesReferences.value.splice(i, 1) }
+function addNoteHistorical()      { notesHistorical.value.push({ date: '', description: '' }) }
+function removeNoteHistorical(i: number) { notesHistorical.value.splice(i, 1) }
+function addNoteMetadata()        { notesMetadataRows.value.push({ key: '', value: '' }) }
+function removeNoteMetadata(i: number) { notesMetadataRows.value.splice(i, 1) }
+
+const authStore = useAuthStore()
+const currentUserName = computed(() => authStore.userFullName || authStore.userEmail || '')
+const LESSON_PHASES = ['PLANNING', 'MOBILIZATION', 'CIVIL_WORKS', 'FINISHING', 'CLOSEOUT', 'OTHER']
+const lessonsLearned = ref<Array<{ phase: string; observation: string; recommendation: string; addedBy?: string; addedAt?: string }>>([])
+// BBB-B: siteObservations removed per R-055
+function addLesson()      { lessonsLearned.value.push({ phase: 'OTHER', observation: '', recommendation: '', addedBy: currentUserName.value, addedAt: new Date().toISOString() }) }
+function removeLesson(i: number) { lessonsLearned.value.splice(i, 1) }
 
 // MH-MOV: Revision Order Means of Verification staging (new project workflow).
 // File uploads queued into pendingDocs (documentType='revision_order_mov');
@@ -183,14 +202,14 @@ function stageRevisionMov() {
     pendingDocs.value.push({
       file,
       documentType: 'revision_order_mov',
-      description: 'Revision Order MOV',
+      description: 'Variation Order MOV',
     })
   }
   if (link) {
     pendingLinks.value.push({
       url: link,
-      title: 'Revision Order MOV',
-      description: 'Documentary means of verification for revision orders',
+      title: 'Variation Order MOV',
+      description: 'Documentary means of verification for variation orders',
     })
   }
   revisionMovLink.value = ''
@@ -214,7 +233,7 @@ async function fetchLookups() {
   }
 }
 
-// Tab navigation state â€” LX-A: added `others` tab to sync with edit-[id].vue
+// Tab navigation state â€" LX-A: added `others` tab to sync with edit-[id].vue
 const activeTab = ref('basic')
 // MI: Added `progress` tab between schedule and personnel; LX-A: added `others`
 const tabOrder = ['basic', 'schedule', 'progress', 'personnel', 'documents', 'others'] as const
@@ -328,7 +347,7 @@ const tabCompletion = computed(() => ({
   documents:
     pendingDocs.value.length + pendingImages.value.length + pendingLinks.value.length > 0,
   // LX-A: others tab completion
-  others: statusUpdateRows.value.length > 0 || readinessDocRows.value.length > 0 || signatoryRows.value.length > 0 || incidentLogRows.value.length > 0 || riskRegisterRows.value.length > 0 || escalationRows.value.length > 0,
+  others: statusUpdateRows.value.length > 0 || readinessDocRows.value.length > 0 || signatoryRows.value.length > 0 || riskRegisterRows.value.length > 0 || escalationRows.value.length > 0,
 }))
 
 // JO-B: Required-field validity for navigation gating (separate from engagement)
@@ -387,7 +406,7 @@ function mapApiError(err: unknown): string {
 
 // Submit form
 async function handleSubmit() {
-  // JO-C: Full-form gate â€” jump to first invalid required tab
+  // JO-C: Full-form gate â€" jump to first invalid required tab
   const incomplete = (Object.keys(tabRequired.value) as Array<keyof typeof tabRequired.value>)
     .filter(k => !tabRequired.value[k])
   if (incomplete.length > 0) {
@@ -422,16 +441,16 @@ async function handleSubmit() {
       implementing_agency: form.value.implementing_agency || undefined,
       co_implementing_agency: form.value.co_implementing_agency || undefined,
       attached_agency: form.value.attached_agency || undefined,
-      // Funding hybrid (MG) â€” cost_amount is the canonical field; backend remaps to contract_amount
+      // Funding hybrid (MG) â€" cost_amount is the canonical field; backend remaps to contract_amount
       funding_source_id: form.value.funding_source_id || undefined,
       funding_source_type: form.value.funding_source_type || undefined,
       additional_funding_sources: form.value.additional_funding_sources?.length
         ? form.value.additional_funding_sources
         : undefined,
       cost_amount: form.value.cost_amount ?? undefined,
-      // Contractor (text â€” MG)
+      // Contractor (text â€" MG)
       contractor: form.value.contractor || undefined,
-      // Beneficiaries (MG â€” aggregate count removed)
+      // Beneficiaries (MG â€" aggregate count removed)
       beneficiary_list: beneficiaryArr.length > 0 ? beneficiaryArr : undefined,
       // Strategic Alignment (MG)
       rdp_alignment: form.value.rdp_alignment?.length ? form.value.rdp_alignment : undefined,
@@ -450,7 +469,7 @@ async function handleSubmit() {
       project_engineer: form.value.project_engineer || undefined,
       building_type: form.value.building_type || undefined,
       floor_area: form.value.floor_area || undefined,
-      // Schedule â€” Primary Dates
+      // Schedule â€" Primary Dates
       start_date: form.value.start_date || undefined,
       target_completion_date: form.value.target_completion_date || undefined,
       actual_completion_date: form.value.actual_completion_date || undefined,
@@ -458,7 +477,7 @@ async function handleSubmit() {
       project_duration: form.value.project_duration_days != null
         ? `${form.value.project_duration_days} days`
         : (form.value.project_duration || undefined),
-      // Schedule â€” Revision Orders (MH)
+      // Schedule â€" Revision Orders (MH)
       original_start_date: form.value.original_start_date || undefined,
       revised_start_date: form.value.revised_start_date || undefined,
       original_completion_date: form.value.original_completion_date || undefined,
@@ -472,7 +491,7 @@ async function handleSubmit() {
       financial_progress: form.value.financial_progress ?? undefined,
       as_of_date: form.value.as_of_date || undefined,
       cost_incurred_to_date: form.value.cost_incurred_to_date ?? undefined,
-      // MI: Remarks log â€” strip UI-only author resolution; server sets it from JWT
+      // MI: Remarks log â€" strip UI-only author resolution; server sets it from JWT
       remarks_log: form.value.remarks_log_entries?.length
         ? form.value.remarks_log_entries.map(r => ({ text: r.text, created_at: r.createdAt }))
         : undefined,
@@ -481,12 +500,28 @@ async function handleSubmit() {
       assigned_user_ids: form.value.assigned_user_ids.length > 0 ? form.value.assigned_user_ids : undefined,
       // Administrative records
       status_updates: statusUpdateRows.value.length > 0 ? statusUpdateRows.value : undefined,
-      readiness_docs: readinessDocRows.value.length > 0 ? readinessDocRows.value : undefined,
+      readiness_documents: readinessDocRows.value.length > 0 ? readinessDocRows.value : undefined, // FFF-A: was readiness_docs (typo — caused 400 on creation with docs)
       signatories: signatoryRows.value.length > 0 ? signatoryRows.value : undefined,
       // LX-A: others tab fields
-      incident_log: incidentLogRows.value.length > 0 ? incidentLogRows.value : undefined,
+      // BBB-B: incident_log removed from create payload per R-055
       risk_register: riskRegisterRows.value.length > 0 ? riskRegisterRows.value : undefined,
       escalation_records: escalationRows.value.length > 0 ? escalationRows.value : undefined,
+      // AAA-E: Others tab — Data Banking + Institutional Knowledge
+      project_notes_banking: (
+        notesAdditional.value || notesSpecial.value ||
+        notesReferences.value.length || notesHistorical.value.length ||
+        notesMetadataRows.value.length || lessonsLearned.value.length
+      )
+        ? {
+            additionalNotes: notesAdditional.value || undefined,
+            specialInstructions: notesSpecial.value || undefined,
+            projectReferences: notesReferences.value.filter(r => r.label.trim()),
+            historicalReferences: notesHistorical.value.filter(r => r.description.trim()),
+            customMetadata: Object.fromEntries(notesMetadataRows.value.filter(r => r.key.trim()).map(r => [r.key.trim(), r.value])),
+            lessonsLearned: lessonsLearned.value.filter(l => l.observation.trim()),
+            // BBB-B: siteObservations removed from create payload
+          }
+        : undefined,
       personnel_groups: {
         csu: csuPersonnelRows.value,
         contractor: contractorPersonnelRows.value,
@@ -637,7 +672,9 @@ function restoreDraft() {
     if (saved) {
       const { form: savedForm } = JSON.parse(saved)
       Object.assign(form.value, savedForm)
-      toast.success('Draft restored')
+      // EEE-C: restored draft is NOT yet saved to the server — keep the unsaved flag
+      hasUnsavedChanges.value = true
+      toast.success('Draft restored. Note: file attachments are not recoverable — re-attach if needed.')
     }
   } catch { toast.error('Could not restore draft') }
   draftRestoreSnackbar.value = false
@@ -672,7 +709,7 @@ onBeforeUnmount(() => {
     <v-snackbar v-model="draftRestoreSnackbar" :timeout="-1" color="info" location="bottom left">
       <div class="d-flex align-center ga-2">
         <v-icon icon="mdi-content-save-outline" />
-        <span>Unsaved draft found. Restore your work?</span>
+        <span>Unsaved form draft found. Restore? (File attachments cannot be restored.)</span>
       </div>
       <template #actions>
         <v-btn variant="text" @click="restoreDraft">Restore</v-btn>
@@ -762,7 +799,7 @@ onBeforeUnmount(() => {
             Attachments
             <v-icon v-if="tabCompletion.documents" end color="success" size="small">mdi-check-circle</v-icon>
           </v-tab>
-          <!-- LX-A: Others tab â€” mirrors edit-[id].vue (timeline intentionally absent until after save) -->
+          <!-- LX-A: Others tab â€" mirrors edit-[id].vue (timeline intentionally absent until after save) -->
           <v-tab value="others">
             <v-icon start>mdi-dots-horizontal-circle-outline</v-icon>
             Others
@@ -774,6 +811,10 @@ onBeforeUnmount(() => {
       <v-window v-model="activeTab">
         <!-- ============= TAB 1: BASIC INFO (KE-AA: uses shared CiBasicInfoForm) ============= -->
         <v-window-item value="basic">
+          <!-- AAA-I: tab guidance banner -->
+          <v-alert type="info" variant="tonal" density="compact" class="mb-3" icon="mdi-information-outline">
+            Complete the project identity, location, funding, objectives, and strategic alignment. Title, Project Code, Campus, Status, and Funding Source are required to save.
+          </v-alert>
           <CiBasicInfoForm
             v-model="form"
             :funding-sources="fundingSources"
@@ -784,6 +825,10 @@ onBeforeUnmount(() => {
 
         <!-- ============= TAB 2: DATES AND DURATION (MH) ============= -->
         <v-window-item value="schedule">
+          <!-- AAA-I: tab guidance banner -->
+          <v-alert type="info" variant="tonal" density="compact" class="mb-3" icon="mdi-information-outline">
+            Record contract dates, original and revised durations, and project completion dates. These dates drive the analytics timeline and WAR/MPR period calculations.
+          </v-alert>
           <!-- Row 1: Primary Project Dates -->
           <v-card class="mb-3" elevation="2" rounded="lg">
             <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
@@ -874,10 +919,10 @@ onBeforeUnmount(() => {
           <v-card class="mb-3" elevation="2" rounded="lg">
             <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
               <v-icon size="small" icon="mdi-file-document-edit-outline" color="warning" />
-              <span class="text-subtitle-1 font-weight-medium">Revision Orders</span>
+              <span class="text-subtitle-1 font-weight-medium">Variation Orders</span>
               <v-chip size="x-small" variant="tonal" color="warning" class="ml-1">VOR / CTE history</v-chip>
             </v-card-title>
-            <v-card-subtitle class=”pt-2 pb-1 text-body-2 text-grey-darken-1” style=”white-space: normal;”>
+            <v-card-subtitle class="pt-2 pb-1 text-body-2 text-grey-darken-1" style="white-space: normal;">
               Track Variation Orders (VOR) and Contract Time Extensions (CTE). Original vs Revised dates preserve audit history.
               <strong>Documentary MOV is required</strong> — attach the signed VO / TE Order file or paste a Drive/SharePoint link.
             </v-card-subtitle>
@@ -989,7 +1034,7 @@ onBeforeUnmount(() => {
               <!-- MH: Means of Verification (MOV) for the revision -->
               <p class="text-caption text-grey font-weight-medium text-uppercase mb-2">
                 <v-icon size="x-small" color="warning">mdi-paperclip-check</v-icon>
-                Means of Verification (MOV) â€” required for any revision
+                Means of Verification (MOV) â€" required for any revision
               </p>
               <v-row dense align="end">
                 <v-col cols="12" md="5">
@@ -1052,7 +1097,7 @@ onBeforeUnmount(() => {
               <span class="text-subtitle-1 font-weight-medium">Progress Targets</span>
             </v-card-title>
             <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
-              Default 100% â€” represents full physical/financial completion. Adjust only if the project targets partial completion (e.g., Phase 1 of multi-phase work).
+              Default 100% â€" represents full physical/financial completion. Adjust only if the project targets partial completion (e.g., Phase 1 of multi-phase work).
             </v-card-subtitle>
             <v-divider />
             <v-card-text class="py-3">
@@ -1078,127 +1123,89 @@ onBeforeUnmount(() => {
           </v-card>
         </v-window-item>
 
-        <!-- ============= TAB: PROGRESS & FINANCIAL (MI) ============= -->
+        <!-- ============= TAB: PROGRESS & FINANCIAL (BBB-D) ============= -->
         <v-window-item value="progress">
-          <!-- HHH-I: Improved progress tab notice -->
-          <v-alert type="info" variant="tonal" class="mb-4" icon="mdi-information-outline">
-            <div class=”text-subtitle-2 font-weight-medium mb-1”>Initial snapshot only</div>
-            <div class=”text-body-2”>Enter the project's current physical and financial status. After saving, the full workspace becomes available:</div>
-            <ul class=”text-body-2 mt-1 pl-4”>
-              <li>Progress Reports (WAR/MPR history, slippage, cost tracking)</li>
-              <li>Milestone Management (phase tracking with target dates)</li>
-              <li>Timelogs (weekly/monthly site work logs)</li>
-              <li>Revision Orders (schedule amendments)</li>
-            </ul>
+          <v-alert type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-information-outline">
+            Progress reports, timelogs, and variation orders become available after saving the project.
+            Set an initial snapshot below — these can be updated in the edit page at any time.
           </v-alert>
 
-          <!-- A: Physical Status -->
-          <v-card class="mb-3" elevation="2" rounded="lg">
+          <!-- BBB-D: Compact initial snapshot card (replaces two separate Physical/Financial cards) -->
+          <v-card class="mb-4" elevation="1" rounded="lg">
             <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
-              <v-icon size="small" icon="mdi-progress-wrench" color="primary" />
-              <span class="text-subtitle-1 font-weight-medium">Physical Status</span>
+              <v-icon size="small" icon="mdi-chart-timeline-variant" color="primary" />
+              <span class="text-subtitle-1 font-weight-medium">Initial Project Snapshot</span>
             </v-card-title>
-            <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
-              Current physical accomplishment percentage as of a specific date. Source: latest Weekly Accomplishment Report (WAR) or Monthly Progress Report (MPR).
+            <v-card-subtitle class="pt-2 pb-1 text-body-2 text-grey-darken-1" style="white-space: normal;">
+              Set the current project status at creation time. Full progress reporting (WAR/MPR, timelogs, variation orders) is available after saving.
             </v-card-subtitle>
             <v-divider />
             <v-card-text class="py-3">
               <v-row dense>
-                <v-col cols="12" sm="6">
+                <v-col cols="6" sm="3">
                   <v-text-field
                     v-model.number="form.physical_progress"
-                    label="Percentage Completion (%)"
-                    type="number" min="0" max="100" suffix="%"
-                    prepend-inner-icon="mdi-progress-check"
+                    label="Physical %" type="number" min="0" max="100" suffix="%"
                     density="compact" variant="outlined" hide-details="auto"
                   />
                 </v-col>
-                <v-col cols="12" sm="6">
-                  <v-menu v-model="progAsOfDateMenu" :close-on-content-click="false">
-                    <template #activator="{ props: mp }">
-                      <v-text-field
-                        v-bind="mp"
-                        :model-value="form.as_of_date"
-                        label="As of Date"
-                        prepend-inner-icon="mdi-calendar"
-                        readonly clearable
-                        density="compact" variant="outlined" hide-details="auto"
-                        @click:clear="form.as_of_date = ''"
-                      />
-                    </template>
-                    <v-date-picker
-                      :model-value="isoToDate(form.as_of_date)"
-                      min="1900-01-01" max="2100-12-31" hide-actions
-                      @update:model-value="(v: any) => { form.as_of_date = toIsoDate(v); progAsOfDateMenu = false }"
-                    />
-                  </v-menu>
+                <v-col cols="6" sm="3">
+                  <v-text-field
+                    v-model.number="form.financial_progress"
+                    label="Financial %" type="number" min="0" max="100" suffix="%"
+                    density="compact" variant="outlined" hide-details="auto"
+                  />
                 </v-col>
-              </v-row>
-            </v-card-text>
-          </v-card>
-
-          <!-- B: Financial Status -->
-          <v-card class="mb-3" elevation="2" rounded="lg">
-            <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
-              <v-icon size="small" icon="mdi-cash-check" color="success" />
-              <span class="text-subtitle-1 font-weight-medium">Financial Status</span>
-            </v-card-title>
-            <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
-              Cumulative cost incurred to date and project completion date. Used in COA / GPPA reporting and utilization rate calculations.
-            </v-card-subtitle>
-            <v-divider />
-            <v-card-text class="py-3">
-              <v-row dense>
-                <v-col cols="12" sm="6">
+                <v-col cols="6" sm="3">
                   <v-text-field
                     v-model.number="form.cost_incurred_to_date"
-                    label="Cost Incurred to Date (PHP)"
-                    type="number" min="0" prefix="â‚±"
-                    prepend-inner-icon="mdi-cash"
+                    label="Cost to Date (PHP)" type="number" min="0" prefix="PHP"
                     density="compact" variant="outlined" hide-details="auto"
                   />
                 </v-col>
-                <v-col cols="12" sm="6">
-                  <v-menu v-model="progDateCompletedMenu" :close-on-content-click="false">
-                    <template #activator="{ props: mp }">
-                      <v-text-field
-                        v-bind="mp"
-                        :model-value="form.date_completed"
-                        label="Date Completed"
-                        prepend-inner-icon="mdi-flag-checkered"
-                        readonly clearable
-                        density="compact" variant="outlined" hide-details="auto"
-                        @click:clear="form.date_completed = ''"
-                      />
-                    </template>
-                    <v-date-picker
-                      :model-value="isoToDate(form.date_completed)"
-                      min="1900-01-01" max="2100-12-31" hide-actions
-                      @update:model-value="(v: any) => { form.date_completed = toIsoDate(v); progDateCompletedMenu = false }"
-                    />
-                  </v-menu>
+                <v-col cols="6" sm="3">
+                  <v-text-field
+                    v-model="form.as_of_date"
+                    label="As of Date" type="date"
+                    density="compact" variant="outlined" hide-details="auto"
+                  />
                 </v-col>
               </v-row>
             </v-card-text>
           </v-card>
 
-          <!-- C: Remarks Log â€” OK-B: replaced inline pattern with reusable CiRemarksLog component -->
-          <CiRemarksLog
-            v-model="form.remarks_log_entries"
-            :read-only="false"
-            :current-user-name="''"
-          />
+          <!-- BBB-D: Post-save capability previews (informational, no project ID available yet) -->
+          <v-row dense>
+            <v-col cols="12" md="6">
+              <v-card variant="outlined" class="pa-4 text-center" rounded="lg">
+                <v-icon size="36" color="grey-lighten-2">mdi-chart-line</v-icon>
+                <p class="text-body-2 text-grey mt-2 mb-0 font-weight-medium">Progress Reports</p>
+                <p class="text-caption text-grey">WAR/MPR, slippage, cost tracking — available after saving</p>
+              </v-card>
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-card variant="outlined" class="pa-4 text-center" rounded="lg">
+                <v-icon size="36" color="grey-lighten-2">mdi-clipboard-text-clock-outline</v-icon>
+                <p class="text-body-2 text-grey mt-2 mb-0 font-weight-medium">Timelogs &amp; Variation Orders</p>
+                <p class="text-caption text-grey">Weekly/monthly site logs — available after saving</p>
+              </v-card>
+            </v-col>
+          </v-row>
         </v-window-item>
 
         <!-- ============= TAB 5: PERSONNEL & ASSIGNMENT ============= -->
         <v-window-item value="personnel">
           <!-- PA (2026-05-22): Unified Personnel & Access Control -->
-          <!-- project-id is empty on new.vue â€” component shows placeholder -->
+          <!-- project-id is empty on new.vue â€" component shows placeholder -->
           <CiPersonnelAccessCard project-id="" />
         </v-window-item>
 
         <!-- ============= TAB 6: DOCUMENTS (JO-D) ============= -->
         <v-window-item value="documents">
+          <!-- AAA-I: tab guidance banner -->
+          <v-alert type="info" variant="tonal" density="compact" class="mb-3" icon="mdi-information-outline">
+            Stage project documents and gallery images. Files upload automatically once the project is created.
+          </v-alert>
           <!-- ZZ-B: Attachment staging delegated to CiAttachmentHub (staging mode) -->
           <CiAttachmentHub
             mode="staging"
@@ -1210,51 +1217,21 @@ onBeforeUnmount(() => {
           <!-- Submit / Cancel actions moved to Others (last tab) -->
         </v-window-item>
 
-        <!-- ============= TAB 6: OTHERS (LX-A) â€” mirrors edit-[id].vue ============= -->
+        <!-- ============= TAB 6: OTHERS (CCC-B: 4-Section UX Restructure) ============= -->
         <v-window-item value="others">
-          <!-- LX-A: Timeline absent notice -->
           <v-alert type="info" variant="tonal" density="compact" class="mb-4">
-            <strong>Milestones &amp; Timelogs</strong> will be available after the project is saved. You can manage them from the project's edit page.
+            <strong>Milestones &amp; Timelogs</strong> will be available after saving. Record governance, administrative, and knowledge data below.
           </v-alert>
 
-          <v-row>
-            <!-- LEFT: Monitoring sections -->
-            <v-col cols="12" md="7">
-              <!-- Incidents / Special Concerns -->
-              <v-card class="mb-4">
-                <v-card-title class="d-flex align-center justify-space-between">
-                  <div class="d-flex align-center ga-2">
-                    <v-icon icon="mdi-alert-circle-outline" size="small" color="error" />
-                    Incidents / Special Concerns
-                    <v-chip v-if="incidentLogRows.length" size="x-small" color="error" variant="tonal" class="ml-1">{{ incidentLogRows.length }}</v-chip>
-                  </div>
-                  <v-btn size="x-small" color="error" prepend-icon="mdi-plus" variant="tonal" @click="addIncident">Add</v-btn>
-                </v-card-title>
-                <v-divider />
-                <v-card-text>
-                  <div v-if="incidentLogRows.length === 0" class="text-center text-grey text-caption pa-3">No incidents recorded. Add to document special concerns or urgent issues.</div>
-                  <div v-for="(row, i) in incidentLogRows" :key="i" class="mb-3 pa-3 rounded bg-grey-lighten-5">
-                    <v-row dense align="center" class="mb-1">
-                      <v-col cols="12" sm="3">
-                        <v-text-field v-model="row.date" label="Date" type="date" variant="outlined" density="compact" hide-details />
-                      </v-col>
-                      <v-col cols="12" sm="4">
-                        <v-select v-model="row.severity" label="Severity" :items="['LOW','MEDIUM','HIGH','CRITICAL']" variant="outlined" density="compact" hide-details />
-                      </v-col>
-                      <v-col cols="12" sm="4">
-                        <v-select v-model="row.status" label="Status" :items="['OPEN','RESOLVED','ESCALATED']" variant="outlined" density="compact" hide-details />
-                      </v-col>
-                      <v-col cols="12" sm="1" class="d-flex justify-center">
-                        <v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeIncident(i)" />
-                      </v-col>
-                    </v-row>
-                    <v-textarea v-model="row.description" label="Description / Action Taken" rows="2" variant="outlined" density="compact" hide-details />
-                  </div>
-                </v-card-text>
-              </v-card>
-
-              <!-- Risk Register -->
-              <v-card class="mb-4">
+          <!-- ── SECTION A: Project Governance ── -->
+          <div class="d-flex align-center ga-2 mb-1">
+            <v-icon size="18" color="error">mdi-shield-alert-outline</v-icon>
+            <span class="text-subtitle-2 font-weight-semibold text-grey-darken-2">Project Governance</span>
+          </div>
+          <p class="text-body-2 text-grey-darken-1 mb-3">Track project risks, escalations, and governance-related concerns.</p>
+          <v-row dense class="mb-4">
+            <v-col cols="12" md="6">
+              <v-card class="h-100">
                 <v-card-title class="d-flex align-center justify-space-between">
                   <div class="d-flex align-center ga-2">
                     <v-icon icon="mdi-shield-alert-outline" size="small" color="warning" />
@@ -1265,33 +1242,22 @@ onBeforeUnmount(() => {
                 </v-card-title>
                 <v-divider />
                 <v-card-text>
-                  <div v-if="riskRegisterRows.length === 0" class="text-center text-grey text-caption pa-3">No risks logged. Add project risks with likelihood and mitigation plan.</div>
+                  <div v-if="riskRegisterRows.length === 0" class="text-center text-grey text-caption pa-3">No risks logged.</div>
                   <div v-for="(row, i) in riskRegisterRows" :key="i" class="mb-3 pa-3 rounded bg-grey-lighten-5">
                     <v-row dense align="center" class="mb-1">
-                      <v-col cols="12" sm="3">
-                        <v-select v-model="row.likelihood" label="Likelihood" :items="['LOW','MEDIUM','HIGH']" variant="outlined" density="compact" hide-details />
-                      </v-col>
-                      <v-col cols="12" sm="3">
-                        <v-select v-model="row.impact" label="Impact" :items="['LOW','MEDIUM','HIGH']" variant="outlined" density="compact" hide-details />
-                      </v-col>
-                      <v-col cols="12" sm="4">
-                        <v-select v-model="row.status" label="Status" :items="['OPEN','MITIGATED','CLOSED']" variant="outlined" density="compact" hide-details />
-                      </v-col>
-                      <v-col cols="12" sm="2" class="d-flex justify-center">
-                        <v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeRisk(i)" />
-                      </v-col>
+                      <v-col cols="12" sm="3"><v-select v-model="row.likelihood" label="Likelihood" :items="['LOW','MEDIUM','HIGH']" variant="outlined" density="compact" hide-details /></v-col>
+                      <v-col cols="12" sm="3"><v-select v-model="row.impact" label="Impact" :items="['LOW','MEDIUM','HIGH']" variant="outlined" density="compact" hide-details /></v-col>
+                      <v-col cols="12" sm="4"><v-select v-model="row.status" label="Status" :items="['OPEN','MITIGATED','CLOSED']" variant="outlined" density="compact" hide-details /></v-col>
+                      <v-col cols="12" sm="2" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeRisk(i)" /></v-col>
                     </v-row>
-                    <v-text-field v-model="row.risk" label="Risk Description" placeholder="Describe the risk..." variant="outlined" density="compact" class="mb-1" hide-details />
-                    <v-text-field v-model="row.mitigation" label="Mitigation Plan" placeholder="How will this be addressed?" variant="outlined" density="compact" hide-details />
+                    <v-text-field v-model="row.risk" label="Risk Description" variant="outlined" density="compact" class="mb-1" hide-details />
+                    <v-text-field v-model="row.mitigation" label="Mitigation Plan" variant="outlined" density="compact" hide-details />
                   </div>
                 </v-card-text>
               </v-card>
             </v-col>
-
-            <!-- RIGHT: Escalations + Administrative Records -->
-            <v-col cols="12" md="5">
-              <!-- Escalation Records -->
-              <v-card class="mb-4">
+            <v-col cols="12" md="6">
+              <v-card class="h-100">
                 <v-card-title class="d-flex align-center justify-space-between">
                   <div class="d-flex align-center ga-2">
                     <v-icon icon="mdi-arrow-up-circle-outline" size="small" color="info" />
@@ -1305,81 +1271,172 @@ onBeforeUnmount(() => {
                   <div v-if="escalationRows.length === 0" class="text-center text-grey text-caption pa-3">No escalation records.</div>
                   <div v-for="(row, i) in escalationRows" :key="i" class="mb-3 pa-3 rounded bg-grey-lighten-5">
                     <v-row dense class="mb-1">
-                      <v-col cols="12" sm="8">
-                        <v-text-field v-model="row.escalatedTo" label="Escalated To" placeholder="Name / Office" variant="outlined" density="compact" hide-details />
-                      </v-col>
-                      <v-col cols="12" sm="3">
-                        <v-text-field v-model="row.date" label="Date" type="date" variant="outlined" density="compact" hide-details />
-                      </v-col>
-                      <v-col cols="12" sm="1" class="d-flex justify-center">
-                        <v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeEscalation(i)" />
-                      </v-col>
+                      <v-col cols="12" sm="8"><v-text-field v-model="row.escalatedTo" label="Escalated To" variant="outlined" density="compact" hide-details /></v-col>
+                      <v-col cols="12" sm="3"><v-text-field v-model="row.date" label="Date" type="date" variant="outlined" density="compact" hide-details /></v-col>
+                      <v-col cols="12" sm="1" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeEscalation(i)" /></v-col>
                     </v-row>
                     <v-text-field v-model="row.issue" label="Issue / Concern" variant="outlined" density="compact" class="mb-1" hide-details />
                     <v-text-field v-model="row.resolution" label="Resolution / Action" variant="outlined" density="compact" hide-details />
                   </div>
                 </v-card-text>
               </v-card>
-
-              <!-- Administrative Records (collapsed) -->
-              <v-expansion-panels variant="accordion" class="mb-4">
-                <v-expansion-panel>
-                  <v-expansion-panel-title>
-                    <div class="d-flex align-center ga-2">
-                      <v-icon icon="mdi-folder-text-outline" size="small" />
-                      Administrative Records
-                      <v-chip v-if="statusUpdateRows.length + readinessDocRows.length + signatoryRows.length" size="x-small" variant="tonal" class="ml-1">
-                        {{ statusUpdateRows.length + readinessDocRows.length + signatoryRows.length }}
-                      </v-chip>
-                    </div>
-                  </v-expansion-panel-title>
-                  <v-expansion-panel-text>
-                    <!-- Status Updates -->
-                    <div class="d-flex align-center justify-space-between mb-2">
-                      <span class="text-caption text-grey font-weight-medium text-uppercase">Status Updates</span>
-                      <v-btn size="x-small" color="primary" prepend-icon="mdi-plus" variant="tonal" @click="addStatusUpdate">Add</v-btn>
-                    </div>
-                    <div v-if="statusUpdateRows.length === 0" class="text-caption text-grey pa-2">None recorded.</div>
-                    <v-row v-for="(row, i) in statusUpdateRows" :key="'su' + i" dense align="center">
-                      <v-col cols="12" sm="3"><v-text-field v-model="row.date" label="Date" type="date" variant="outlined" density="compact" /></v-col>
-                      <v-col cols="12" sm="8"><v-text-field v-model="row.text" label="Update" variant="outlined" density="compact" /></v-col>
-                      <v-col cols="12" sm="1" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeStatusUpdate(i)" /></v-col>
-                    </v-row>
-
-                    <v-divider class="my-3" />
-
-                    <!-- Readiness Documents -->
-                    <div class="d-flex align-center justify-space-between mb-2">
-                      <span class="text-caption text-grey font-weight-medium text-uppercase">Readiness Documents</span>
-                      <v-btn size="x-small" color="primary" prepend-icon="mdi-plus" variant="tonal" @click="addReadinessDoc">Add</v-btn>
-                    </div>
-                    <div v-if="readinessDocRows.length === 0" class="text-caption text-grey pa-2">None listed.</div>
-                    <v-row v-for="(row, i) in readinessDocRows" :key="'rd' + i" dense align="center">
-                      <v-col cols="12" sm="4"><v-text-field v-model="row.type" label="Type" variant="outlined" density="compact" /></v-col>
-                      <v-col cols="12" sm="3"><v-select v-model="row.status" label="Status" :items="['SUBMITTED','PENDING','APPROVED','MISSING']" variant="outlined" density="compact" /></v-col>
-                      <v-col cols="12" sm="4"><v-text-field v-model="row.remarks" label="Remarks" variant="outlined" density="compact" /></v-col>
-                      <v-col cols="12" sm="1" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeReadinessDoc(i)" /></v-col>
-                    </v-row>
-
-                    <v-divider class="my-3" />
-
-                    <!-- Signatories -->
-                    <div class="d-flex align-center justify-space-between mb-2">
-                      <span class="text-caption text-grey font-weight-medium text-uppercase">Signatories</span>
-                      <v-btn size="x-small" color="primary" prepend-icon="mdi-plus" variant="tonal" @click="addSignatory">Add</v-btn>
-                    </div>
-                    <div v-if="signatoryRows.length === 0" class="text-caption text-grey pa-2">None listed.</div>
-                    <v-row v-for="(row, i) in signatoryRows" :key="'si' + i" dense align="center">
-                      <v-col cols="12" sm="4"><v-text-field v-model="row.name" label="Name" variant="outlined" density="compact" /></v-col>
-                      <v-col cols="12" sm="4"><v-text-field v-model="row.position" label="Position" variant="outlined" density="compact" /></v-col>
-                      <v-col cols="12" sm="3"><v-text-field v-model="row.date" label="Date" type="date" variant="outlined" density="compact" /></v-col>
-                      <v-col cols="12" sm="1" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeSignatory(i)" /></v-col>
-                    </v-row>
-                  </v-expansion-panel-text>
-                </v-expansion-panel>
-              </v-expansion-panels>
             </v-col>
           </v-row>
+
+          <!-- ── SECTION B: Administrative Management ── -->
+          <div class="d-flex align-center ga-2 mb-1">
+            <v-icon size="18" color="info">mdi-folder-text-outline</v-icon>
+            <span class="text-subtitle-2 font-weight-semibold text-grey-darken-2">Administrative Management</span>
+          </div>
+          <p class="text-body-2 text-grey-darken-1 mb-3">Manage project administrative and readiness documentation.</p>
+          <v-row dense class="mb-4">
+            <v-col cols="12" md="4">
+              <v-card class="h-100">
+                <v-card-title class="d-flex align-center justify-space-between">
+                  <div class="d-flex align-center ga-2">
+                    <v-icon icon="mdi-update" size="small" color="primary" />
+                    Status Updates
+                    <v-chip v-if="statusUpdateRows.length" size="x-small" color="primary" variant="tonal" class="ml-1">{{ statusUpdateRows.length }}</v-chip>
+                  </div>
+                  <v-btn size="x-small" color="primary" prepend-icon="mdi-plus" variant="tonal" @click="addStatusUpdate">Add</v-btn>
+                </v-card-title>
+                <v-divider />
+                <v-card-text>
+                  <div v-if="statusUpdateRows.length === 0" class="text-center text-grey text-caption pa-3">None recorded.</div>
+                  <v-row v-for="(row, i) in statusUpdateRows" :key="'su'+i" dense align="center" class="mb-1">
+                    <v-col cols="12" sm="4"><v-text-field v-model="row.date" label="Date" type="date" variant="outlined" density="compact" /></v-col>
+                    <v-col cols="10" sm="7"><v-text-field v-model="row.text" label="Update" variant="outlined" density="compact" /></v-col>
+                    <v-col cols="2" sm="1" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeStatusUpdate(i)" /></v-col>
+                  </v-row>
+                </v-card-text>
+              </v-card>
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-card class="h-100">
+                <v-card-title class="d-flex align-center justify-space-between">
+                  <div class="d-flex align-center ga-2">
+                    <v-icon icon="mdi-file-check-outline" size="small" color="success" />
+                    Readiness Documents
+                    <v-chip v-if="readinessDocRows.length" size="x-small" color="success" variant="tonal" class="ml-1">{{ readinessDocRows.length }}</v-chip>
+                  </div>
+                  <v-btn size="x-small" color="success" prepend-icon="mdi-plus" variant="tonal" @click="addReadinessDoc">Add</v-btn>
+                </v-card-title>
+                <v-divider />
+                <v-card-text>
+                  <div v-if="readinessDocRows.length === 0" class="text-center text-grey text-caption pa-3">None listed.</div>
+                  <!-- EEE-C: balanced layout — type/status/delete in one row, remarks below -->
+                  <div v-for="(row, i) in readinessDocRows" :key="'rd'+i" class="mb-2 pa-2 rounded bg-grey-lighten-5">
+                    <v-row dense align="center" class="mb-1">
+                      <v-col cols="12" sm="5"><v-text-field v-model="row.type" label="Document Type" variant="outlined" density="compact" hide-details /></v-col>
+                      <v-col cols="8" sm="4"><v-select v-model="row.status" label="Status" :items="['SUBMITTED','PENDING','APPROVED','MISSING']" variant="outlined" density="compact" hide-details /></v-col>
+                      <v-col cols="4" sm="3" class="d-flex justify-end"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeReadinessDoc(i)" /></v-col>
+                    </v-row>
+                    <v-text-field v-model="row.remarks" label="Remarks (optional)" variant="outlined" density="compact" hide-details />
+                  </div>
+                </v-card-text>
+              </v-card>
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-card class="h-100">
+                <v-card-title class="d-flex align-center justify-space-between">
+                  <div class="d-flex align-center ga-2">
+                    <v-icon icon="mdi-pen" size="small" color="purple" />
+                    Signatories
+                    <v-chip v-if="signatoryRows.length" size="x-small" color="purple" variant="tonal" class="ml-1">{{ signatoryRows.length }}</v-chip>
+                  </div>
+                  <v-btn size="x-small" color="purple" prepend-icon="mdi-plus" variant="tonal" @click="addSignatory">Add</v-btn>
+                </v-card-title>
+                <v-divider />
+                <v-card-text>
+                  <div v-if="signatoryRows.length === 0" class="text-center text-grey text-caption pa-3">None listed.</div>
+                  <div v-for="(row, i) in signatoryRows" :key="'si'+i" class="mb-2 pa-2 rounded bg-grey-lighten-5">
+                    <v-row dense align="center">
+                      <v-col cols="10"><v-text-field v-model="row.name" label="Name" variant="outlined" density="compact" hide-details /></v-col>
+                      <v-col cols="2" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeSignatory(i)" /></v-col>
+                    </v-row>
+                    <v-text-field v-model="row.position" label="Position" variant="outlined" density="compact" class="mt-1 mb-1" hide-details />
+                    <v-text-field v-model="row.date" label="Date" type="date" variant="outlined" density="compact" hide-details />
+                  </div>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+
+          <!-- ── SECTION C: Project Knowledge Bank ── -->
+          <div class="d-flex align-center ga-2 mb-1">
+            <v-icon size="18" color="primary">mdi-database-outline</v-icon>
+            <span class="text-subtitle-2 font-weight-semibold text-grey-darken-2">Project Knowledge Bank</span>
+          </div>
+          <p class="text-body-2 text-grey-darken-1 mb-3">Capture institutional knowledge, references, and project context.</p>
+          <v-card class="mb-4">
+            <v-card-text>
+              <v-textarea v-model="notesAdditional" label="Additional Notes" rows="2" auto-grow variant="outlined" density="compact" class="mb-3" hide-details />
+              <v-textarea v-model="notesSpecial" label="Special Instructions" rows="2" auto-grow variant="outlined" density="compact" class="mb-3" hide-details />
+              <div class="d-flex align-center justify-space-between mb-1">
+                <span class="text-caption font-weight-medium text-uppercase text-grey">Project References</span>
+                <v-btn size="x-small" color="primary" variant="tonal" prepend-icon="mdi-plus" @click="addNoteReference">Add</v-btn>
+              </div>
+              <div v-for="(row, i) in notesReferences" :key="'ref'+i" class="mb-2">
+                <v-row dense>
+                  <v-col cols="12" sm="4"><v-text-field v-model="row.label" label="Label" variant="outlined" density="compact" hide-details /></v-col>
+                  <v-col cols="12" sm="5"><v-text-field v-model="row.url" label="URL" variant="outlined" density="compact" hide-details /></v-col>
+                  <v-col cols="10" sm="2"><v-text-field v-model="row.notes" label="Notes" variant="outlined" density="compact" hide-details /></v-col>
+                  <v-col cols="2" sm="1" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeNoteReference(i)" /></v-col>
+                </v-row>
+              </div>
+              <div class="d-flex align-center justify-space-between mb-1 mt-2">
+                <span class="text-caption font-weight-medium text-uppercase text-grey">Historical References</span>
+                <v-btn size="x-small" color="blue-grey" variant="tonal" prepend-icon="mdi-plus" @click="addNoteHistorical">Add</v-btn>
+              </div>
+              <div v-for="(row, i) in notesHistorical" :key="'hist'+i" class="mb-2">
+                <v-row dense>
+                  <v-col cols="12" sm="3"><v-text-field v-model="row.date" label="Date" type="date" variant="outlined" density="compact" hide-details /></v-col>
+                  <v-col cols="10" sm="8"><v-text-field v-model="row.description" label="Description" variant="outlined" density="compact" hide-details /></v-col>
+                  <v-col cols="2" sm="1" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeNoteHistorical(i)" /></v-col>
+                </v-row>
+              </div>
+              <div class="d-flex align-center justify-space-between mb-1 mt-2">
+                <span class="text-caption font-weight-medium text-uppercase text-grey">Custom Metadata</span>
+                <v-btn size="x-small" color="secondary" variant="tonal" prepend-icon="mdi-plus" @click="addNoteMetadata">Add</v-btn>
+              </div>
+              <div v-for="(row, i) in notesMetadataRows" :key="'meta'+i" class="mb-2">
+                <v-row dense>
+                  <v-col cols="5"><v-text-field v-model="row.key" label="Key" variant="outlined" density="compact" hide-details /></v-col>
+                  <v-col cols="6"><v-text-field v-model="row.value" label="Value" variant="outlined" density="compact" hide-details /></v-col>
+                  <v-col cols="1" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeNoteMetadata(i)" /></v-col>
+                </v-row>
+              </div>
+            </v-card-text>
+          </v-card>
+
+          <!-- ── SECTION D: Lessons Learned ── -->
+          <div class="d-flex align-center ga-2 mb-1">
+            <v-icon size="18" color="amber-darken-2">mdi-lightbulb-on-outline</v-icon>
+            <span class="text-subtitle-2 font-weight-semibold text-grey-darken-2">Lessons Learned</span>
+          </div>
+          <p class="text-body-2 text-grey-darken-1 mb-3">Document experiences and recommendations for future projects.</p>
+          <v-card class="mb-4">
+            <v-card-title class="d-flex align-center justify-space-between">
+              <div class="d-flex align-center ga-2">
+                <v-icon icon="mdi-lightbulb-on-outline" size="small" color="amber-darken-2" />
+                Lessons Learned
+                <v-chip v-if="lessonsLearned.length" size="x-small" color="amber-darken-2" variant="tonal" class="ml-1">{{ lessonsLearned.length }}</v-chip>
+              </div>
+              <v-btn size="x-small" color="amber-darken-2" prepend-icon="mdi-plus" variant="tonal" @click="addLesson">Add</v-btn>
+            </v-card-title>
+            <v-divider />
+            <v-card-text>
+              <div v-if="lessonsLearned.length === 0" class="text-center text-grey text-caption pa-3">No lessons recorded. Capture what worked, what didn't, and recommendations for future projects.</div>
+              <div v-for="(row, i) in lessonsLearned" :key="'lesson'+i" class="mb-3 pa-3 rounded bg-grey-lighten-5">
+                <v-row dense align="center" class="mb-1">
+                  <v-col cols="12" sm="6"><v-select v-model="row.phase" label="Phase" :items="LESSON_PHASES" variant="outlined" density="compact" hide-details /></v-col>
+                  <v-col cols="12" sm="6" class="d-flex justify-end"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeLesson(i)" /></v-col>
+                </v-row>
+                <v-textarea v-model="row.observation" label="Observation" rows="2" auto-grow variant="outlined" density="compact" class="mb-2" hide-details />
+                <v-textarea v-model="row.recommendation" label="Recommendation" rows="2" auto-grow variant="outlined" density="compact" hide-details />
+              </div>
+            </v-card-text>
+          </v-card>
 
         </v-window-item>
       </v-window>
@@ -1431,5 +1488,8 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </v-form>
+
+    <!-- AAA-E: Scroll-to-top FAB (parity with edit-[id].vue) -->
+    <CiScrollToTopFab />
   </div>
 </template>

@@ -220,6 +220,16 @@ export class ConstructionProject {
   @Property({ columnType: 'jsonb', default: '[]' })
   escalationRecords: any[] = [];
 
+  // GGG-E: Others-tab data banking (additionalNotes, projectReferences[], specialInstructions, historicalReferences[], customMetadata{})
+  @Property({ columnType: 'jsonb', nullable: true })
+  projectNotesBanking?: {
+    additionalNotes?: string;
+    projectReferences?: Array<{ label: string; url?: string; notes?: string }>;
+    specialInstructions?: string;
+    historicalReferences?: Array<{ date: string; description: string }>;
+    customMetadata?: Record<string, string>;
+  };
+
   // MC: Location
   @Property({ nullable: true, columnType: 'varchar(500)' })
   spatialCoverage?: string;

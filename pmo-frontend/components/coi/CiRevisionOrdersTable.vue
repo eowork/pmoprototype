@@ -79,7 +79,7 @@ function openEdit(r: RevisionOrder) {
 
 async function save() {
   if (!form.value.revision_type || !form.value.revision_date) {
-    toast.error('Revision Type and Revision Date are required')
+    toast.error('Variation Type and Variation Date are required')
     return
   }
   submitting.value = true
@@ -97,24 +97,24 @@ async function save() {
     }
     if (editing.value) {
       await update(editing.value.id, payload)
-      toast.success('Revision order updated')
+      toast.success('Variation order updated')
     } else {
       await create(payload)
-      toast.success('Revision order created')
+      toast.success('Variation order created')
     }
     dialogOpen.value = false
   } catch (err: any) {
-    toast.error(err?.message || 'Failed to save revision order')
+    toast.error(err?.message || 'Failed to save variation order')
   } finally {
     submitting.value = false
   }
 }
 
 async function confirmRemove(r: RevisionOrder) {
-  if (!confirm(`Delete Revision #${r.revisionNumber} (${r.revisionType})?`)) return
+  if (!confirm(`Delete Variation #${r.revisionNumber} (${r.revisionType})?`)) return
   try {
     await remove(r.id)
-    toast.success('Revision order deleted')
+    toast.success('Variation order deleted')
   } catch (err: any) {
     toast.error(err?.message || 'Failed to delete')
   }
@@ -138,7 +138,7 @@ const pagedListItems = computed(() =>
 watch(items, () => { listPage.value = 1; page.value = 1 })
 
 const headers = [
-  { title: 'Rev #', key: 'revisionNumber', width: 70 },
+  { title: 'VO #', key: 'revisionNumber', width: 70 },
   { title: 'Type', key: 'revisionType', width: 80 },
   { title: 'Date', key: 'revisionDate', width: 110 },
   { title: 'New Start', key: 'newStartDate', width: 110 },
@@ -178,7 +178,7 @@ function toggleExpand(id: string) {
     <v-card-title class="d-flex align-center justify-space-between py-2 px-4 bg-grey-lighten-4">
       <div class="d-flex align-center ga-2">
         <v-icon size="small" icon="mdi-file-document-edit-outline" color="warning" />
-        <span class="text-subtitle-1 font-weight-medium">Revision Orders</span>
+        <span class="text-subtitle-1 font-weight-medium">Variation Orders</span>
         <v-chip size="x-small" variant="tonal" color="warning">{{ items.length }}</v-chip>
       </div>
       <div class="d-flex align-center ga-2">
@@ -202,7 +202,7 @@ function toggleExpand(id: string) {
           prepend-icon="mdi-plus"
           @click="openCreate"
         >
-          Add Revision Order
+          Add Variation Order
         </v-btn>
       </div>
     </v-card-title>
@@ -244,7 +244,7 @@ function toggleExpand(id: string) {
         <template #no-data>
           <div class="text-center text-grey py-6">
             <v-icon size="32" color="grey-lighten-1">mdi-file-document-outline</v-icon>
-            <div class="text-body-2 mt-2">No revision orders yet.</div>
+            <div class="text-body-2 mt-2">No variation orders yet.</div>
           </div>
         </template>
       </v-data-table>
@@ -261,7 +261,7 @@ function toggleExpand(id: string) {
       </div>
       <div v-else-if="items.length === 0" class="text-center text-grey py-8">
         <v-icon size="40" color="grey-lighten-1">mdi-file-document-outline</v-icon>
-        <div class="text-body-2 mt-2">No revision orders yet.</div>
+        <div class="text-body-2 mt-2">No variation orders yet.</div>
       </div>
       <div v-else class="pa-3 d-flex flex-column ga-3">
         <!-- OR-A (2026-05-22): 3-column sm layout — left identity, center stat grid + expand, right actions -->
@@ -277,7 +277,7 @@ function toggleExpand(id: string) {
           <v-row no-gutters align="stretch">
             <!-- LEFT: Identity -->
             <v-col cols="12" sm="3" class="pa-3 d-flex flex-column ga-1" style="border-right: 1px solid rgba(0,0,0,0.08)">
-              <div class="text-body-2 text-grey-darken-1 font-weight-medium">Rev #{{ r.revisionNumber }}</div>
+              <div class="text-body-2 text-grey-darken-1 font-weight-medium">VO #{{ r.revisionNumber }}</div>
               <v-chip size="small" :color="typeColor(r.revisionType)" variant="tonal" class="align-self-start">{{ r.revisionType }}</v-chip>
               <v-chip size="small" :color="statusColor(r.approvalStatus)" variant="tonal" class="align-self-start">{{ r.approvalStatus || 'DRAFT' }}</v-chip>
               <span class="text-body-2 text-grey mt-1">{{ r.revisionDate || '—' }}</span>
@@ -349,7 +349,7 @@ function toggleExpand(id: string) {
         <v-card-title class="d-flex align-center ga-2 bg-grey-lighten-4 py-3">
           <v-icon icon="mdi-file-document-edit-outline" color="warning" />
           <span class="text-h6 font-weight-medium">
-            {{ editing ? `Edit Revision #${editing.revisionNumber}` : 'Add Revision Order' }}
+            {{ editing ? `Edit Variation #${editing.revisionNumber}` : 'Add Variation Order' }}
           </span>
           <v-spacer />
           <v-btn icon="mdi-close" size="small" variant="text" @click="dialogOpen = false" />
@@ -360,7 +360,7 @@ function toggleExpand(id: string) {
             <v-col cols="12" sm="4">
               <v-select
                 v-model="form.revision_type"
-                label="Revision Type *"
+                label="Variation Type *"
                 :items="[
                   { title: 'Variation Order (VOR)', value: 'VOR' },
                   { title: 'Contract Time Extension (CTE)', value: 'CTE' },
@@ -375,7 +375,7 @@ function toggleExpand(id: string) {
               <v-menu v-model="revDateMenu" :close-on-content-click="false">
                 <template #activator="{ props: mp }">
                   <v-text-field
-                    v-bind="mp" :model-value="form.revision_date" label="Revision Date *"
+                    v-bind="mp" :model-value="form.revision_date" label="Variation Date *"
                     prepend-inner-icon="mdi-calendar" readonly clearable
                     density="compact" variant="outlined" hide-details="auto"
                     @click:clear="form.revision_date = ''"

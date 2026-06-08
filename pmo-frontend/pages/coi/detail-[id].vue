@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { adaptProjectDetail, adaptGalleryItem, type UIProjectDetail, type BackendProjectDetail, type BackendGalleryItem, type UIGalleryItem, type PublicationStatus } from '~/utils/adapters'
-import { PERSONNEL_GROUPS, KEY_DOC_TYPECODES } from '~/utils/coiFormState'
+import { KEY_DOC_TYPECODES } from '~/utils/coiFormState'
 import { labelForSdg, labelForRdp, labelForSea, labelForLikha } from '~/utils/coiHierarchies'
 import { useCoiProgressReports, type ProgressReport } from '~/composables/useCoiProgressReports'
 import CiDocumentChecklist from '~/components/coi/CiDocumentChecklist.vue'
@@ -42,13 +42,15 @@ const isTabVisible = computed(() => {
   return (tabValue: string): boolean => {
     if (!accessResolved.value) return false
     if (tabValue === 'analytics') return true
+    // AAA-B: Audit Log tab is privileged — Admin/SuperAdmin only
+    if (tabValue === 'audit') return isAdmin.value
     const permKey = DETAIL_TAB_PERM_MAP[tabValue]
     return permKey ? canViewTab(permKey) : true
   }
 })
 
 // SC-B: redirect activeTab when it becomes hidden after permissions load
-const DETAIL_TAB_ORDER = ['overview', 'progress', 'analytics', 'documents', 'team', 'others'] as const
+const DETAIL_TAB_ORDER = ['overview', 'progress', 'analytics', 'documents', 'team', 'others', 'audit'] as const
 
 watch(
   () => DETAIL_TAB_ORDER.filter(t => isTabVisible.value(t)),
@@ -64,56 +66,17 @@ watch(
 // FFF-A: default-open all overview panels (8-panel grid)
 const overviewPanels = ref([0, 1, 2, 3, 4, 5, 6, 7])
 
-// KU-A: Per-project audit trail
-const auditLogs = ref<any[]>([])
-const auditTotal = ref(0)
-const auditLoading = ref(false)
-const auditLoaded = ref(false)
-
-async function loadAuditTrail() {
-  if (!projectId) return
-  auditLoading.value = true
-  try {
-    const res = await api.get<{ data: any[]; total: number }>(
-      `/api/activity-logs/CONSTRUCTION_PROJECT/${projectId}?pageSize=25`,
-    )
-    auditLogs.value = res.data || []
-    auditTotal.value = res.total || 0
-    auditLoaded.value = true
-  } catch (err) {
-    console.error('[Audit Trail] Failed to load:', err)
-  } finally {
-    auditLoading.value = false
-  }
+// AAA-C: Expand / Collapse all overview panels with a single action
+const OVERVIEW_PANEL_COUNT = 8
+const allPanelsExpanded = computed(() => overviewPanels.value.length === OVERVIEW_PANEL_COUNT)
+function toggleAllPanels() {
+  overviewPanels.value = allPanelsExpanded.value
+    ? []
+    : Array.from({ length: OVERVIEW_PANEL_COUNT }, (_, i) => i)
 }
 
-const ACTION_COLORS: Record<string, string> = {
-  CREATE: 'success',
-  UPDATE: 'primary',
-  DELETE: 'error',
-  SUBMIT: 'info',
-  PUBLISH: 'primary',
-  REJECT: 'warning',
-  WITHDRAW: 'grey',
-  UPLOAD: 'teal',
-  REMOVE_ATTACHMENT: 'error',
-}
-
-function auditActionColor(action: string): string {
-  return ACTION_COLORS[action] || 'grey'
-}
-
-function relativeTime(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  if (days < 30) return `${days}d ago`
-  return new Date(dateStr).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
-}
+// AAA-B: legacy inline audit trail removed — CiAuditLogPanel (Audit Log tab) is the
+// single audit renderer and fetches its own data.
 
 // ACE-R15 Tier 3: Direct ID extraction (no computed, no watchEffect)
 // Dynamic route [id] means ID is static after mount - no reactivity needed
@@ -379,19 +342,6 @@ interface DocumentItem {
 const documents = ref<DocumentItem[]>([])
 const loadingDocuments = ref(false)
 
-// KD-D: Personnel category groups for Team tab.
-const groupedPersonnel = computed(() => {
-  const users = (project.value?.assignedUsers || []) as Array<any>
-  return PERSONNEL_GROUPS.map(g => ({
-    ...g,
-    users: users.filter((u) => {
-      const cat = u.personnelCategory ?? u.personnel_category ?? null
-      if (g.code === '__UNCATEGORIZED__') return !cat
-      return cat === g.code
-    }),
-  }))
-})
-
 // KC-D: Document preview type registry â€” used by Overview "Key Documents" panel
 // to surface compliance status for the four most-audited document categories.
 const DOCUMENT_PREVIEW_TYPES = [
@@ -571,28 +521,62 @@ const ALIGN_MAX_CHIPS = 4
 const showMoreAlignment = reactive<Record<string, boolean>>({ rdp: false, sea: false, likha: false, sdg: false })
 const showMoreNarrative = ref(false)
 
-// AAA-A: Team tab — client-side search
+// AAA-A / ZZZ-C: Team tab — client-side search + Institutional/External split.
+// Source of truth = record_assignments (project.assignedUsers); legacy JSONB
+// personnel_groups are no longer displayed (ADR-020).
 const teamSearch = ref('')
-const filteredAssignedUsers = computed(() => {
-  const users = project.value?.assignedUsers ?? []
-  if (!teamSearch.value) return users
-  const q = teamSearch.value.toLowerCase()
-  return users.filter((u: any) =>
-    (u.name || '').toLowerCase().includes(q) ||
-    (u.department || '').toLowerCase().includes(q) ||
-    (u.role || '').toLowerCase().includes(q),
-  )
-})
+const EXTERNAL_CAT_SET = new Set([
+  'CONTRACTOR', 'CONSTRUCTOR', 'SUPPLIER',
+  'CONSULTANT', 'EXTERNAL_AUDITOR', 'EXTERNAL_PARTNER',
+])
+const TEAM_PAGE_SIZE = 12
+const institutionalPage = ref(1)
+const externalPage = ref(1)
 
-// AAA-B: Others tab — empty state gate
-const hasOthersData = computed(() =>
-  (project.value?.statusUpdates?.length ?? 0) +
-  (project.value?.readinessDocuments?.length ?? 0) +
-  (project.value?.signatories?.length ?? 0) +
-  (project.value?.incidentLog?.length ?? 0) +
-  (project.value?.riskRegister?.length ?? 0) +
-  (project.value?.escalationRecords?.length ?? 0) > 0,
+function teamMatches(u: any): boolean {
+  const q = teamSearch.value.toLowerCase()
+  if (!q) return true
+  return (u.name || '').toLowerCase().includes(q) ||
+    (u.department || '').toLowerCase().includes(q) ||
+    (u.project_role || u.projectRole || '').toLowerCase().includes(q) ||
+    (u.role || '').toLowerCase().includes(q)
+}
+function userCategory(u: any): string {
+  return u.personnelCategory ?? u.personnel_category ?? ''
+}
+// Title-case a personnel category code (e.g., EXTERNAL_PARTNER → "External Partner")
+function personnelCatLabel(code: string): string {
+  if (!code) return '—'
+  return code.split('_').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ')
+}
+
+const filteredInstitutional = computed(() =>
+  (project.value?.assignedUsers ?? []).filter((u: any) =>
+    !EXTERNAL_CAT_SET.has(userCategory(u)) && teamMatches(u)),
 )
+const filteredExternal = computed(() =>
+  (project.value?.assignedUsers ?? []).filter((u: any) =>
+    EXTERNAL_CAT_SET.has(userCategory(u)) && teamMatches(u)),
+)
+const paginatedInstitutional = computed(() =>
+  filteredInstitutional.value.slice(0, institutionalPage.value * TEAM_PAGE_SIZE),
+)
+const paginatedExternal = computed(() =>
+  filteredExternal.value.slice(0, externalPage.value * TEAM_PAGE_SIZE),
+)
+
+// AAA-B / ZZZ-D: Others tab — Notes Banking + legacy monitoring data gating
+const notesBanking = computed(() => project.value?.projectNotesBanking ?? null)
+const hasNotesBanking = computed(() => {
+  const n = notesBanking.value
+  if (!n) return false
+  return !!(n.additionalNotes || n.specialInstructions ||
+    n.projectReferences?.length || n.historicalReferences?.length ||
+    (n.customMetadata && Object.keys(n.customMetadata).length) ||
+    n.lessonsLearned?.length) // BBB-B: siteObservations removed per R-055
+})
+// AAA-L: legacy single-gate (hasLegacyOthersData) removed — Others tab now uses
+// per-section gates (Risk & Escalation Management / Administrative Records). BBB-B: Incident Log removed.
 
 // LA-G: Progress summary metrics for milestone and report cards
 const progressSummary = computed(() => {
@@ -912,13 +896,6 @@ onMounted(() => {
               Documents ({{ documents.length }})
             </v-chip>
             <v-chip
-              v-if="isTabVisible('progress')"
-              size="small" variant="tonal" color="info" prepend-icon="mdi-flag-checkered"
-              @click="activeTab = 'progress'"
-            >
-              Milestones ({{ project?.milestones?.filter((m: any) => m.status?.toUpperCase() === 'COMPLETED').length ?? 0 }}/{{ project?.milestones?.length ?? 0 }})
-            </v-chip>
-            <v-chip
               v-if="isTabVisible('team')"
               size="small" variant="tonal" color="teal" prepend-icon="mdi-account-group-outline"
               @click="activeTab = 'team'"
@@ -935,73 +912,7 @@ onMounted(() => {
         </v-card-text>
       </v-card>
 
-      <!-- EEE-C: Dashboard summary panel (additive; accordion + tabs untouched) -->
-      <v-expansion-panels v-if="project" class="mb-4" variant="accordion">
-        <v-expansion-panel>
-          <v-expansion-panel-title>
-            <div class="d-flex align-center ga-2">
-              <v-icon icon="mdi-view-dashboard-outline" size="small" />
-              <span class="text-body-2 font-weight-medium">Dashboard Summary</span>
-            </div>
-          </v-expansion-panel-title>
-          <v-expansion-panel-text>
-            <v-row dense>
-              <!-- Financial bar -->
-              <v-col cols="12" md="5">
-                <div class="text-caption text-grey-darken-1 font-weight-medium mb-2">Financials</div>
-                <div v-if="dashFinancials.appropriation">
-                  <div class="d-flex justify-space-between text-caption mb-1">
-                    <span>Contract / Appropriation</span><span>{{ formatCurrency(dashFinancials.appropriation) }}</span>
-                  </div>
-                  <v-progress-linear :model-value="100" height="6" rounded color="teal" class="mb-2" />
-                  <div class="d-flex justify-space-between text-caption mb-1">
-                    <span>Obligation</span><span>{{ dashFinancials.obligationPct.toFixed(1) }}%</span>
-                  </div>
-                  <v-progress-linear :model-value="dashFinancials.obligationPct" height="6" rounded color="info" class="mb-2" />
-                  <div class="d-flex justify-space-between text-caption mb-1">
-                    <span>Disbursement</span><span>{{ dashFinancials.disbursementPct.toFixed(1) }}%</span>
-                  </div>
-                  <v-progress-linear :model-value="dashFinancials.disbursementPct" height="6" rounded color="success" />
-                </div>
-                <div v-else class="text-caption text-grey">No financial data.</div>
-              </v-col>
-
-              <!-- Milestone progress -->
-              <v-col cols="12" md="3">
-                <div class="text-caption text-grey-darken-1 font-weight-medium mb-2">Milestones</div>
-                <div class="d-flex align-center ga-2 mb-1">
-                  <v-chip size="small" color="success" variant="tonal">{{ progressSummary.completedMs }} completed</v-chip>
-                  <span class="text-caption text-grey">/ {{ progressSummary.totalMs }} total</span>
-                </div>
-                <v-progress-linear :model-value="progressSummary.msRate" height="6" rounded color="success" />
-              </v-col>
-
-              <!-- Gallery thumbnails -->
-              <v-col cols="12" md="4">
-                <div class="text-caption text-grey-darken-1 font-weight-medium mb-2">Gallery ({{ gallery.length }})</div>
-                <div class="d-flex flex-wrap ga-1">
-                  <v-img
-                    v-for="img in gallery.slice(0, 4)" :key="img.id"
-                    :src="img.imageUrl" width="56" height="56"
-                    cover class="rounded cursor-pointer"
-                    @click="activeTab = isTabVisible('documents') ? 'documents' : activeTab"
-                  />
-                  <div v-if="!gallery.length" class="text-caption text-grey">No images uploaded.</div>
-                </div>
-              </v-col>
-            </v-row>
-
-            <!-- Quick actions -->
-            <v-divider class="my-3" />
-            <div class="d-flex flex-wrap ga-2">
-              <v-btn v-if="isTabVisible('documents')" size="small" variant="tonal" color="primary" prepend-icon="mdi-paperclip" @click="activeTab = 'documents'">Documents</v-btn>
-              <v-btn v-if="isTabVisible('progress')" size="small" variant="tonal" color="info" prepend-icon="mdi-flag-checkered" @click="activeTab = 'progress'">Milestones</v-btn>
-              <v-btn v-if="isTabVisible('team')" size="small" variant="tonal" color="teal" prepend-icon="mdi-account-group-outline" @click="activeTab = 'team'">Team</v-btn>
-            </div>
-          </v-expansion-panel-text>
-        </v-expansion-panel>
-      </v-expansion-panels>
-
+      
       <!-- JR-B: Tab navigation -->
       <!-- WC-C: filter-before-render â€” tab bar deferred until RBAC is resolved -->
       <v-skeleton-loader v-if="!accessResolved" type="chip@4" class="mb-4" />
@@ -1027,6 +938,10 @@ onMounted(() => {
         <v-tab v-if="isTabVisible('others')" value="others">
           <v-icon start icon="mdi-dots-horizontal-circle-outline" />Others
         </v-tab>
+        <!-- AAA-B: Audit Log tab — Admin / SuperAdmin only -->
+        <v-tab v-if="isTabVisible('audit')" value="audit">
+          <v-icon start icon="mdi-history" />Audit Log
+        </v-tab>
       </v-tabs>
 
       <v-window v-model="activeTab">
@@ -1036,12 +951,15 @@ onMounted(() => {
 
           <!-- FFF-A: Row 1 — carousel gallery (left) + always-expanded Project Profile (right) -->
           <v-row class="mb-4" align="stretch">
-            <v-col cols="12" md="7">
+            <v-col cols="12" md="6">
               <!-- CCC-C: fixed height (280) ensures uniform carousel regardless of image dimensions -->
-              <v-card variant="outlined" class="h-100 overflow-hidden d-flex flex-column" style="min-height: 280px">
+              <v-card variant="outlined" class="h-100 overflow-hidden d-flex flex-column" style="min-height: 400px">
                 <v-carousel
                   v-if="carouselImages.length"
-                  height="560"
+                  height="100%"
+                  cycle
+                  :interval="10000"
+                  pause-on-hover
                   hide-delimiter-background
                   show-arrows="hover"
                   :continuous="false"
@@ -1051,9 +969,10 @@ onMounted(() => {
                     v-for="(img, idx) in carouselImages"
                     :key="img.id"
                   >
+                  
                     <v-img
                       :src="img.imageUrl"
-                      height="280"
+                      height="100%"
                       cover
                       position="center"
                       class="cursor-zoom-in bg-grey-lighten-3"
@@ -1070,7 +989,7 @@ onMounted(() => {
               </v-card>
             </v-col>
 
-            <v-col cols="12" md="5">
+            <v-col cols="12" md="6">
               <v-card variant="outlined" class="h-100 d-flex flex-column">
                 <v-card-title class="d-flex align-center ga-2 py-3 bg-grey-lighten-4">
                   <v-icon icon="mdi-information-outline" color="primary" size="small" />
@@ -1201,98 +1120,114 @@ onMounted(() => {
               <v-icon size="x-small" color="grey">mdi-office-building-outline</v-icon>
               {{ project.implementingAgency }}
             </span>
+            <!-- AAA-C: Expand / Collapse all overview panels -->
+          <div class="d-flex align-center mb-2">
+            <v-spacer />
+            <v-btn
+              variant="text"
+              size="small"
+              :prepend-icon="allPanelsExpanded ? 'mdi-collapse-all' : 'mdi-expand-all'"
+              :aria-label="allPanelsExpanded ? 'Collapse all panels' : 'Expand all panels'"
+              @click="toggleAllPanels"
+            >
+              {{ allPanelsExpanded ? 'Collapse All' : 'Expand All' }}
+            </v-btn>
+          </div>
           </div>
 
-          <!-- OU-D / FFF-A: Unified overview panels — collapsible 2-column grid -->
-          <v-expansion-panels v-model="overviewPanels" multiple class="overview-grid">
+          
 
-            <!-- Panel 0: Project Profile -->
+          <!-- EEE-A: One expansion panel per row; two-column internal layout (eliminates sibling height-sync issues) -->
+          <v-expansion-panels v-model="overviewPanels" multiple>
+
+            <!-- EEE-A Merged Panel: Project Profile & Information (two-column) -->
             <v-expansion-panel>
-              <v-expansion-panel-title>
+              <v-expansion-panel-title class="font-weight-bold">
                 <v-icon start size="small" icon="mdi-information-outline" />
-                Project Profile
+                Project Profile &amp; Information
               </v-expansion-panel-title>
               <v-expansion-panel-text>
                 <v-row>
-                  <v-col v-if="project.summary" cols="12">
-                    <p class="text-caption text-grey">Summary</p>
-                    <p class="text-pre-line">{{ project.summary }}</p>
-                  </v-col>
-                  <v-col v-if="project.description" cols="12">
-                    <p class="text-caption text-grey">Description</p>
-                    <p class="text-pre-line">{{ project.description }}</p>
-                  </v-col>
-                  <v-col v-if="project.scope" cols="12">
-                    <p class="text-caption text-grey">Scope of Work</p>
-                    <p class="text-pre-line">{{ project.scope }}</p>
-                  </v-col>
-                  <v-col v-if="project.objectives && (Array.isArray(project.objectives) ? project.objectives.length : true)" cols="12">
-                    <p class="text-caption text-grey">Project Objectives</p>
-                    <ul class="pl-4">
-                      <template v-if="Array.isArray(project.objectives)">
-                        <li v-for="(obj, i) in project.objectives" :key="i">{{ obj }}</li>
-                      </template>
-                      <template v-else>
-                        <li>{{ project.objectives }}</li>
-                      </template>
-                    </ul>
-                  </v-col>
-                  <v-col v-if="project.keyFeatures && (Array.isArray(project.keyFeatures) ? project.keyFeatures.length : true)" cols="12">
-                    <p class="text-caption text-grey mb-2">Key Features</p>
-                    <div class="d-flex flex-wrap ga-2">
-                      <template v-if="Array.isArray(project.keyFeatures)">
-                        <v-chip v-for="(feat, i) in project.keyFeatures" :key="i" color="primary" variant="tonal" size="small" prepend-icon="mdi-star-outline">
-                          {{ feat }}
-                        </v-chip>
-                      </template>
-                      <span v-else>{{ project.keyFeatures }}</span>
+                  <!-- LEFT COLUMN: Project Profile -->
+                  <v-col cols="12" md="6">
+                    <div class="d-flex align-center ga-2 mb-3">
+                      <v-icon size="18" color="primary">mdi-information-outline</v-icon>
+                      <span class="text-subtitle-2 font-weight-semibold">Project Profile</span>
                     </div>
-                  </v-col>
-                  <v-col v-if="facilitiesList && facilitiesList.length" cols="12">
-                    <p class="text-caption text-grey">Facilities</p>
-                    <ul class="pl-4">
-                      <li v-for="(fac, i) in facilitiesList" :key="i">{{ fac }}</li>
-                    </ul>
-                  </v-col>
-                  <v-col v-if="project.beneficiaries || project.beneficiaryList?.length" cols="12">
-                    <p class="text-caption text-grey">Beneficiaries</p>
-                    <template v-if="project.beneficiaryList?.length">
+                    <div v-if="project.summary" class="mb-3">
+                      <p class="text-body-2 text-grey-darken-1 mb-1">Summary</p>
+                      <p class="text-pre-line">{{ project.summary }}</p>
+                    </div>
+                    <div v-if="project.description" class="mb-3">
+                      <p class="text-body-2 text-grey-darken-1 mb-1">Description</p>
+                      <p class="text-pre-line">{{ project.description }}</p>
+                    </div>
+                    <div v-if="project.scope" class="mb-3">
+                      <p class="text-body-2 text-grey-darken-1 mb-1">Scope of Work</p>
+                      <p class="text-pre-line">{{ project.scope }}</p>
+                    </div>
+                    <div v-if="project.objectives && (Array.isArray(project.objectives) ? project.objectives.length : true)" class="mb-3">
+                      <p class="text-body-2 text-grey-darken-1 mb-1">Project Objectives</p>
                       <ul class="pl-4">
-                        <li v-for="(b, i) in project.beneficiaryList" :key="i">{{ b }}</li>
+                        <template v-if="Array.isArray(project.objectives)">
+                          <li v-for="(obj, i) in project.objectives" :key="i">{{ obj }}</li>
+                        </template>
+                        <template v-else>
+                          <li>{{ project.objectives }}</li>
+                        </template>
                       </ul>
-                    </template>
-                    <p v-else-if="project.beneficiaries">{{ Number(project.beneficiaries).toLocaleString() }} direct beneficiaries</p>
+                    </div>
+                    <div v-if="project.keyFeatures && (Array.isArray(project.keyFeatures) ? project.keyFeatures.length : true)" class="mb-3">
+                      <p class="text-caption text-grey mb-2">Key Features</p>
+                      <div class="d-flex flex-wrap ga-2">
+                        <template v-if="Array.isArray(project.keyFeatures)">
+                          <v-chip v-for="(feat, i) in project.keyFeatures" :key="i" color="primary" variant="tonal" size="x-small" prepend-icon="mdi-star-outline">
+                            {{ feat }}
+                          </v-chip>
+                        </template>
+                        <span v-else>{{ project.keyFeatures }}</span>
+                      </div>
+                    </div>
+                    <div v-if="facilitiesList && facilitiesList.length" class="mb-3">
+                      <p class="text-body-2 text-grey-darken-1 mb-1">Facilities</p>
+                      <ul class="pl-4">
+                        <li v-for="(fac, i) in facilitiesList" :key="i">{{ fac }}</li>
+                      </ul>
+                    </div>
+                    <div v-if="project.beneficiaries || project.beneficiaryList?.length" class="mb-3">
+                      <p class="text-body-2 text-grey-darken-1 mb-1">Beneficiaries</p>
+                      <template v-if="project.beneficiaryList?.length">
+                        <ul class="pl-4">
+                          <li v-for="(b, i) in project.beneficiaryList" :key="i">{{ b }}</li>
+                        </ul>
+                      </template>
+                      <p v-else-if="project.beneficiaries">{{ Number(project.beneficiaries).toLocaleString() }} direct beneficiaries</p>
+                    </div>
+
+                    <!-- DDD-A: Location — emphasized critical infrastructure attribute -->
+                    <div v-if="project.campus || project.spatialCoverage || project.municipality || project.province || project.latitude != null" class="mb-1">
+                      <div class="d-flex align-center ga-2 mb-2">
+                        <v-icon size="16" color="blue-grey">mdi-map-marker-outline</v-icon>
+                        <p class="text-caption text-grey-darken-1 font-weight-medium mb-0">Location</p>
+                      </div>
+                      <div class="d-flex flex-wrap ga-2">
+                        <v-chip v-if="project.campus" size="small" color="primary" variant="tonal" prepend-icon="mdi-school-outline">{{ project.campus }}</v-chip>
+                        <v-chip v-if="project.spatialCoverage" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-map">{{ project.spatialCoverage }}</v-chip>
+                        <v-chip v-if="project.municipality" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-city">{{ project.municipality }}</v-chip>
+                        <v-chip v-if="project.province" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-map-marker">{{ project.province }}</v-chip>
+                        <v-chip v-if="project.latitude != null && project.longitude != null" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-crosshairs-gps">
+                          {{ project.latitude }}, {{ project.longitude }}
+                        </v-chip>
+                      </div>
+                    </div>
                   </v-col>
 
-                  <!-- DDD-A: Location — elevated to Profile panel as a critical infrastructure attribute -->
-                  <v-col v-if="project.campus || project.spatialCoverage || project.municipality || project.province || project.latitude != null" cols="12">
-                    <div class="d-flex align-center ga-2 mb-2">
-                      <v-icon size="16" color="blue-grey">mdi-map-marker-outline</v-icon>
-                      <p class="text-caption text-grey font-weight-medium text-uppercase mb-0">Location</p>
+                  <!-- RIGHT COLUMN: Project Information & Contract Details -->
+                  <v-col cols="12" md="6" class="border-md-s pl-md-4">
+                    <div class="d-flex align-center ga-2 mb-3">
+                      <v-icon size="18" color="primary">mdi-calendar-range</v-icon>
+                      <span class="text-subtitle-2 font-weight-semibold">Project Information &amp; Contract Details</span>
                     </div>
-                    <div class="d-flex flex-wrap ga-2">
-                      <v-chip v-if="project.campus" size="small" color="primary" variant="tonal" prepend-icon="mdi-school-outline">{{ project.campus }}</v-chip>
-                      <v-chip v-if="project.spatialCoverage" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-map">{{ project.spatialCoverage }}</v-chip>
-                      <v-chip v-if="project.municipality" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-city">{{ project.municipality }}</v-chip>
-                      <v-chip v-if="project.province" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-map-marker">{{ project.province }}</v-chip>
-                      <v-chip v-if="project.latitude != null && project.longitude != null" size="small" variant="tonal" color="blue-grey" prepend-icon="mdi-crosshairs-gps">
-                        {{ project.latitude }}, {{ project.longitude }}
-                      </v-chip>
-                    </div>
-                  </v-col>
-                </v-row>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-
-            <!-- Panel 1: Dates & Duration -->
-            <v-expansion-panel>
-              <v-expansion-panel-title>
-                <v-icon start size="small" icon="mdi-calendar-range" />
-                Dates &amp; Duration
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <v-row>
-                  <v-col cols="12" sm="6">
                     <v-list density="compact">
                       <v-list-item v-if="project.buildingType">
                         <v-list-item-title>Building Type</v-list-item-title>
@@ -1306,10 +1241,6 @@ onMounted(() => {
                         <v-list-item-title>Number of Floors</v-list-item-title>
                         <v-list-item-subtitle>{{ project.numberOfFloors }}</v-list-item-subtitle>
                       </v-list-item>
-                    </v-list>
-                  </v-col>
-                  <v-col cols="12" sm="6">
-                    <v-list density="compact">
                       <v-list-item v-if="project.contractor">
                         <v-list-item-title>Contractor</v-list-item-title>
                         <v-list-item-subtitle>{{ project.contractor }}</v-list-item-subtitle>
@@ -1335,217 +1266,222 @@ onMounted(() => {
                         <v-list-item-subtitle>{{ project.projectDuration }}</v-list-item-subtitle>
                       </v-list-item>
                     </v-list>
-                  </v-col>
 
-                  <!-- DDD-A: Location moved to Project Profile panel -->
-
-                  <!-- MH: Revision Orders -->
-                  <v-col v-if="project.originalStartDate || project.revisedStartDate || project.originalCompletionDate || project.revisedCompletionDate || project.revisedProjectDuration" cols="12">
-                    <p class="text-caption text-grey font-weight-medium text-uppercase mb-2">
-                      <v-icon size="x-small" color="warning" class="mr-1">mdi-file-document-edit-outline</v-icon>
-                      Revision Orders (VOR / CTE)
-                    </p>
-                    <v-row dense>
-                      <v-col v-if="project.originalStartDate" cols="12" sm="6" md="4">
-                        <v-list-item density="compact">
-                          <v-list-item-title class="text-caption text-grey">Original Start Date</v-list-item-title>
-                          <v-list-item-subtitle class="text-body-2">{{ formatDate(project.originalStartDate) }}</v-list-item-subtitle>
-                        </v-list-item>
-                      </v-col>
-                      <v-col v-if="project.revisedStartDate" cols="12" sm="6" md="4">
-                        <v-list-item density="compact">
-                          <v-list-item-title class="text-caption text-grey">Revised Start Date</v-list-item-title>
-                          <v-list-item-subtitle class="text-body-2">{{ formatDate(project.revisedStartDate) }}</v-list-item-subtitle>
-                        </v-list-item>
-                      </v-col>
-                      <v-col v-if="project.originalCompletionDate" cols="12" sm="6" md="4">
-                        <v-list-item density="compact">
-                          <v-list-item-title class="text-caption text-grey">Original Completion</v-list-item-title>
-                          <v-list-item-subtitle class="text-body-2">{{ formatDate(project.originalCompletionDate) }}</v-list-item-subtitle>
-                        </v-list-item>
-                      </v-col>
-                      <v-col v-if="project.revisedCompletionDate" cols="12" sm="6" md="4">
-                        <v-list-item density="compact">
-                          <v-list-item-title class="text-caption text-grey">Revised Completion</v-list-item-title>
-                          <v-list-item-subtitle class="text-body-2">{{ formatDate(project.revisedCompletionDate) }}</v-list-item-subtitle>
-                        </v-list-item>
-                      </v-col>
-                      <v-col v-if="project.revisedProjectDuration" cols="12" sm="6" md="4">
-                        <v-list-item density="compact">
-                          <v-list-item-title class="text-caption text-grey">Revised Duration</v-list-item-title>
-                          <v-list-item-subtitle class="text-body-2">{{ project.revisedProjectDuration }}</v-list-item-subtitle>
-                        </v-list-item>
-                      </v-col>
-                    </v-row>
-                  </v-col>
-                </v-row>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-
-            <!-- Panel 2: Progress & Reports -->
-            <v-expansion-panel>
-              <v-expansion-panel-title>
-                <v-icon start size="small" icon="mdi-chart-line" />
-                Progress &amp; Reports
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <!-- TTT-B: PROGRESS REPORT SUMMARY -->
-                <div class="d-flex justify-end">
-                  <v-btn size="small" color="info" variant="tonal" prepend-icon="mdi-chart-line" @click="activeTab = 'progress'">
-                    View Progress Reports
-                  </v-btn>
-              </div>
-                <div class="text-overline text-medium-emphasis mb-2">Progress Report Summary</div>
-                <v-row dense class="mb-3">
-                  <v-col cols="6" sm="3">
-                    <v-card variant="tonal" color="primary" class="pa-3" rounded="lg">
-                      <div class="text-caption text-grey">Physical</div>
-                      <div class="text-h6 font-weight-bold">{{ progressSummary.physical != null ? progressSummary.physical.toFixed(1) : (project?.physicalProgress ?? 0) }}%</div>
-                    </v-card>
-                  </v-col>
-                  <v-col cols="6" sm="3">
-                    <v-card variant="tonal" color="info" class="pa-3" rounded="lg">
-                      <div class="text-caption text-grey">Financial</div>
-                      <div class="text-h6 font-weight-bold">{{ project?.financialProgress ?? 0 }}%</div>
-                    </v-card>
-                  </v-col>
-                  <v-col cols="6" sm="3">
-                    <v-card variant="tonal" color="blue-grey" class="pa-3" rounded="lg">
-                      <div class="text-caption text-grey">Latest Report</div>
-                      <div class="text-body-1 font-weight-bold">
-                        {{ latestReport ? (latestReport.reportType === 'WEEKLY' ? 'WAR' : latestReport.reportType === 'MONTHLY' ? 'MPR' : latestReport.reportType) : '—' }}
-                      </div>
-                      <div class="text-caption text-grey">{{ latestReport?.reportDate ? formatDate(latestReport.reportDate) : 'No reports' }}</div>
-                    </v-card>
-                  </v-col>
-                  <v-col cols="6" sm="3">
-                    <v-card variant="tonal" color="secondary" class="pa-3" rounded="lg">
-                      <div class="text-caption text-grey">Status</div>
-                      <div class="text-body-2 font-weight-bold">{{ getPublicationStatusLabel(project.publicationStatus) }}</div>
-                      <div v-if="project.projectStatusCategory" class="text-caption text-grey">{{ project.projectStatusCategory }}</div>
-                    </v-card>
-                  </v-col>
-                  <v-col v-if="latestReport && latestReport.percentageCompletion != null" cols="6" sm="3">
-                    <div class="text-caption text-grey">Report Completion</div>
-                    <div class="text-body-2 font-weight-medium text-primary">{{ Number(latestReport.percentageCompletion).toFixed(1) }}%</div>
-                  </v-col>
-                  <v-col v-if="latestReport && latestReport.slippage != null" cols="6" sm="3">
-                    <div class="text-caption text-grey">Slippage</div>
-                    <div class="text-body-2 font-weight-medium" :class="Number(latestReport.slippage) < 0 ? 'text-error' : 'text-success'">{{ Number(latestReport.slippage).toFixed(1) }}%</div>
-                  </v-col>
-                  <v-col v-if="project.costIncurredToDate" cols="6" sm="3">
-                    <div class="text-caption text-grey">Cost Incurred</div>
-                    <div class="text-body-2 font-weight-medium">{{ formatCurrency(project.costIncurredToDate) }}</div>
-                  </v-col>
-                  <v-col v-if="project.asOfDate" cols="6" sm="3">
-                    <div class="text-caption text-grey">As Of</div>
-                    <div class="text-body-2 font-weight-medium">{{ formatDate(project.asOfDate) }}</div>
-                  </v-col>
-                </v-row>
-                <v-progress-linear v-if="prLoading" indeterminate height="2" color="blue-grey" class="mb-3" />
-
-                <!-- DDD-C: Milestone Summary removed (redundant — full milestone view is in Progress tab) -->
-
-                <!-- TTT-B: RECENT ACTIVITY -->
-                <v-divider class="my-3" />
-                <div class="text-overline text-medium-emphasis mb-2">Recent Activity</div>
-                <div class="d-flex flex-column ga-1 mb-2">
-                  <div class="d-flex align-center ga-2 text-body-2">
-                    <v-icon size="16" color="blue-grey">mdi-clipboard-text-clock-outline</v-icon>
-                    <span class="text-grey-darken-1">Latest submitted report:</span>
-                    <span class="font-weight-medium">{{ latestReport?.reportDate ? formatDate(latestReport.reportDate) : '—' }}</span>
-                  </div>
-                  <div v-if="latestMilestoneUpdate" class="d-flex align-center ga-2 text-body-2">
-                    <v-icon size="16" color="secondary">mdi-flag-checkered</v-icon>
-                    <span class="text-grey-darken-1">Latest milestone:</span>
-                    <span class="font-weight-medium">{{ latestMilestoneUpdate.name || 'Untitled' }}</span>
-                    <v-chip size="x-small" :color="getMilestoneStatusColor(latestMilestoneUpdate.status)" variant="tonal">{{ latestMilestoneUpdate.status }}</v-chip>
-                  </div>
-                </div>
-
-                <!-- Progress remarks preview (kept) -->
-                <div v-if="project.remarksLog?.length" class="mt-2 mb-2">
-                  <div class="text-caption text-grey font-weight-medium text-uppercase mb-1">Progress Remarks</div>
-                  <div v-for="(remark, i) in project.remarksLog.slice(0, 2)" :key="i" class="mb-1 pa-2 rounded bg-grey-lighten-5">
-                    <div class="text-body-2">{{ remark.text }}</div>
-                    <div class="text-caption text-grey-darken-1">
-                      <span v-if="remark.author">{{ remark.author }} · </span>
-                      {{ remark.createdAt ? formatDate(remark.createdAt) : '' }}
+                    <!-- MH: Revision Orders -->
+                    <div v-if="project.originalStartDate || project.revisedStartDate || project.originalCompletionDate || project.revisedCompletionDate || project.revisedProjectDuration" class="mt-3">
+                      <p class="text-caption text-black font-weight-bold text-uppercase mb-2">
+                        <v-icon size="x-small" color="warning" class="mr-1">mdi-file-document-edit-outline</v-icon>
+                        Variation Orders (VO / CTE)
+                      </p>
+                      <v-row dense>
+                        <v-col v-if="project.originalStartDate" cols="12" sm="6">
+                          <v-list-item density="compact">
+                            <v-list-item-title class="text-caption text-black font-weight-medium">Original Start Date</v-list-item-title>
+                            <v-list-item-subtitle class="text-body-2">{{ formatDate(project.originalStartDate) }}</v-list-item-subtitle>
+                          </v-list-item>
+                        </v-col>
+                        <v-col v-if="project.revisedStartDate" cols="12" sm="6">
+                          <v-list-item density="compact">
+                            <v-list-item-title class="text-caption text-black font-weight-medium">Revised Start Date</v-list-item-title>
+                            <v-list-item-subtitle class="text-body-2">{{ formatDate(project.revisedStartDate) }}</v-list-item-subtitle>
+                          </v-list-item>
+                        </v-col>
+                        <v-col v-if="project.originalCompletionDate" cols="12" sm="6">
+                          <v-list-item density="compact">
+                            <v-list-item-title class="text-caption text-black font-weight-medium">Original Completion</v-list-item-title>
+                            <v-list-item-subtitle class="text-body-2">{{ formatDate(project.originalCompletionDate) }}</v-list-item-subtitle>
+                          </v-list-item>
+                        </v-col>
+                        <v-col v-if="project.revisedCompletionDate" cols="12" sm="6">
+                          <v-list-item density="compact">
+                            <v-list-item-title class="text-caption text-black font-weight-medium">Revised Completion</v-list-item-title>
+                            <v-list-item-subtitle class="text-body-2">{{ formatDate(project.revisedCompletionDate) }}</v-list-item-subtitle>
+                          </v-list-item>
+                        </v-col>
+                        <v-col v-if="project.revisedProjectDuration" cols="12" sm="6">
+                          <v-list-item density="compact">
+                            <v-list-item-title class="text-caption text-black font-weight-medium">Revised Duration</v-list-item-title>
+                            <v-list-item-subtitle class="text-body-2">{{ project.revisedProjectDuration }}</v-list-item-subtitle>
+                          </v-list-item>
+                        </v-col>
+                      </v-row>
                     </div>
-                  </div>
-                </div>
-
-                
+                  </v-col>
+                </v-row>
               </v-expansion-panel-text>
             </v-expansion-panel>
 
-            <!-- Panel 3: Strategic Alignment -->
+            <!-- EEE-A Merged Panel: Progress & Strategic Alignment (two-column) -->
             <v-expansion-panel>
-              <v-expansion-panel-title>
-                <v-icon start size="small" icon="mdi-strategy" />
-                Strategic Alignment
+              <v-expansion-panel-title class="font-weight-bold">
+                <v-icon start size="small" icon="mdi-chart-line" />
+                Progress &amp; Strategic Alignment
               </v-expansion-panel-title>
-              <!-- BBB-A: Only alignment content. CCC-B: Show More/Less per section. -->
               <v-expansion-panel-text>
                 <v-row>
-                  <!-- Narrative with Show More/Less -->
-                  <v-col v-if="project.strategicAlignment" cols="12">
-                    <p class="text-caption text-grey">Strategic Alignment Narrative</p>
-                    <p class="text-pre-line" :class="{ 'text-truncate-4': !showMoreNarrative }">{{ project.strategicAlignment }}</p>
-                    <v-btn v-if="project.strategicAlignment.length > 200" variant="text" size="x-small" color="primary" class="mt-1 pa-0" @click="showMoreNarrative = !showMoreNarrative">
-                      {{ showMoreNarrative ? 'Show less' : 'Show more' }}
-                    </v-btn>
-                  </v-col>
-
-                  <!-- RDP with Show More/Less -->
-                  <v-col v-if="project.rdpAlignment?.length" cols="12">
-                    <p class="text-caption text-grey mb-2">RDP 2023–2028 Alignment</p>
-                    <div class="d-flex flex-wrap ga-2 align-center">
-                      <v-chip v-for="(item, i) in (showMoreAlignment.rdp ? project.rdpAlignment : project.rdpAlignment.slice(0, ALIGN_MAX_CHIPS))" :key="i" color="primary" variant="tonal" size="small">{{ labelForRdp(item) }}</v-chip>
-                      <v-btn v-if="project.rdpAlignment.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="primary" class="pa-0" @click="showMoreAlignment.rdp = !showMoreAlignment.rdp">
-                        {{ showMoreAlignment.rdp ? 'Show less' : `+${project.rdpAlignment.length - ALIGN_MAX_CHIPS} more` }}
+                  <!-- LEFT COLUMN: Progress & Reports -->
+                  <v-col cols="12" md="6">
+                    <div class="d-flex justify-space-between align-center mb-3">
+                      <div class="d-flex align-center ga-2">
+                        <v-icon size="18" color="info">mdi-chart-line</v-icon>
+                        <span class="text-subtitle-2 font-weight-semibold">Progress Report Summary</span>
+                      </div>
+                      <v-btn size="small" color="info" variant="tonal" prepend-icon="mdi-chart-line" @click="activeTab = 'progress'">
+                        View Reports
                       </v-btn>
+                    </div>
+                    <!-- EEE-A: equal-size summary cards -->
+                    <v-row dense class="mb-3">
+                      <v-col cols="6">
+                        <v-card variant="tonal" color="primary" class="pa-3 h-100" rounded="lg">
+                          <div class="text-caption text-grey">Physical</div>
+                          <div class="text-h6 font-weight-bold">{{ progressSummary.physical != null ? progressSummary.physical.toFixed(1) : (project?.physicalProgress ?? 0) }}%</div>
+                        </v-card>
+                      </v-col>
+                      <v-col cols="6">
+                        <v-card variant="tonal" color="info" class="pa-3 h-100" rounded="lg">
+                          <div class="text-caption text-grey">Financial</div>
+                          <div class="text-h6 font-weight-bold">{{ project?.financialProgress ?? 0 }}%</div>
+                        </v-card>
+                      </v-col>
+                      <v-col cols="6">
+                        <v-card variant="tonal" color="blue-grey" class="pa-3 h-100" rounded="lg">
+                          <div class="text-caption text-grey">Latest Report</div>
+                          <div class="text-body-1 font-weight-bold">
+                            {{ latestReport ? (latestReport.reportType === 'WEEKLY' ? 'WAR' : latestReport.reportType === 'MONTHLY' ? 'MPR' : latestReport.reportType) : '—' }}
+                          </div>
+                          <div class="text-caption text-grey">{{ latestReport?.reportDate ? formatDate(latestReport.reportDate) : 'No reports' }}</div>
+                        </v-card>
+                      </v-col>
+                      <v-col cols="6">
+                        <v-card variant="tonal" color="secondary" class="pa-3 h-100" rounded="lg">
+                          <div class="text-caption text-grey">Status</div>
+                          <div class="text-body-2 font-weight-bold">{{ getPublicationStatusLabel(project.publicationStatus) }}</div>
+                          <div v-if="project.projectStatusCategory" class="text-caption text-grey">{{ project.projectStatusCategory }}</div>
+                        </v-card>
+                      </v-col>
+                    </v-row>
+                    <v-progress-linear v-if="prLoading" indeterminate height="2" color="blue-grey" class="mb-3" />
+
+                    <!-- Secondary report metrics -->
+                    <v-row dense v-if="(latestReport && (latestReport.percentageCompletion != null || latestReport.slippage != null)) || project.costIncurredToDate || project.asOfDate" class="mb-2">
+                      <v-col v-if="latestReport && latestReport.percentageCompletion != null" cols="6">
+                        <div class="text-caption text-grey">Report Completion</div>
+                        <div class="text-body-2 font-weight-medium text-primary">{{ Number(latestReport.percentageCompletion).toFixed(1) }}%</div>
+                      </v-col>
+                      <v-col v-if="latestReport && latestReport.slippage != null" cols="6">
+                        <div class="text-caption text-grey">Slippage</div>
+                        <div class="text-body-2 font-weight-medium" :class="Number(latestReport.slippage) < 0 ? 'text-error' : 'text-success'">{{ Number(latestReport.slippage).toFixed(1) }}%</div>
+                      </v-col>
+                      <v-col v-if="project.costIncurredToDate" cols="6">
+                        <div class="text-caption text-grey">Cost Incurred</div>
+                        <div class="text-body-2 font-weight-medium">{{ formatCurrency(project.costIncurredToDate) }}</div>
+                      </v-col>
+                      <v-col v-if="project.asOfDate" cols="6">
+                        <div class="text-caption text-grey">As Of</div>
+                        <div class="text-body-2 font-weight-medium">{{ formatDate(project.asOfDate) }}</div>
+                      </v-col>
+                    </v-row>
+
+                    <!-- TTT-B: RECENT ACTIVITY -->
+                    <v-divider class="my-3" />
+                    <div class="text-overline text-medium-emphasis mb-2">Recent Activity</div>
+                    <div class="d-flex flex-column ga-1 mb-2">
+                      <div class="d-flex align-center ga-2 text-body-2">
+                        <v-icon size="16" color="blue-grey">mdi-clipboard-text-clock-outline</v-icon>
+                        <span class="text-grey-darken-1">Latest submitted report:</span>
+                        <span class="font-weight-medium">{{ latestReport?.reportDate ? formatDate(latestReport.reportDate) : '—' }}</span>
+                      </div>
+                      <div v-if="latestMilestoneUpdate" class="d-flex align-center ga-2 text-body-2">
+                        <v-icon size="16" color="secondary">mdi-flag-checkered</v-icon>
+                        <span class="text-grey-darken-1">Latest milestone:</span>
+                        <span class="font-weight-medium">{{ latestMilestoneUpdate.name || 'Untitled' }}</span>
+                        <v-chip size="x-small" :color="getMilestoneStatusColor(latestMilestoneUpdate.status)" variant="tonal">{{ latestMilestoneUpdate.status }}</v-chip>
+                      </div>
+                    </div>
+
+                    <!-- Progress remarks preview -->
+                    <div v-if="project.remarksLog?.length" class="mt-2 mb-2">
+                      <div class="text-caption text-grey font-weight-medium text-uppercase mb-1">Progress Remarks</div>
+                      <div v-for="(remark, i) in project.remarksLog.slice(0, 2)" :key="i" class="mb-1 pa-2 rounded bg-grey-lighten-5">
+                        <div class="text-body-2">{{ remark.text }}</div>
+                        <div class="text-caption text-grey-darken-1">
+                          <span v-if="remark.author">{{ remark.author }} · </span>
+                          {{ remark.createdAt ? formatDate(remark.createdAt) : '' }}
+                        </div>
+                      </div>
                     </div>
                   </v-col>
 
-                  <!-- SEA with Show More/Less -->
-                  <v-col v-if="project.socioeconomicAgenda?.length" cols="12">
-                    <p class="text-caption text-grey mb-2">Socio-Economic Agenda</p>
-                    <div class="d-flex flex-wrap ga-2 align-center">
-                      <v-chip v-for="(item, i) in (showMoreAlignment.sea ? project.socioeconomicAgenda : project.socioeconomicAgenda.slice(0, ALIGN_MAX_CHIPS))" :key="i" color="success" variant="tonal" size="small">{{ labelForSea(item) }}</v-chip>
-                      <v-btn v-if="project.socioeconomicAgenda.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="success" class="pa-0" @click="showMoreAlignment.sea = !showMoreAlignment.sea">
-                        {{ showMoreAlignment.sea ? 'Show less' : `+${project.socioeconomicAgenda.length - ALIGN_MAX_CHIPS} more` }}
-                      </v-btn>
+                  <!-- RIGHT COLUMN: Strategic Alignment (EEE-B: always-visible sections with placeholders) -->
+                  <v-col cols="12" md="6" class="border-md-s pl-md-4">
+                    <div class="d-flex align-center ga-2 mb-3">
+                      <v-icon size="18" color="primary">mdi-strategy</v-icon>
+                      <span class="text-subtitle-2 font-weight-semibold">Strategic Alignment</span>
                     </div>
-                  </v-col>
 
-                  <!-- LIKHA with Show More/Less -->
-                  <v-col v-if="project.csuLikhaGoals?.length" cols="12">
-                    <p class="text-caption text-grey mb-2">CSU LIKHA Strategic Goals</p>
-                    <div class="d-flex flex-wrap ga-2 align-center">
-                      <v-chip v-for="(item, i) in (showMoreAlignment.likha ? project.csuLikhaGoals : project.csuLikhaGoals.slice(0, ALIGN_MAX_CHIPS))" :key="i" color="info" variant="tonal" size="small">{{ labelForLikha(item) }}</v-chip>
-                      <v-btn v-if="project.csuLikhaGoals.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="info" class="pa-0" @click="showMoreAlignment.likha = !showMoreAlignment.likha">
-                        {{ showMoreAlignment.likha ? 'Show less' : `+${project.csuLikhaGoals.length - ALIGN_MAX_CHIPS} more` }}
-                      </v-btn>
+                    <!-- Narrative -->
+                    <div class="mb-3">
+                      <p class="text-body-2 text-grey-darken-1 mb-1">Strategic Alignment Narrative</p>
+                      <template v-if="project.strategicAlignment">
+                        <p class="text-pre-line mb-0 text-subtitle-2" :class="{ 'text-truncate-4': !showMoreNarrative }">{{ project.strategicAlignment }}</p>
+                        <v-btn v-if="project.strategicAlignment.length > 200" variant="text" size="x-small" color="primary" class="mt-1 pa-0" @click="showMoreNarrative = !showMoreNarrative">
+                          {{ showMoreNarrative ? 'Show less' : 'Show more' }}
+                        </v-btn>
+                      </template>
+                      <p v-else class="text-caption text-grey font-italic mb-0">Not provided.</p>
                     </div>
-                  </v-col>
 
-                  <!-- SDG with Show More/Less -->
-                  <v-col v-if="(project as any).sdgGoals?.length" cols="12">
-                    <p class="text-caption text-grey mb-2">UN Sustainable Development Goals</p>
-                    <div class="d-flex flex-wrap ga-2 align-center">
-                      <v-chip
-                        v-for="(item, i) in (showMoreAlignment.sdg ? (project as any).sdgGoals : (project as any).sdgGoals.slice(0, ALIGN_MAX_CHIPS))"
-                        :key="i" color="teal" variant="tonal" size="small" prepend-icon="mdi-earth"
-                      >{{ labelForSdg(item) }}</v-chip>
-                      <v-btn v-if="(project as any).sdgGoals.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="teal" class="pa-0" @click="showMoreAlignment.sdg = !showMoreAlignment.sdg">
-                        {{ showMoreAlignment.sdg ? 'Show less' : `+${(project as any).sdgGoals.length - ALIGN_MAX_CHIPS} more` }}
-                      </v-btn>
+                    <!-- SDG -->
+                    <div class="mb-3">
+                      <p class="text-caption text-black text-weight-bold mb-2">UN Sustainable Development Goals</p>
+                      <div v-if="project.sdgGoals?.length" class="d-flex flex-wrap ga-2 align-center">
+                        <v-chip
+                          v-for="(item, i) in (showMoreAlignment.sdg ? project.sdgGoals : project.sdgGoals.slice(0, ALIGN_MAX_CHIPS))"
+                          :key="i" color="teal" variant="tonal" size="small" prepend-icon="mdi-earth"
+                        >{{ labelForSdg(item) }}</v-chip>
+                        <v-btn v-if="project.sdgGoals.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="teal" class="pa-0" @click="showMoreAlignment.sdg = !showMoreAlignment.sdg">
+                          {{ showMoreAlignment.sdg ? 'Show less' : `+${project.sdgGoals.length - ALIGN_MAX_CHIPS} more` }}
+                        </v-btn>
+                      </div>
+                      <p v-else class="text-caption text-grey font-italic mb-0">No SDGs selected.</p>
                     </div>
-                  </v-col>
 
-                  <v-col v-if="!project.strategicAlignment && !project.rdpAlignment?.length && !project.socioeconomicAgenda?.length && !project.csuLikhaGoals?.length && !(project as any).sdgGoals?.length" cols="12" class="text-center text-grey py-2">
-                    No strategic alignment recorded.
+                    <!-- RDP -->
+                    <div class="mb-3">
+                      <p class="text-caption text-black text-weight-bold mb-2">RDP 2023–2028 Alignment</p>
+                      <div v-if="project.rdpAlignment?.length" class="d-flex flex-wrap ga-2 align-center">
+                        <v-chip v-for="(item, i) in (showMoreAlignment.rdp ? project.rdpAlignment : project.rdpAlignment.slice(0, ALIGN_MAX_CHIPS))" :key="i" color="primary" variant="tonal" size="small">{{ labelForRdp(item) }}</v-chip>
+                        <v-btn v-if="project.rdpAlignment.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="primary" class="pa-0" @click="showMoreAlignment.rdp = !showMoreAlignment.rdp">
+                          {{ showMoreAlignment.rdp ? 'Show less' : `+${project.rdpAlignment.length - ALIGN_MAX_CHIPS} more` }}
+                        </v-btn>
+                      </div>
+                      <p v-else class="text-caption text-grey font-italic mb-0">No RDP alignment selected.</p>
+                    </div>
+
+                    <!-- SEA -->
+                    <div class="mb-3">
+                      <p class="text-caption text-black text-weight-bold mb-2">Socio-Economic Agenda</p>
+                      <div v-if="project.socioeconomicAgenda?.length" class="d-flex flex-wrap ga-2 align-center">
+                        <v-chip v-for="(item, i) in (showMoreAlignment.sea ? project.socioeconomicAgenda : project.socioeconomicAgenda.slice(0, ALIGN_MAX_CHIPS))" :key="i" color="success" variant="tonal" size="small">{{ labelForSea(item) }}</v-chip>
+                        <v-btn v-if="project.socioeconomicAgenda.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="success" class="pa-0" @click="showMoreAlignment.sea = !showMoreAlignment.sea">
+                          {{ showMoreAlignment.sea ? 'Show less' : `+${project.socioeconomicAgenda.length - ALIGN_MAX_CHIPS} more` }}
+                        </v-btn>
+                      </div>
+                      <p v-else class="text-caption text-grey font-italic mb-0">No Socio-Economic Agenda selected.</p>
+                    </div>
+
+                    <!-- LIKHA -->
+                    <div class="mb-1">
+                      <p class="text-caption text-black text-weight-bold mb-2">CSU LIKHA Strategic Goals</p>
+                      <div v-if="project.csuLikhaGoals?.length" class="d-flex flex-wrap ga-2 align-center">
+                        <v-chip v-for="(item, i) in (showMoreAlignment.likha ? project.csuLikhaGoals : project.csuLikhaGoals.slice(0, ALIGN_MAX_CHIPS))" :key="i" color="info" variant="tonal" size="small">{{ labelForLikha(item) }}</v-chip>
+                        <v-btn v-if="project.csuLikhaGoals.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="info" class="pa-0" @click="showMoreAlignment.likha = !showMoreAlignment.likha">
+                          {{ showMoreAlignment.likha ? 'Show less' : `+${project.csuLikhaGoals.length - ALIGN_MAX_CHIPS} more` }}
+                        </v-btn>
+                      </div>
+                      <p v-else class="text-caption text-grey font-italic mb-0">No CSU LIKHA goals selected.</p>
+                    </div>
                   </v-col>
                 </v-row>
               </v-expansion-panel-text>
@@ -1553,7 +1489,7 @@ onMounted(() => {
 
             <!-- Panel 4: Project Indicators -->
             <v-expansion-panel>
-              <v-expansion-panel-title>
+              <v-expansion-panel-title class="font-weight-bold">
                 <v-icon start size="small" icon="mdi-chart-bar" />
                 Project Indicators
                 <v-chip v-if="(project.outputIndicators?.length || 0) + (project.outcomeIndicators?.length || 0) > 0" size="x-small" variant="tonal" color="primary" class="ml-2">
@@ -1561,54 +1497,56 @@ onMounted(() => {
                 </v-chip>
               </v-expansion-panel-title>
               <v-expansion-panel-text>
-                <template v-if="project.outputIndicators?.length || project.outcomeIndicators?.length">
-                  <div v-if="project.outputIndicators?.length" class="mb-3">
-                    <p class="text-caption text-grey mb-2">Output Indicators</p>
-                    <div class="d-flex flex-wrap ga-2">
-                      <v-chip v-for="(ind, i) in project.outputIndicators" :key="i" color="primary" variant="tonal" size="small" prepend-icon="mdi-arrow-right-circle-outline">
+                <!-- EEE-E: two-column tag-list layout. GGG-B: larger, wrapping chips for readability. -->
+                <v-row>
+                  <v-col cols="12" md="6">
+                    <p class="text-body-2 text-grey-darken-1 font-weight-medium mb-2">Output Indicators</p>
+                    <div v-if="project.outputIndicators?.length" class="d-flex flex-wrap ga-2">
+                      <v-chip v-for="(ind, i) in project.outputIndicators" :key="i" color="primary" variant="tonal" size="small" prepend-icon="mdi-arrow-right-circle-outline" style="white-space:normal;height:auto;min-height:32px;padding-top:4px;padding-bottom:4px">
                         {{ ind }}
                       </v-chip>
                     </div>
-                  </div>
-                  <div v-if="project.outcomeIndicators?.length">
-                    <p class="text-caption text-grey mb-2">Outcome Indicators</p>
-                    <div class="d-flex flex-wrap ga-2">
-                      <v-chip v-for="(ind, i) in project.outcomeIndicators" :key="i" color="success" variant="tonal" size="small" prepend-icon="mdi-check-circle-outline">
+                    <p v-else class="text-body-2 text-grey font-italic mb-0">No output indicators recorded.</p>
+                  </v-col>
+                  <v-col cols="12" md="6" class="border-md-s pl-md-4">
+                    <p class="text-body-2 text-grey-darken-1 font-weight-medium mb-2">Outcome Indicators</p>
+                    <div v-if="project.outcomeIndicators?.length" class="d-flex flex-wrap ga-2">
+                      <v-chip v-for="(ind, i) in project.outcomeIndicators" :key="i" color="success" variant="tonal" size="small" prepend-icon="mdi-check-circle-outline" style="white-space:normal;height:auto;min-height:32px;padding-top:4px;padding-bottom:4px">
                         {{ ind }}
                       </v-chip>
                     </div>
-                  </div>
-                </template>
-                <p v-else class="text-grey text-center py-2">No indicators recorded.</p>
+                    <p v-else class="text-body-2 text-grey font-italic mb-0">No outcome indicators recorded.</p>
+                  </v-col>
+                </v-row>
               </v-expansion-panel-text>
             </v-expansion-panel>
 
             <!-- Panel 5: Project Administration & Governance (BBB-A: moved from Strategic Alignment) -->
             <v-expansion-panel>
-              <v-expansion-panel-title>
+              <v-expansion-panel-title class="font-weight-bold">
                 <v-icon start size="small" icon="mdi-office-building-outline" />
                 Project Administration
               </v-expansion-panel-title>
               <v-expansion-panel-text>
                 <v-row>
                   <v-col v-if="project.implementingAgency" cols="12" sm="6">
-                    <p class="text-caption text-grey">Implementing Agency</p>
+                    <p class="text-caption text-black">Implementing Agency</p>
                     <p class="font-weight-medium">{{ project.implementingAgency }}</p>
                   </v-col>
                   <v-col v-if="project.coImplementingAgency" cols="12" sm="6">
-                    <p class="text-caption text-grey">Co-Implementing Agency</p>
+                    <p class="text-caption text-black">Co-Implementing Agency</p>
                     <p class="font-weight-medium">{{ project.coImplementingAgency }}</p>
                   </v-col>
                   <v-col v-if="project.attachedAgency" cols="12" sm="6">
-                    <p class="text-caption text-grey">Attached Agency</p>
+                    <p class="text-caption text-black">Attached Agency</p>
                     <p class="font-weight-medium">{{ project.attachedAgency }}</p>
                   </v-col>
                   <v-col v-if="project.projectStatusCategory" cols="12" sm="6">
-                    <p class="text-caption text-grey">Status Category</p>
+                    <p class="text-caption text-black">Status Category</p>
                     <v-chip size="small" color="secondary" variant="tonal">{{ project.projectStatusCategory }}</v-chip>
                   </v-col>
                   <v-col v-if="project.additionalFundingSources?.length" cols="12">
-                    <p class="text-caption text-grey mb-2">Additional Funding Sources</p>
+                    <p class="text-caption text-black">Additional Funding Sources</p>
                     <div class="d-flex flex-wrap ga-2">
                       <v-chip v-for="(src, i) in project.additionalFundingSources" :key="i" size="small" variant="tonal" color="success">
                         {{ src.name }}{{ src.type ? ` (${src.type})` : '' }}
@@ -1622,111 +1560,116 @@ onMounted(() => {
               </v-expansion-panel-text>
             </v-expansion-panel>
 
-            <!-- Panel 6: Key Documents -->
+            <!-- EEE-A Merged Panel: Key Documents & Financial Summary (two-column; FY table full-width below) -->
             <v-expansion-panel>
-              <v-expansion-panel-title>
-                <v-icon start size="small" icon="mdi-file-document-multiple" />
-                Key Documents
-                <v-chip v-if="documents.length" size="x-small" variant="tonal" color="primary" class="ml-2">
-                  {{ documents.length }}
-                </v-chip>
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <v-row dense>
-                  <v-col v-for="docType in DOCUMENT_PREVIEW_TYPES" :key="docType.key" cols="12" sm="6">
-                    <v-card variant="outlined" class="pa-3 h-100">
-                      <div class="d-flex justify-space-between align-center mb-1">
-                        <span class="text-subtitle-2">{{ docType.label }}</span>
-                        <v-chip v-if="findDocumentPreview(documents, docType.key)" color="success" size="x-small" variant="tonal">Uploaded</v-chip>
-                        <v-chip v-else color="warning" size="x-small" variant="tonal">Not Uploaded</v-chip>
-                      </div>
-                      <template v-if="findDocumentPreview(documents, docType.key)">
-                        <div class="text-caption text-grey">
-                          {{ findDocumentPreview(documents, docType.key)?.fileName || 'â€”' }}
-                          <span v-if="findDocumentPreview(documents, docType.key)?.createdAt">
-                            Â· {{ formatDate(findDocumentPreview(documents, docType.key)!.createdAt || '') }}
-                          </span>
-                        </div>
-                        <v-btn
-                          v-if="findDocumentPreview(documents, docType.key)?.filePath"
-                          variant="text" size="x-small" color="primary" class="mt-1 pa-0"
-                          :href="findDocumentPreview(documents, docType.key)?.filePath || undefined"
-                          target="_blank" rel="noopener noreferrer"
-                        >
-                          View Document
-                        </v-btn>
-                      </template>
-                      <div v-else class="text-caption text-grey">No matching document on file.</div>
-                    </v-card>
-                  </v-col>
-                </v-row>
-                <div class="text-caption text-grey mt-3">
-                  For full document management, see the
-                  <a class="cursor-pointer text-primary" @click.prevent="activeTab = 'documents'">Documents tab</a>.
-                </div>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-
-            <!-- Panel 6: Financial Summary -->
-            <v-expansion-panel>
-              <v-expansion-panel-title>
+              <v-expansion-panel-title class="font-weight-bold">
                 <v-icon start size="small" icon="mdi-cash-multiple" />
-                Financial Summary
+                Key Documents &amp; Financial Summary
               </v-expansion-panel-title>
               <v-expansion-panel-text>
-                <!-- BBB-B: Contract-level KPI cards — always visible when project has financial data -->
-                <v-row dense class="mb-3">
-                  <v-col cols="6" sm="3">
-                    <v-card variant="tonal" color="primary" class="pa-3" rounded="lg">
-                      <div class="text-caption text-grey">Contract / Appropriation</div>
-                      <div class="text-subtitle-2 font-weight-bold">{{ formatCurrency(dashFinancials.appropriation) }}</div>
-                    </v-card>
+                <v-row>
+                  <!-- LEFT COLUMN: Key Documents -->
+                  <v-col cols="12" md="6">
+                    <div class="d-flex align-center ga-2 mb-3">
+                      <v-icon size="18" color="primary">mdi-file-document-multiple</v-icon>
+                      <span class="text-subtitle-2 font-weight-semibold">Key Documents</span>
+                      <v-chip v-if="documents.length" size="x-small" variant="tonal" color="primary">{{ documents.length }}</v-chip>
+                    </div>
+                    <v-row dense>
+                      <v-col v-for="docType in DOCUMENT_PREVIEW_TYPES" :key="docType.key" cols="12">
+                        <v-card variant="outlined" class="pa-3 h-100">
+                          <div class="d-flex justify-space-between align-center mb-1">
+                            <span class="text-subtitle-2 font-weight-medium">{{ docType.label }}</span>
+                            <v-chip v-if="findDocumentPreview(documents, docType.key)" color="success" size="x-small" variant="tonal">Uploaded</v-chip>
+                            <v-chip v-else color="warning" size="x-small" variant="tonal">Not Uploaded</v-chip>
+                          </div>
+                          <template v-if="findDocumentPreview(documents, docType.key)">
+                            <div class="text-caption text-grey">
+                              {{ findDocumentPreview(documents, docType.key)?.fileName || '—' }}
+                              <span v-if="findDocumentPreview(documents, docType.key)?.createdAt">
+                                · {{ formatDate(findDocumentPreview(documents, docType.key)!.createdAt || '') }}
+                              </span>
+                            </div>
+                            <v-btn
+                              v-if="findDocumentPreview(documents, docType.key)?.filePath"
+                              variant="text" size="x-small" color="primary" class="mt-1 pa-0"
+                              :href="findDocumentPreview(documents, docType.key)?.filePath || undefined"
+                              target="_blank" rel="noopener noreferrer"
+                            >
+                              View Document
+                            </v-btn>
+                          </template>
+                          <div v-else class="text-caption text-grey">No matching document on file.</div>
+                        </v-card>
+                      </v-col>
+                    </v-row>
+                    <div class="text-caption text-grey mt-3">
+                      For full document management, see the
+                      <a class="cursor-pointer text-primary" @click.prevent="activeTab = 'documents'">Documents tab</a>.
+                    </div>
                   </v-col>
-                  <v-col cols="6" sm="3">
-                    <v-card variant="tonal" color="info" class="pa-3" rounded="lg">
-                      <div class="text-caption text-grey">Cost Incurred</div>
-                      <div class="text-subtitle-2 font-weight-bold">{{ formatCurrency(project.costIncurredToDate ?? 0) }}</div>
-                    </v-card>
-                  </v-col>
-                  <v-col cols="6" sm="3">
-                    <v-card variant="tonal" color="success" class="pa-3" rounded="lg">
-                      <div class="text-caption text-grey">Remaining Budget</div>
-                      <div class="text-subtitle-2 font-weight-bold">
-                        {{ dashFinancials.appropriation && (project.costIncurredToDate ?? 0)
-                          ? formatCurrency(dashFinancials.appropriation - (project.costIncurredToDate ?? 0))
-                          : '—' }}
+
+                  <!-- RIGHT COLUMN: Financial Summary -->
+                  <v-col cols="12" md="6" class="border-md-s pl-md-4">
+                    <div class="d-flex align-center ga-2 mb-3">
+                      <v-icon size="18" color="success">mdi-cash-multiple</v-icon>
+                      <span class="text-subtitle-2 font-weight-semibold">Financial Summary</span>
+                    </div>
+                    <!-- BBB-B: Contract-level KPI cards — equal size -->
+                    <v-row dense class="mb-3">
+                      <v-col cols="6">
+                        <v-card variant="tonal" color="primary" class="pa-3 h-100" rounded="lg">
+                          <div class="text-caption text-grey">Contract / Appropriation</div>
+                          <div class="text-subtitle-2 font-weight-bold">{{ formatCurrency(dashFinancials.appropriation) }}</div>
+                        </v-card>
+                      </v-col>
+                      <v-col cols="6">
+                        <v-card variant="tonal" color="info" class="pa-3 h-100" rounded="lg">
+                          <div class="text-caption text-grey">Cost Incurred</div>
+                          <div class="text-subtitle-2 font-weight-bold">{{ formatCurrency(project.costIncurredToDate ?? 0) }}</div>
+                        </v-card>
+                      </v-col>
+                      <v-col cols="6">
+                        <v-card variant="tonal" color="success" class="pa-3 h-100" rounded="lg">
+                          <div class="text-caption text-grey">Remaining Budget</div>
+                          <div class="text-subtitle-2 font-weight-bold">
+                            {{ dashFinancials.appropriation && (project.costIncurredToDate ?? 0)
+                              ? formatCurrency(dashFinancials.appropriation - (project.costIncurredToDate ?? 0))
+                              : '—' }}
+                          </div>
+                        </v-card>
+                      </v-col>
+                      <v-col cols="6">
+                        <v-card variant="tonal" color="warning" class="pa-3 h-100" rounded="lg">
+                          <div class="text-caption text-grey">Financial Progress</div>
+                          <div class="text-subtitle-2 font-weight-bold">{{ project.financialProgress ?? 0 }}%</div>
+                          <v-progress-linear :model-value="project.financialProgress ?? 0" color="warning" height="4" rounded class="mt-1" />
+                        </v-card>
+                      </v-col>
+                      <!-- CCC-D: Cost This Period from latest progress report -->
+                      <v-col v-if="latestReport?.costIncurredThisPeriod != null" cols="6">
+                        <v-card variant="tonal" color="blue-grey" class="pa-3 h-100" rounded="lg">
+                          <div class="text-caption text-grey">Cost This Period</div>
+                          <div class="text-subtitle-2 font-weight-bold">{{ formatCurrency(Number(latestReport.costIncurredThisPeriod)) }}</div>
+                          <div class="text-caption text-grey mt-1">
+                            {{ latestReport.reportType === 'WEEKLY' ? 'WAR' : 'MPR' }} · {{ latestReport.reportDate ? formatDate(latestReport.reportDate) : '' }}
+                          </div>
+                        </v-card>
+                      </v-col>
+                    </v-row>
+
+                    <!-- Funding sources -->
+                    <template v-if="project.fundSource || project.additionalFundingSources?.length">
+                      <div class="text-caption text-grey mb-1">Funding Sources</div>
+                      <div class="d-flex flex-wrap ga-2 mb-3">
+                        <v-chip v-if="project.fundSource" size="small" variant="tonal" color="primary">{{ project.fundSource }}</v-chip>
+                        <v-chip v-for="(src, i) in project.additionalFundingSources" :key="i" size="small" variant="tonal" color="success">{{ src.name }}</v-chip>
                       </div>
-                    </v-card>
-                  </v-col>
-                  <v-col cols="6" sm="3">
-                    <v-card variant="tonal" color="warning" class="pa-3" rounded="lg">
-                      <div class="text-caption text-grey">Financial Progress</div>
-                      <div class="text-subtitle-2 font-weight-bold">{{ project.financialProgress ?? 0 }}%</div>
-                      <v-progress-linear :model-value="project.financialProgress ?? 0" color="warning" height="4" rounded class="mt-1" />
-                    </v-card>
-                  </v-col>
-                  <!-- CCC-D: Cost This Period from latest progress report -->
-                  <v-col v-if="latestReport?.costIncurredThisPeriod != null" cols="6" sm="3">
-                    <v-card variant="tonal" color="blue-grey" class="pa-3" rounded="lg">
-                      <div class="text-caption text-grey">Cost This Period</div>
-                      <div class="text-subtitle-2 font-weight-bold">{{ formatCurrency(Number(latestReport.costIncurredThisPeriod)) }}</div>
-                      <div class="text-caption text-grey mt-1">
-                        {{ latestReport.reportType === 'WEEKLY' ? 'WAR' : 'MPR' }} · {{ latestReport.reportDate ? formatDate(latestReport.reportDate) : '' }}
-                      </div>
-                    </v-card>
+                    </template>
                   </v-col>
                 </v-row>
 
-                <!-- Funding sources -->
-                <template v-if="project.fundSource || project.additionalFundingSources?.length">
-                  <div class="text-caption text-grey mb-1">Funding Sources</div>
-                  <div class="d-flex flex-wrap ga-2 mb-3">
-                    <v-chip v-if="project.fundSource" size="small" variant="tonal" color="primary">{{ project.fundSource }}</v-chip>
-                    <v-chip v-for="(src, i) in project.additionalFundingSources" :key="i" size="small" variant="tonal" color="success">{{ src.name }}</v-chip>
-                  </div>
-                </template>
-
-                <!-- Per-FY breakdown (supplemental, shown when FY records exist) -->
+                <!-- Per-FY breakdown (full-width, supplemental) -->
                 <template v-if="project.financials && project.financials.length > 0">
                   <v-divider class="mb-3" />
                   <div class="text-overline text-medium-emphasis mb-2">Per-Fiscal-Year Breakdown</div>
@@ -1773,7 +1716,7 @@ onMounted(() => {
 
             <!-- Panel 7: Approval History + Signatories -->
             <v-expansion-panel>
-              <v-expansion-panel-title>
+              <v-expansion-panel-title class="font-weight-bold">
                 <v-icon start size="small" icon="mdi-history" />
                 Approval History &amp; Signatories
               </v-expansion-panel-title>
@@ -1864,11 +1807,26 @@ onMounted(() => {
             </div>
           </v-card>
 
+          <!-- ZZZ-I: Milestone summary row (milestone list lives in Overview tab) -->
+          <div v-if="(project?.milestones?.length ?? 0) > 0" class="d-flex flex-wrap align-center ga-2 mb-4">
+            <span class="text-caption text-grey-darken-1 d-flex align-center mr-2">
+              <v-icon size="14" class="mr-1">mdi-flag-checkered</v-icon>Milestones:
+            </span>
+            <v-chip size="x-small" color="success" variant="tonal">{{ milestoneSummary.completed }} Completed</v-chip>
+            <v-chip size="x-small" color="primary" variant="tonal">{{ project!.milestones.filter((m: any) => (m.status || '').toUpperCase() === 'IN_PROGRESS').length }} In Progress</v-chip>
+            <v-chip size="x-small" color="error" variant="tonal">{{ project!.milestones.filter((m: any) => (m.status || '').toUpperCase() === 'DELAYED').length }} Delayed</v-chip>
+            <v-chip size="x-small" color="grey" variant="tonal">{{ project!.milestones.filter((m: any) => !m.status || (m.status || '').toUpperCase() === 'PENDING').length }} Pending</v-chip>
+            <v-btn size="x-small" variant="text" color="primary" @click="activeTab = 'overview'">View details in Overview →</v-btn>
+          </div>
+
           <!-- Priority #1: Progress Reports -->
-          <div class="text-subtitle-1 font-weight-medium mb-3 d-flex align-center ga-2">
+          <div class="text-subtitle-1 font-weight-semibold mb-1 d-flex align-center ga-2">
             <v-icon color="info" size="small">mdi-chart-line</v-icon>
             Progress Reports
           </div>
+          <p class="text-body-2 text-grey-darken-1 mb-3">
+            Formal periodic progress captures. Records physical completion %, financial status, and period narrative aligned to WAR/MPR cycles.
+          </p>
           <CiProgressReportTab
             v-if="projectId"
             :project-id="projectId"
@@ -1879,140 +1837,59 @@ onMounted(() => {
             class="mb-4"
           />
 
+          <!-- ZZZ-I: empty-state guidance when no progress reports exist -->
+          <v-alert v-if="progressReportItems.length === 0" type="info" variant="tonal" density="compact" class="mb-4">
+            No progress reports recorded yet. Navigate to <strong>Edit Project → Progress tab</strong> to add WAR/MPR timelogs and record progress.
+          </v-alert>
+          
+          <!-- Priority #4: Variation Orders (historical / schedule amendments) -->
           <v-divider class="my-4" />
-
-          <!-- Priority #2: Project Milestones -->
-          <v-card variant="outlined" class="mb-4" rounded="lg">
-            <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4 text-subtitle-1">
-              <v-icon icon="mdi-flag-checkered" size="small" color="info" />
-              <span class="font-weight-medium">Project Milestones</span>
-              <v-chip size="small" variant="tonal" color="info">
-                {{ filteredMilestones.length }}/{{ project?.milestones?.length ?? 0 }}
-              </v-chip>
-              <v-spacer />
-              <a v-if="canEditCurrentProject" class="text-body-2 text-primary text-decoration-none cursor-pointer" @click="editSection('progress')">Manage in Edit ↗</a>
-            </v-card-title>
-            <v-divider />
-            <v-card-text v-if="project?.milestones?.length">
-              <!-- PPP-E: Search / filter / sort controls -->
-              <div class="d-flex flex-wrap align-center ga-2 mb-3">
-                <v-text-field
-                  v-model="milestoneSearch"
-                  placeholder="Search milestones…"
-                  density="compact" variant="outlined" hide-details single-line clearable
-                  prepend-inner-icon="mdi-magnify"
-                  style="max-width: 200px"
-                />
-                <v-select
-                  v-model="milestoneStatusFilter"
-                  :items="[
-                    { title: 'All Statuses', value: null },
-                    { title: 'Pending', value: 'PENDING' },
-                    { title: 'In Progress', value: 'IN_PROGRESS' },
-                    { title: 'Completed', value: 'COMPLETED' },
-                    { title: 'Delayed', value: 'DELAYED' },
-                    { title: 'Cancelled', value: 'CANCELLED' },
-                  ]"
-                  density="compact" variant="outlined" hide-details clearable
-                  label="Status"
-                  style="max-width: 155px"
-                />
-                <v-btn-toggle v-model="milestoneSortKey" mandatory density="compact" variant="outlined">
-                  <v-btn value="targetDate" size="small" title="Sort by target date">
-                    <v-icon size="16">mdi-calendar-sort-ascending</v-icon>
-                  </v-btn>
-                  <v-btn value="progress" size="small" title="Sort by progress">
-                    <v-icon size="16">mdi-percent</v-icon>
-                  </v-btn>
-                  <v-btn value="name" size="small" title="Sort by name">
-                    <v-icon size="16">mdi-sort-alphabetical-ascending</v-icon>
-                  </v-btn>
-                </v-btn-toggle>
-              </div>
-
-              <v-row dense>
-                <v-col
-                  v-for="milestone in filteredMilestones"
-                  :key="milestone.id"
-                  cols="12"
-                  md="6"
-                  lg="6"
-                >
-                  <v-card variant="outlined" rounded="lg" class="h-100">
-                    <v-card-text class="py-3">
-                      <div class="d-flex align-center ga-2 mb-2">
-                        <v-chip size="x-small" :color="getMilestoneStatusColor(milestone.status)" variant="tonal">
-                          {{ milestone.status }}
-                        </v-chip>
-                        <v-spacer />
-                        <span class="text-caption text-grey">
-                          {{ milestone.targetDate ? formatDate(milestone.targetDate) : 'No target date' }}
-                        </span>
-                      </div>
-                      <div class="text-subtitle-2 font-weight-medium mb-2">
-                        {{ milestone.name || 'Untitled milestone' }}
-                      </div>
-                      <div class="d-flex align-center ga-2 mb-2">
-                        <v-progress-linear
-                          :model-value="milestone.progress ?? 0"
-                          :color="(milestone.progress ?? 0) >= 100 ? 'success' : 'primary'"
-                          height="6"
-                          rounded
-                        />
-                        <span class="text-body-2">{{ milestone.progress ?? 0 }}%</span>
-                      </div>
-                      <v-btn size="small" variant="text" color="primary" prepend-icon="mdi-eye-outline" @click="openMilestoneDetail(milestone)">
-                        View Details
-                      </v-btn>
-                    </v-card-text>
-                  </v-card>
-                </v-col>
-              </v-row>
-
-              <!-- Empty state when filters produce no results -->
-              <div v-if="filteredMilestones.length === 0" class="text-center text-grey py-4">
-                <v-icon icon="mdi-flag-outline" size="32" color="grey-lighten-2" class="d-block mx-auto mb-2" />
-                No milestones match the current filters.
-                <v-btn size="small" variant="text" color="primary" class="ml-1" @click="milestoneSearch = ''; milestoneStatusFilter = null">Clear filters</v-btn>
-              </div>
-            </v-card-text>
-            <v-card-text v-else class="text-center text-grey py-6">
-              <v-icon icon="mdi-flag-outline" size="40" color="grey-lighten-2" class="d-block mx-auto mb-2" />
-              No milestones recorded.
-            </v-card-text>
-          </v-card>
-
-          <!-- Priority #3: Timelogs -->
-          <v-divider class="my-4" />
-          <div class="text-subtitle-1 font-weight-medium mb-3 d-flex align-center ga-2">
-            <v-icon color="teal" size="small">mdi-clipboard-text-clock-outline</v-icon>
-            Timelogs
-          </div>
-          <!-- FFF-B: Timelogs container (weekly/monthly work logs) -->
-          <CiTimelogsContainer
-            v-if="projectId"
-            :project-id="projectId"
-            :read-only="true"
-            :can-delete="false"
-          />
-
-          <!-- Priority #4: Revision Orders (historical / schedule amendments) -->
-          <v-divider class="my-4" />
-          <div class="text-subtitle-1 font-weight-medium mb-3 d-flex align-center ga-2">
+          <div class="text-subtitle-1 font-weight-semibold mb-1 d-flex align-center ga-2">
             <v-icon color="warning" size="small">mdi-file-document-edit-outline</v-icon>
-            Revision Orders
-            <span class="text-caption text-grey font-weight-regular">— schedule amendments (VOR / CTE)</span>
+           B. Variation Orders
+            <span class="text-caption text-grey font-weight-regular">— schedule amendments (VO)</span>
           </div>
+          <p class="text-body-2 text-grey-darken-1 mb-3">
+            Contract amendments, time extensions, and scope changes (VO). Each entry records the type, date, and justification.
+          </p>
           <CiRevisionOrdersTable
             v-if="projectId"
             :project-id="projectId"
             :read-only="true"
           />
+
+
+           <!-- Priority #2: Timelogs (supplementary — collapsible) -->
+          <v-divider class="my-4" />
+          <v-expansion-panels :model-value="0" variant="accordion">
+            <v-expansion-panel>
+              <v-expansion-panel-title>
+                <v-icon start color="teal" size="small">mdi-clipboard-text-clock-outline</v-icon>
+                <span class="text-subtitle-1 font-weight-semibold">C. Timelogs</span>
+                <span class="text-caption text-grey ml-2">— WAR/MPR operational work logs</span>
+              </v-expansion-panel-title>
+              <v-expansion-panel-text class="px-0">
+                <p class="text-body-2 text-grey-darken-1 mb-3">
+                  Weekly (WAR) and Monthly (MPR) operational work logs. Records manpower, accomplishments, concerns, and site activities per reporting period.
+                </p>
+                <CiTimelogsContainer
+                  v-if="projectId"
+                  :project-id="projectId"
+                  :read-only="true"
+                  :can-delete="false"
+                />
+              </v-expansion-panel-text>
+            </v-expansion-panel>
+          </v-expansion-panels>
         </v-window-item>
+
+        
+         
+
+          
 
 
         <!-- ME: POW window item removed -->
-
         <!-- ============= ANALYTICS TAB (KD-F, KM-B: ClientOnly+eager) ============= -->
         <v-window-item value="analytics" eager>
           <ClientOnly>
@@ -2040,6 +1917,12 @@ onMounted(() => {
 
         <!-- ============= TEAM TAB (AAA-A: read-only personnel) ============= -->
         <v-window-item value="team">
+          <!-- ZZZ-C: read-only notice — Team tab reflects Personnel tab (record_assignments) -->
+          <v-alert type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-information-outline">
+            Read-only view of personnel assigned to this project. To add or modify personnel, use
+            <strong>Edit Project → Personnel tab</strong>.
+          </v-alert>
+
           <v-text-field
             v-model="teamSearch"
             placeholder="Search personnel…"
@@ -2048,22 +1931,30 @@ onMounted(() => {
             class="mb-4" style="max-width:280px"
           />
 
-          <!-- Assigned System Users -->
+          <!-- ZZZ-C: Two-column Institutional / External personnel split (record_assignments only) -->
+          <v-row>
+          <!-- LEFT COLUMN: Institutional Personnel -->
+          <v-col cols="12" md="6">
+          <div class="d-flex align-center ga-2 mb-3">
+            <v-icon size="18" color="primary">mdi-account-tie</v-icon>
+            <span class="text-subtitle-2 font-weight-semibold">Institutional Personnel</span>
+          </div>
+
           <v-card variant="outlined" class="mb-4" rounded="lg">
             <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4 text-subtitle-1">
               <v-icon icon="mdi-account-group-outline" size="small" color="primary" />
-              <span class="font-weight-medium">Assigned Personnel</span>
-              <v-chip size="x-small" variant="tonal" color="primary">{{ filteredAssignedUsers.length }}</v-chip>
+              <span class="font-weight-medium">CSU / Implementing Staff</span>
+              <v-chip size="x-small" variant="tonal" color="primary">{{ filteredInstitutional.length }}</v-chip>
             </v-card-title>
             <v-divider />
             <v-card-text>
-              <div v-if="!filteredAssignedUsers.length" class="text-grey text-body-2 py-4 text-center">No assigned personnel.</div>
+              <div v-if="!filteredInstitutional.length" class="text-grey text-body-2 py-4 text-center">No institutional personnel.</div>
               <v-row v-else dense>
-                <v-col v-for="u in filteredAssignedUsers" :key="(u as any).id" cols="12" sm="6" md="4">
+                <v-col v-for="u in paginatedInstitutional" :key="(u as any).id" cols="12" sm="6">
                   <v-card variant="tonal" color="primary" class="pa-3" rounded="lg">
                     <div class="d-flex align-center ga-2">
                       <v-avatar size="36" color="primary" variant="tonal">
-                        <v-icon icon="mdi-account" />
+                        <span class="text-caption font-weight-bold">{{ initials((u as any).name || '') }}</span>
                       </v-avatar>
                       <div style="min-width:0">
                         <div class="text-body-2 font-weight-medium text-truncate">{{ (u as any).name || 'Unknown' }}</div>
@@ -2071,205 +1962,240 @@ onMounted(() => {
                       </div>
                     </div>
                     <div class="d-flex flex-wrap ga-1 mt-2">
-                      <v-chip v-if="(u as any).user_role" size="x-small" variant="tonal" color="primary">{{ (u as any).user_role }}</v-chip>
+                      <v-chip v-if="userCategory(u)" size="x-small" variant="tonal" color="primary">{{ personnelCatLabel(userCategory(u)) }}</v-chip>
                       <v-chip v-if="(u as any).project_role" size="x-small" variant="tonal" color="blue-grey">{{ (u as any).project_role }}</v-chip>
                     </div>
                   </v-card>
                 </v-col>
               </v-row>
+              <div v-if="filteredInstitutional.length > paginatedInstitutional.length" class="text-center mt-3">
+                <v-btn size="small" variant="text" color="primary" @click="institutionalPage++">
+                  Show more ({{ filteredInstitutional.length - paginatedInstitutional.length }} more)
+                </v-btn>
+              </div>
             </v-card-text>
           </v-card>
+          </v-col>
 
-          <!-- CSU Personnel -->
-          <v-card v-if="project?.personnelGroups?.csu?.length" variant="outlined" class="mb-4" rounded="lg">
-            <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4 text-subtitle-1">
-              <v-icon icon="mdi-school-outline" size="small" color="teal" />
-              <span class="font-weight-medium">CSU Personnel</span>
-              <v-chip size="x-small" variant="tonal" color="teal">{{ project.personnelGroups.csu.length }}</v-chip>
-            </v-card-title>
-            <v-divider />
-            <v-card-text>
-              <v-list density="compact">
-                <v-list-item v-for="(row, i) in project.personnelGroups.csu" :key="i">
-                  <template #prepend><v-icon icon="mdi-account-tie" color="teal" size="small" /></template>
-                  <v-list-item-title>{{ (row as any).name || '—' }}</v-list-item-title>
-                  <v-list-item-subtitle class="text-caption">
-                    {{ (row as any).position || (row as any).designation || '—' }}
-                    <span v-if="(row as any).rank"> · {{ (row as any).rank }}</span>
-                  </v-list-item-subtitle>
-                </v-list-item>
-              </v-list>
-            </v-card-text>
-          </v-card>
+          <!-- RIGHT COLUMN: External Personnel -->
+          <v-col cols="12" md="6" class="border-md-s pl-md-4">
+          <div class="d-flex align-center ga-2 mb-3">
+            <v-icon size="18" color="warning">mdi-hard-hat</v-icon>
+            <span class="text-subtitle-2 font-weight-semibold">External Personnel</span>
+          </div>
 
-          <!-- Contractor Personnel -->
-          <v-card v-if="project?.personnelGroups?.contractor?.length" variant="outlined" class="mb-4" rounded="lg">
+          <v-card variant="outlined" class="mb-4" rounded="lg">
             <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4 text-subtitle-1">
               <v-icon icon="mdi-hard-hat" size="small" color="warning" />
-              <span class="font-weight-medium">Contractor Personnel</span>
-              <v-chip size="x-small" variant="tonal" color="warning">{{ project.personnelGroups.contractor.length }}</v-chip>
+              <span class="font-weight-medium">Contractor / Consultant Staff</span>
+              <v-chip size="x-small" variant="tonal" color="warning">{{ filteredExternal.length }}</v-chip>
             </v-card-title>
             <v-divider />
             <v-card-text>
-              <v-list density="compact">
-                <v-list-item v-for="(row, i) in project.personnelGroups.contractor" :key="i">
-                  <template #prepend><v-icon icon="mdi-account-hard-hat" color="warning" size="small" /></template>
-                  <v-list-item-title>{{ (row as any).name || (row as any).contractorName || '—' }}</v-list-item-title>
-                  <v-list-item-subtitle class="text-caption">
-                    {{ (row as any).position || (row as any).role || '—' }}
-                    <span v-if="(row as any).company || (row as any).firm"> · {{ (row as any).company || (row as any).firm }}</span>
-                  </v-list-item-subtitle>
-                </v-list-item>
-              </v-list>
+              <div v-if="!filteredExternal.length" class="text-grey text-body-2 py-4 text-center">No external personnel recorded.</div>
+              <v-row v-else dense>
+                <v-col v-for="u in paginatedExternal" :key="(u as any).id" cols="12" sm="6">
+                  <v-card variant="tonal" color="warning" class="pa-3" rounded="lg">
+                    <div class="d-flex align-center ga-2">
+                      <v-avatar size="36" color="warning" variant="tonal">
+                        <span class="text-caption font-weight-bold">{{ initials((u as any).name || '') }}</span>
+                      </v-avatar>
+                      <div style="min-width:0">
+                        <div class="text-body-2 font-weight-medium text-truncate">{{ (u as any).name || 'Unknown' }}</div>
+                        <div class="text-caption text-grey-darken-2 text-truncate">{{ (u as any).project_role || (u as any).department || '—' }}</div>
+                      </div>
+                    </div>
+                    <div class="d-flex flex-wrap ga-1 mt-2">
+                      <v-chip v-if="userCategory(u)" size="x-small" variant="tonal" color="warning">{{ personnelCatLabel(userCategory(u)) }}</v-chip>
+                    </div>
+                  </v-card>
+                </v-col>
+              </v-row>
+              <div v-if="filteredExternal.length > paginatedExternal.length" class="text-center mt-3">
+                <v-btn size="small" variant="text" color="warning" @click="externalPage++">
+                  Show more ({{ filteredExternal.length - paginatedExternal.length }} more)
+                </v-btn>
+              </div>
             </v-card-text>
           </v-card>
+          </v-col>
+          </v-row>
 
-          <!-- Other Personnel -->
-          <v-card v-if="project?.personnelGroups?.others?.length" variant="outlined" class="mb-4" rounded="lg">
-            <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4 text-subtitle-1">
-              <v-icon icon="mdi-account-multiple-outline" size="small" color="secondary" />
-              <span class="font-weight-medium">Other Personnel</span>
-              <v-chip size="x-small" variant="tonal" color="secondary">{{ project.personnelGroups.others.length }}</v-chip>
-            </v-card-title>
-            <v-divider />
-            <v-card-text>
-              <v-list density="compact">
-                <v-list-item v-for="(row, i) in project.personnelGroups.others" :key="i">
-                  <template #prepend><v-icon icon="mdi-account-outline" size="small" /></template>
-                  <v-list-item-title>{{ (row as any).name || '—' }}</v-list-item-title>
-                  <v-list-item-subtitle class="text-caption">{{ (row as any).organization || (row as any).affiliation || (row as any).role || '—' }}</v-list-item-subtitle>
-                </v-list-item>
-              </v-list>
-            </v-card-text>
-          </v-card>
-
-          <!-- Empty state -->
-          <div v-if="!project?.assignedUsers?.length && !project?.personnelGroups?.csu?.length && !project?.personnelGroups?.contractor?.length && !project?.personnelGroups?.others?.length" class="text-center text-grey py-8">
+          <!-- Global empty state -->
+          <div v-if="!project?.assignedUsers?.length" class="text-center text-grey py-8">
             <v-icon size="48" color="grey-lighten-2" icon="mdi-account-group-outline" class="d-block mx-auto mb-2" />
             No personnel records for this project.
           </div>
         </v-window-item>
 
-        <!-- ============= OTHERS TAB (AAA-B: read-only monitoring data) ============= -->
+        <!-- ============= OTHERS TAB (DDD-B: 4-Section IA; FFF-C: Section B restored) ============= -->
         <v-window-item value="others">
-          <div v-if="!hasOthersData" class="text-center text-grey py-8">
-            <v-icon size="48" color="grey-lighten-2" icon="mdi-dots-horizontal-circle-outline" class="d-block mx-auto mb-2" />
-            No supplementary project data recorded.
+
+          <!-- FFF-C SECTION B: Administrative Management (read-only) -->
+          <div class="d-flex align-center ga-2 mb-1">
+            <v-icon size="18" color="info">mdi-folder-text-outline</v-icon>
+            <span class="text-subtitle-2 font-weight-semibold text-grey-darken-2">Administrative Management</span>
           </div>
-          <v-expansion-panels v-else variant="accordion" multiple>
+          <p class="text-body-2 text-grey-darken-1 mb-3">Administrative and readiness documentation for this project.</p>
+          <template v-if="project?.statusUpdates?.length || project?.readinessDocuments?.length || project?.signatories?.length">
+            <v-expansion-panels variant="accordion" multiple class="mb-4">
+              <v-expansion-panel v-if="project?.statusUpdates?.length">
+                <v-expansion-panel-title>
+                  <v-icon start size="small" icon="mdi-update" />
+                  Status Updates
+                  <v-chip size="x-small" variant="tonal" color="info" class="ml-2">{{ project.statusUpdates.length }}</v-chip>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <v-timeline density="compact" align="start">
+                    <v-timeline-item v-for="(r, i) in project.statusUpdates" :key="i" dot-color="info" size="small">
+                      <div class="text-caption text-grey">{{ (r as any).date ? formatDate((r as any).date) : '—' }}</div>
+                      <div class="text-body-2">{{ (r as any).text }}</div>
+                    </v-timeline-item>
+                  </v-timeline>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="project?.readinessDocuments?.length">
+                <v-expansion-panel-title>
+                  <v-icon start size="small" icon="mdi-file-check-outline" />
+                  Readiness Documents
+                  <v-chip size="x-small" variant="tonal" color="success" class="ml-2">{{ project.readinessDocuments.length }}</v-chip>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <v-table density="compact">
+                    <thead><tr><th>Type</th><th>Status</th><th>Remarks</th></tr></thead>
+                    <tbody>
+                      <tr v-for="(r, i) in project.readinessDocuments" :key="i">
+                        <td>{{ (r as any).type }}</td>
+                        <td><v-chip size="x-small" variant="tonal">{{ (r as any).status }}</v-chip></td>
+                        <td class="text-caption">{{ (r as any).remarks || '—' }}</td>
+                      </tr>
+                    </tbody>
+                  </v-table>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="project?.signatories?.length">
+                <v-expansion-panel-title>
+                  <v-icon start size="small" icon="mdi-pen" />
+                  Signatories
+                  <v-chip size="x-small" variant="tonal" color="purple" class="ml-2">{{ project.signatories.length }}</v-chip>
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <v-list density="compact">
+                    <v-list-item v-for="(r, i) in project.signatories" :key="i">
+                      <v-list-item-title>{{ (r as any).name }}</v-list-item-title>
+                      <v-list-item-subtitle class="text-caption">{{ (r as any).position }}<span v-if="(r as any).date"> · {{ formatDate((r as any).date) }}</span></v-list-item-subtitle>
+                    </v-list-item>
+                  </v-list>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+            </v-expansion-panels>
+          </template>
+          <div v-else class="text-center text-grey text-caption pa-3 mb-4">No administrative records.</div>
 
-            <!-- Status Updates -->
-            <v-expansion-panel v-if="project?.statusUpdates?.length">
-              <v-expansion-panel-title>
-                <v-icon start size="small" icon="mdi-update" />
-                Status Updates
-                <v-chip size="x-small" variant="tonal" color="info" class="ml-2">{{ project.statusUpdates.length }}</v-chip>
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <v-timeline density="compact" align="start">
-                  <v-timeline-item v-for="(r, i) in project.statusUpdates" :key="i" dot-color="info" size="small">
-                    <div class="text-caption text-grey">{{ (r as any).date ? formatDate((r as any).date) : '—' }}</div>
-                    <div class="text-body-2">{{ (r as any).text }}</div>
-                  </v-timeline-item>
-                </v-timeline>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
+          <!-- DDD-B SECTION C: Project Knowledge Bank (Notes Banking) -->
+          <div class="d-flex align-center ga-2 mb-1 mt-2">
+            <v-icon size="18" color="primary">mdi-database-outline</v-icon>
+            <span class="text-subtitle-2 font-weight-semibold text-grey-darken-2">Project Knowledge Bank</span>
+          </div>
+          <p class="text-body-2 text-grey-darken-1 mb-3">Capture institutional knowledge, references, and project context.</p>
+          <v-card variant="outlined" class="mb-4" rounded="lg">
+            <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4 text-subtitle-1">
+              <v-icon icon="mdi-database-outline" size="small" color="primary" />
+              <span class="font-weight-medium">Project Notes &amp; Data Banking</span>
+            </v-card-title>
+            <v-divider />
+            <v-card-text>
+              <template v-if="!hasNotesBanking">
+                <div class="text-center text-grey py-4">
+                  <v-icon size="36" color="grey-lighten-2">mdi-note-off-outline</v-icon>
+                  <p class="text-body-2 mt-2">No supplementary notes recorded.</p>
+                  <v-btn size="small" variant="tonal" color="primary" class="mt-2" :to="`/coi/edit-${projectId}?tab=others`">
+                    Add Notes in Edit Project
+                  </v-btn>
+                </div>
+              </template>
+              <template v-else>
+                <v-row>
+                  <v-col cols="12" md="6">
+                    <div v-if="notesBanking?.additionalNotes" class="mb-4">
+                      <div class="text-caption font-weight-medium text-uppercase text-grey mb-1">Additional Notes</div>
+                      <p class="text-body-2 text-pre-line">{{ notesBanking.additionalNotes }}</p>
+                    </div>
+                    <div v-if="notesBanking?.specialInstructions" class="mb-4">
+                      <div class="text-caption font-weight-medium text-uppercase text-grey mb-1">Special Instructions</div>
+                      <p class="text-body-2 text-pre-line">{{ notesBanking.specialInstructions }}</p>
+                    </div>
+                    <div v-if="notesBanking?.customMetadata && Object.keys(notesBanking.customMetadata).length">
+                      <div class="text-caption font-weight-medium text-uppercase text-grey mb-1">Custom Metadata</div>
+                      <v-table density="compact">
+                        <tbody>
+                          <tr v-for="(val, key) in notesBanking.customMetadata" :key="key">
+                            <td class="text-caption font-weight-medium" style="width:40%">{{ key }}</td>
+                            <td class="text-body-2">{{ val }}</td>
+                          </tr>
+                        </tbody>
+                      </v-table>
+                    </div>
+                  </v-col>
+                  <v-col cols="12" md="6" class="border-md-s pl-md-4">
+                    <div v-if="notesBanking?.projectReferences?.length" class="mb-4">
+                      <div class="text-caption font-weight-medium text-uppercase text-grey mb-1">Project References</div>
+                      <v-list density="compact">
+                        <v-list-item v-for="(ref, i) in notesBanking.projectReferences" :key="i">
+                          <v-list-item-title>
+                            <a v-if="ref.url" :href="ref.url" target="_blank" rel="noopener noreferrer" class="text-primary">{{ ref.label }}</a>
+                            <span v-else>{{ ref.label }}</span>
+                          </v-list-item-title>
+                          <v-list-item-subtitle v-if="ref.notes" class="text-caption">{{ ref.notes }}</v-list-item-subtitle>
+                        </v-list-item>
+                      </v-list>
+                    </div>
+                    <div v-if="notesBanking?.historicalReferences?.length">
+                      <div class="text-caption font-weight-medium text-uppercase text-grey mb-1">Historical References</div>
+                      <v-timeline density="compact" align="start" side="end">
+                        <v-timeline-item v-for="(h, i) in notesBanking.historicalReferences" :key="i" dot-color="blue-grey" size="small">
+                          <div class="text-body-2">{{ h.description }}</div>
+                          <div class="text-caption text-grey">{{ h.date ? formatDate(h.date) : '' }}</div>
+                        </v-timeline-item>
+                      </v-timeline>
+                    </div>
+                  </v-col>
+                </v-row>
+              </template>
+            </v-card-text>
+          </v-card>
 
-            <!-- Readiness Documents -->
-            <v-expansion-panel v-if="project?.readinessDocuments?.length">
-              <v-expansion-panel-title>
-                <v-icon start size="small" icon="mdi-file-check-outline" />
-                Readiness Documents
-                <v-chip size="x-small" variant="tonal" color="success" class="ml-2">{{ project.readinessDocuments.length }}</v-chip>
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <v-table density="compact">
-                  <thead><tr><th>Type</th><th>Status</th><th>Remarks</th></tr></thead>
-                  <tbody>
-                    <tr v-for="(r, i) in project.readinessDocuments" :key="i">
-                      <td>{{ (r as any).type }}</td>
-                      <td><v-chip size="x-small" variant="tonal">{{ (r as any).status }}</v-chip></td>
-                      <td class="text-caption">{{ (r as any).remarks || '—' }}</td>
-                    </tr>
-                  </tbody>
-                </v-table>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
+          <!-- DDD-B SECTION D: Lessons Learned (always visible) -->
+          <div class="d-flex align-center ga-2 mb-1 mt-2">
+            <v-icon size="18" color="amber-darken-2">mdi-lightbulb-on-outline</v-icon>
+            <span class="text-subtitle-2 font-weight-semibold text-grey-darken-2">Lessons Learned</span>
+          </div>
+          <p class="text-body-2 text-grey-darken-1 mb-3">Document experiences and recommendations for future projects.</p>
+          <v-card variant="outlined" class="mb-4" rounded="lg">
+            <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4 text-subtitle-1">
+              <v-icon icon="mdi-lightbulb-on-outline" size="small" color="amber-darken-2" />
+              <span class="font-weight-medium">Lessons Learned</span>
+              <v-chip v-if="notesBanking?.lessonsLearned?.length" size="x-small" variant="tonal" color="amber-darken-2">{{ notesBanking.lessonsLearned.length }}</v-chip>
+            </v-card-title>
+            <v-divider />
+            <v-card-text>
+              <div v-if="!notesBanking?.lessonsLearned?.length" class="text-center text-grey py-4">
+                <v-icon size="32" color="grey-lighten-2">mdi-lightbulb-off-outline</v-icon>
+                <p class="text-body-2 mt-2">No lessons recorded. Document what worked and what to do differently for future projects.</p>
+                <v-btn size="small" variant="text" color="primary" :to="`/coi/edit-${projectId}?tab=others`">Add Lessons via Edit Project →</v-btn>
+              </div>
+              <v-timeline v-else density="compact" align="start" side="end">
+                <v-timeline-item v-for="(l, i) in notesBanking.lessonsLearned" :key="i" dot-color="amber-darken-2" size="small">
+                  <div class="d-flex align-center ga-2 mb-1">
+                    <v-chip size="x-small" variant="tonal" color="amber-darken-2">{{ personnelCatLabel(l.phase) }}</v-chip>
+                  </div>
+                  <div class="text-body-2"><strong>Observation:</strong> {{ l.observation }}</div>
+                  <div v-if="l.recommendation" class="text-body-2"><strong>Recommendation:</strong> {{ l.recommendation }}</div>
+                </v-timeline-item>
+              </v-timeline>
+            </v-card-text>
+          </v-card>
 
-            <!-- Signatories -->
-            <v-expansion-panel v-if="project?.signatories?.length">
-              <v-expansion-panel-title>
-                <v-icon start size="small" icon="mdi-pen" />
-                Signatories
-                <v-chip size="x-small" variant="tonal" color="purple" class="ml-2">{{ project.signatories.length }}</v-chip>
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <v-list density="compact">
-                  <v-list-item v-for="(r, i) in project.signatories" :key="i">
-                    <v-list-item-title>{{ (r as any).name }}</v-list-item-title>
-                    <v-list-item-subtitle class="text-caption">{{ (r as any).position }}<span v-if="(r as any).date"> · {{ formatDate((r as any).date) }}</span></v-list-item-subtitle>
-                  </v-list-item>
-                </v-list>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-
-            <!-- Incident Log -->
-            <v-expansion-panel v-if="project?.incidentLog?.length">
-              <v-expansion-panel-title>
-                <v-icon start size="small" icon="mdi-alert-circle-outline" color="error" />
-                Incident Log
-                <v-chip size="x-small" variant="tonal" color="error" class="ml-2">{{ project.incidentLog.length }}</v-chip>
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <v-list density="compact">
-                  <v-list-item v-for="(r, i) in project.incidentLog" :key="i">
-                    <template #prepend>
-                      <v-chip size="x-small" :color="(r as any).severity === 'HIGH' ? 'error' : (r as any).severity === 'MEDIUM' ? 'warning' : 'grey'" variant="tonal">{{ (r as any).severity }}</v-chip>
-                    </template>
-                    <v-list-item-title>{{ (r as any).description }}</v-list-item-title>
-                    <v-list-item-subtitle class="text-caption">{{ (r as any).date ? formatDate((r as any).date) : '—' }} · {{ (r as any).status }}</v-list-item-subtitle>
-                  </v-list-item>
-                </v-list>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-
-            <!-- Risk Register -->
-            <v-expansion-panel v-if="project?.riskRegister?.length">
-              <v-expansion-panel-title>
-                <v-icon start size="small" icon="mdi-shield-alert-outline" color="warning" />
-                Risk Register
-                <v-chip size="x-small" variant="tonal" color="warning" class="ml-2">{{ project.riskRegister.length }}</v-chip>
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <v-list density="compact">
-                  <v-list-item v-for="(r, i) in project.riskRegister" :key="i">
-                    <v-list-item-title>{{ (r as any).risk }}</v-list-item-title>
-                    <v-list-item-subtitle class="text-caption">
-                      Likelihood: {{ (r as any).likelihood }} · Impact: {{ (r as any).impact }} · {{ (r as any).status }}
-                    </v-list-item-subtitle>
-                  </v-list-item>
-                </v-list>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-
-            <!-- Escalation Records -->
-            <v-expansion-panel v-if="project?.escalationRecords?.length">
-              <v-expansion-panel-title>
-                <v-icon start size="small" icon="mdi-escalator-up" color="deep-orange" />
-                Escalation Records
-                <v-chip size="x-small" variant="tonal" color="deep-orange" class="ml-2">{{ project.escalationRecords.length }}</v-chip>
-              </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <v-list density="compact">
-                  <v-list-item v-for="(r, i) in project.escalationRecords" :key="i">
-                    <v-list-item-title>{{ (r as any).issue }}</v-list-item-title>
-                    <v-list-item-subtitle class="text-caption">Escalated to: {{ (r as any).escalatedTo }} · {{ (r as any).date ? formatDate((r as any).date) : '' }}</v-list-item-subtitle>
-                  </v-list-item>
-                </v-list>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-
-          </v-expansion-panels>
         </v-window-item>
 
         <!-- ============= ATTACHMENTS TAB (ZQ: enterprise 4-section layout; gallery merged in) ============= -->
@@ -2284,6 +2210,14 @@ onMounted(() => {
             :custom-key-sections="project?.customKeySections ?? []"
             :custom-supporting-sections="project?.customSupportingSections ?? []"
           />
+        </v-window-item>
+
+        <!-- ============= AUDIT LOG TAB (AAA-B: Admin / SuperAdmin only) ============= -->
+        <v-window-item v-if="isAdmin" value="audit">
+          <v-alert type="info" variant="tonal" density="compact" class="mb-4" icon="mdi-shield-account-outline">
+            <strong>Project Audit Trail</strong> — All create, update, delete, upload, and access events for this project. Visible to Administrators only.
+          </v-alert>
+          <CiAuditLogPanel :project-id="projectId" :initial-limit="200" />
         </v-window-item>
       </v-window>
     </template>
@@ -2626,16 +2560,10 @@ onMounted(() => {
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
   color: #fff;
 }
+/* EEE-A / FFF-B: clearer vertical divider between the two columns of merged overview panels (desktop only) */
 @media (min-width: 960px) {
-  .overview-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: flex-start; /* CCC-A: prevent sibling panels from stretching to match expanded neighbor */
-  }
-  .overview-grid > .v-expansion-panel {
-    flex: 1 1 calc(50% - 12px);
-    max-width: calc(50% - 12px);
+  .border-md-s {
+    border-left: 2px solid rgba(0, 0, 0, 0.12);
   }
 }
 /* CCC-B: Strategic Alignment narrative clamp */

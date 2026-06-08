@@ -1,0 +1,268 @@
+PROMPT:
+
+Conduct a Documentation Architecture Refactor for the project artifacts.
+
+Current Situation
+
+The current documentation structure has become excessively verbose:
+
+* docs/research.md contains research, history, decisions, implementation notes, and legacy discussions.
+* docs/plan.md contains active work, completed work, historical records, implementation details, and decision history.
+* Both files have become too large for efficient AI continuity.
+* Large artifacts increase hallucination, duplicate implementations, contradictory instructions, and onboarding time.
+
+Objective
+
+Refactor the documentation architecture into a lean AI-first structure optimized for:
+
+* GPT
+* Claude
+* Gemini
+* DeepSeek
+* Qwen
+* Cursor
+* Windsurf
+* Copilot
+
+The objective is NOT to create many artifacts.
+
+The objective is to create only the minimum number of artifacts necessary to preserve continuity and improve implementation accuracy.
+
+====================================================================
+
+TARGET ARTIFACT STRUCTURE
+
+docs/
+
+├── state.md
+├── plan.md
+├── research.md
+├── history.md
+└── architecture.md
+
+Total Artifacts: 5
+
+====================================================================
+
+1. state.md
+
+Purpose:
+
+Single source of truth.
+
+Every AI conversation must read this file first.
+
+Maximum Size:
+500–1,500 lines
+
+Contains only:
+
+* Current Phase
+* Current Sprint
+* Active Modules
+* Current Priorities
+* Current Blockers
+* Current Deployment Status
+* Current Testing Status
+* Current Security Status
+* Current Completion Percentage
+* Current Focus Areas
+* Recently Approved Decisions
+
+Must never contain:
+
+* Historical records
+* Research findings
+* Detailed implementation plans
+* Closed tasks
+
+This file always reflects TODAY'S project state.
+
+====================================================================
+
+2. plan.md
+
+Purpose:
+
+Only active and approved work.
+
+This becomes the implementation artifact.
+
+Target Size:
+Under 3,000 lines
+
+Contains:
+
+Module
+Task
+Priority
+Dependencies
+Acceptance Criteria
+
+Structure:
+
+PHASE
+MODULE
+TASK
+STATUS
+ACCEPTANCE CRITERIA
+
+Must never contain:
+
+* Historical records
+* Research discussions
+* Completed tasks
+* Decision logs
+* Long explanations
+
+Completed tasks are immediately moved to history.md.
+
+This document should remain concise and implementation-focused.
+
+====================================================================
+
+3. research.md
+
+Purpose:
+
+Research repository only.
+
+Contains:
+
+Module
+Research Topic
+Findings
+References
+Recommendations
+
+Target Size:
+10,000 lines maximum
+
+Remove:
+
+* Historical records
+* Completed implementations
+* Active plans
+* Decision logs
+* Bug tracking
+
+Research.md must answer:
+
+"What did we learn?"
+
+Not:
+
+"What are we doing?"
+
+====================================================================
+
+4. history.md
+
+Purpose:
+
+Permanent archive.
+
+Combines:
+
+* Completed work
+* Phase completions
+* Major refactors
+* Closed bugs
+* Approved decisions
+* Milestone achievements
+
+Structure:
+
+Date
+Phase
+Module
+Task
+Outcome
+
+This becomes the project memory.
+
+Once something is completed, move it here.
+
+This prevents plan.md from growing indefinitely.
+
+====================================================================
+
+5. architecture.md
+
+Purpose:
+
+Technical reference.
+
+Contains:
+
+* System Architecture
+* Frontend Architecture
+* Backend Architecture
+* Database Structure
+* RBAC Model
+* Audit Log Design
+* Repository Design
+* Attachment Architecture
+* Naming Conventions
+* Development Standards
+
+Must never contain:
+
+* Tasks
+* Research
+* Historical logs
+* Active plans
+
+This is the technical blueprint.
+
+====================================================================
+
+MIGRATION RULES
+
+Analyze:
+
+* docs/research.md
+* docs/plan.md
+
+Then:
+
+1. Create state.md.
+2. Reduce plan.md by moving completed items into history.md.
+3. Convert research.md into research-only content.
+4. Create architecture.md from recurring technical decisions and structures.
+5. Preserve all approved decisions by recording them in history.md.
+6. Remove duplicated requirements.
+7. Remove obsolete implementation requests.
+8. Remove superseded decisions.
+9. Consolidate repeated requirements into single authoritative entries.
+
+====================================================================
+
+AI CONTINUITY RULE
+
+Future AI conversations should only require:
+
+1. docs/state.md
+2. docs/plan.md
+
+for implementation work.
+
+research.md, history.md, and architecture.md should only be opened when deeper context is needed.
+
+This minimizes token consumption, improves implementation accuracy, reduces hallucination, and preserves continuity across multiple AI models and conversations.
+
+====================================================================
+
+SUCCESS CRITERIA
+
+* Only 5 artifacts exist.
+* state.md becomes the primary continuity artifact.
+* plan.md becomes implementation-only.
+* research.md becomes research-only.
+* history.md becomes project memory.
+* architecture.md becomes technical reference.
+* Documentation verbosity reduced significantly.
+* Duplicate requirements removed.
+* AI onboarding time reduced.
+* Cross-model continuity improved.
+* Long-term maintainability improved.

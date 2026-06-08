@@ -50,6 +50,88 @@ export class ConstructionTimelineEntry {
   @Property({ nullable: true, length: 20 })
   reporterType?: string;
 
+  // GGG-F: WAR (Weekly Accomplishment Report) fields
+  @Property({ nullable: true, length: 50 })
+  warNumber?: string;
+
+  @Property({ nullable: true, columnType: 'date' })
+  reportingPeriodStart?: Date;
+
+  @Property({ nullable: true, columnType: 'date' })
+  reportingPeriodEnd?: Date;
+
+  @Property({ nullable: true, columnType: 'text' })
+  personnelEquipmentConstraints?: string;
+
+  @Property({ nullable: true, columnType: 'text' })
+  mitigationMeasures?: string;
+
+  @Property({ nullable: true, columnType: 'text' })
+  lookAheadActivities?: string;
+
+  @Property({ nullable: true, columnType: 'jsonb' })
+  accomplishments?: Array<{
+    description?: string;
+    category?: string;
+    date?: string;
+    percentage?: number;
+    remarks?: string;
+  }>;
+
+  @Property({ nullable: true, columnType: 'jsonb' })
+  signatories?: Array<{
+    userId?: string;
+    userName?: string;
+    position?: string;
+    role?: string;
+    date?: string;
+  }>;
+
+  // GGG-F: MPR (Monthly Progress Report) fields
+  @Property({ nullable: true, length: 50 })
+  mprNumber?: string;
+
+  @Property({ nullable: true, columnType: 'date' })
+  reportingPeriodMonth?: Date;
+
+  @Property({ nullable: true, columnType: 'jsonb' })
+  workItems?: Array<Record<string, any>>;
+
+  @Property({ nullable: true, columnType: 'numeric' })
+  accomplishmentSummaryPercent?: number;
+
+  @Property({ nullable: true, columnType: 'numeric' })
+  percentTimeElapsed?: number;
+
+  @Property({ nullable: true, columnType: 'numeric' })
+  originalContractAmount?: number;
+
+  @Property({ nullable: true, columnType: 'numeric' })
+  revisedContractAmount?: number;
+
+  // BBB-C: WAR/MPR financial billing fields (operational records; Progress Reports is the official source)
+  @Property({ nullable: true, columnType: 'decimal(15,2)' })
+  billingAmountThisPeriod?: number;
+
+  @Property({ nullable: true, columnType: 'decimal(5,2)' })
+  financialAccomplishmentPercent?: number;
+
+  // ZZZ-G: structured Project Concerns list (shared by WAR/MPR/timelogs)
+  @Property({ nullable: true, columnType: 'jsonb' })
+  concernsList?: Array<{
+    title?: string;
+    description?: string;
+    category?: string;
+    severity?: string;
+    status?: string;
+    responsibleParty?: string;
+    resolutionTargetDate?: string;
+    actualResolutionDate?: string;
+    mitigationAction?: string;
+    createdBy?: string;
+    createdAt?: string;
+  }>;
+
   @Property({ nullable: true, columnType: 'uuid' })
   createdBy?: string;
 
