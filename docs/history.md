@@ -101,3 +101,41 @@
 | Template URL seeding migration (20260601010000) | ✅ Created (LLL-E) |
 | `em.fork()` in ActivityLogService | ✅ Applied |
 | Nuxt `/templates` devProxy | ✅ Applied (UUU-A) |
+
+---
+
+## Phase III + JJJ — Completed (2026-06-08, commit `0643c6c`)
+
+### Phase III: COI Analytics Tier 2
+
+| Step | Deliverable |
+|---|---|
+| III-A | `getAnalyticsSummary()` extended — 2 new GROUP BY queries: `by_funding_source` + `by_contractor` (top-10 LIMIT) |
+| III-B | Campus bars: dual-bar template — count bar (primary) + avg_progress bar (deep-purple) |
+| III-C | Avg Progress by Campus: horizontal bar chart (purple) |
+| III-D | Budget by Campus: donut chart; Contract by Status: donut chart |
+| III-E | Contractor chart: horizontal bar (top-10, sky-blue); `fundingSourceChart` prefers backend data |
+| III-F | Analytics tab: top guidance banner + 4 section labels (Status & Campus, Financial Overview, Progress Analysis, Contractor & Funding) |
+
+### Phase JJJ: CSU CORE Executive Charts
+
+| Step | Deliverable |
+|---|---|
+| JJJ-A | `uoTrendChart` — Q1-Q4 UO Accomplishment Trend area chart (green, `#059669`) in UO Summary card |
+| JJJ-B | `uoFinancialTrendChart` — Q1-Q4 Financial Utilization Trend area chart (purple, `#7c3aed`) in UO Summary card |
+| JJJ-C | `watch(selectedFiscalYear)` — reloads all 3 UO datasets simultaneously via `Promise.allSettled` |
+| JJJ-D | Quick Actions subtitle caption; Other Modules section heading |
+
+**Verification:** vue-tsc 0 new errors; tsc 0 new errors. No migrations required.
+
+---
+
+## Phase KKK + LLL — Phase 1 + 2 Complete (2026-06-08)
+
+Research (R-088–R-103) and Plan written. PENDING Phase 3 authorization.
+
+| Phase | Scope | Key Findings |
+|---|---|---|
+| KKK | CSU CORE Dashboard executive refactor (7 sub-steps) | Replace "Delayed" KPI with "Published"; compact typography; UO Summary dual-stat cards + collapsible trends; Quick Actions as compact v-list; eliminate GAD/stat cards |
+| LLL | COI Dashboard executive refactor (8 sub-steps) | KPI 8→5 compact cards (remove Delayed); add Fund Source/Project Code/Orig.End to table; Column Manager with localStorage; collapsible Recent Activity (lazy fetch); 3-tier filter; section banners; remove Needs Attention + Slow-Moving from landing |
+

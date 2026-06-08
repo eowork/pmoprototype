@@ -5,6 +5,31 @@
 
 ## Current Phase
 
+**Phase KKK + LLL** — Phase 1 (Research R-088–R-103) and Phase 2 (Plan) complete. PENDING Phase 3 authorization.
+
+**KKK scope (CSU CORE Dashboard executive refactor):**
+- KKK-A: AdminKpiRow — replace "Delayed" with "Published Projects"; compact text-subtitle-1, avatar 36
+- KKK-B: Infrastructure card stat 3 — replace "Delayed" with "Completed"; text-h6 stats
+- KKK-C: UO Summary — 4 compact dual-stat pillar cards; trend charts in collapsible panel (default collapsed)
+- KKK-D: Quick Actions — compact v-list navigation (remove large block buttons)
+- KKK-E: Other Modules — remove GAD Reports, stat cards, full-list API calls; navigation-only
+- KKK-F: Welcome heading text-h4 → text-h5
+- KKK-G: Context banner text update
+
+**LLL scope (COI Dashboard executive refactor):**
+- LLL-A: KPI cards 8→5 compact; text-h4→text-h6; icon 32→20; remove Delayed + On Hold; add Pending Review
+- LLL-B: Project table default columns add Fund Source, Project Code, Orig. End Date
+- LLL-C: Column Manager — v-menu checkboxes; localStorage persist; horizontal scroll
+- LLL-D: Recent Activity → admin-only collapsible (default collapsed); lazy fetch
+- LLL-E: Filter bar — primary 3 fields; advanced collapse 3 fields; full-search dialog for power users
+- LLL-F: Section banners (Portfolio Summary, Project List with dynamic count)
+- LLL-G: Remove Needs Attention + Slow-Moving panels from Overview tab
+- LLL-H: Remove hero analytics strip (duplicate data)
+
+---
+
+## Archived Previous Phase
+
 **Phase III + JJJ** — ✅ Phase 3 complete. Committed `0643c6c`. vue-tsc + tsc 0 new errors. No migrations.
 
 **III delivered:** `getAnalyticsSummary()` extended with `by_funding_source` + `by_contractor` GROUP BY queries; campus panel dual-bar (count + avg_progress); Avg Progress by Campus horizontal bar chart (purple); Budget by Campus donut + Contract by Status donut; Contractor horizontal bar (top-10, sky-blue); fundingSourceChart upgraded to prefer backend data; top-of-tab guidance banner + 4 section labels.
@@ -70,9 +95,10 @@
 
 ## Current Priorities
 
-1. **Run pending DB migrations** — 7 migrations (sdg_goals, custom_supporting_sections, war fields, mpr fields, notes_banking, concerns_list, billing fields): `npx mikro-orm migration:up`
-2. **Backend restart** — activates `/templates/SD_ECO_*.docx` static serving + new `by_funding_source`/`by_contractor` analytics fields
-3. **Operator smoke test** — COI dashboard analytics tab (verify Contractor chart + Funding Source donut populate); CORE dashboard UO Summary (verify Q1–Q4 charts render after fiscal year select)
+1. **Phase 3 authorization** — Issue `RUN_ACE` to begin Phase KKK + LLL implementation (CORE + COI executive refactor)
+2. **Run pending DB migrations** — 7 migrations (sdg_goals, custom_supporting_sections, war fields, mpr fields, notes_banking, concerns_list, billing fields): `npx mikro-orm migration:up`
+3. **Backend restart** — activates `/templates/SD_ECO_*.docx` static serving + new `by_funding_source`/`by_contractor` analytics fields
+4. **Operator smoke test** — COI dashboard analytics tab (verify Contractor chart + Funding Source donut populate); CORE dashboard UO Summary (verify Q1–Q4 charts render after fiscal year select)
 
 ---
 

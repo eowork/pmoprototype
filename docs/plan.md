@@ -4420,3 +4420,522 @@ Add descriptive subtitles and captions to every major dashboard section.
 - [ ] JJJ-D: Quick Actions has subtitle caption
 - [ ] JJJ-D: Module cards section has heading
 - [ ] vue-tsc 0 new errors
+
+---
+
+## Phase KKK — CSU CORE Dashboard Executive Refactor
+
+**Status:** PENDING Phase 3 authorization
+**Research:** R-088, R-091, R-092, R-095, R-099, R-100, R-101, R-103
+**Files:** `pmo-frontend/pages/dashboard.vue`, `pmo-frontend/components/AdminKpiRow.vue`
+
+### KKK-A: AdminKpiRow — Remove Negative Metric + Compact Typography
+
+**Goal:** Replace "Delayed Projects" (negative metric) with "Published Projects" (positive). Downsize KPI tile typography.
+
+**Changes to `pmo-frontend/components/AdminKpiRow.vue`:**
+- Tile 2: change label from "Delayed Projects" to "Published Projects"; change icon from `mdi-alert-circle` to `mdi-check-decagram`; change color from `error` to `success`; derive value from `analyticsSummary.by_publication_status` where status = PUBLISHED
+- All 4 tiles: change value class from `text-h5 font-weight-bold` to `text-subtitle-1 font-weight-bold`
+- All 4 tiles: change avatar `size="44"` to `size="36"`
+- Tile 1 (Infrastructure): value = `analyticsSummary.total` (unchanged)
+- Tile 3 (Pending Reviews): unchanged
+- Tile 4 (UO Compliance): unchanged
+
+**Acceptance:**
+- [ ] Tile 2 shows "Published Projects" count with success color
+- [ ] All tile values use `text-subtitle-1 font-weight-bold`
+- [ ] Avatar size is 36 on all tiles
+- [ ] No negative metrics visible in KpiRow
+
+---
+
+### KKK-B: Infrastructure Mini-Summary — Remove Delayed + Compact Typography
+
+**Goal:** Replace "Delayed" stat with "Completed". Downsize stat typography. Add positive framing.
+
+**Changes to `pmo-frontend/pages/dashboard.vue` — Infrastructure card stat row:**
+- Stat 3: change label from "Delayed" to "Completed"; derive value from `analyticsSummary.by_status` where status = COMPLETE (or COMPLETED)
+- All 4 stat values: change `text-h5 font-weight-bold` to `text-h6 font-weight-bold`
+- Stat 3 icon/color: change from error/delayed to `mdi-check-circle` / success color
+
+**Acceptance:**
+- [ ] Stat 3 shows "Completed" count with success/neutral color
+- [ ] All 4 stats use `text-h6 font-weight-bold`
+- [ ] No "Delayed" label visible in Infrastructure card
+
+---
+
+### KKK-C: UO Summary — Compact Pillar Display + Collapsible Trend Charts
+
+**Goal:** Replace 8 separate pillar cards with 4 compact dual-stat cards. Move trend charts to collapsible panel (default collapsed).
+
+**Changes to `pmo-frontend/pages/dashboard.vue` — UO Summary section:**
+
+Replace the current physical/financial 8-card loop with a single `v-row` of 4 cards:
+```html
+<v-col v-for="pillar in compactPillarData" :key="pillar.name" cols="12" sm="6" lg="3">
+  <v-card variant="tonal" rounded="lg" class="pa-3">
+    <div class="d-flex align-center mb-2">
+      <v-icon :icon="pillar.icon" size="18" :color="pillar.color" class="mr-2" />
+      <span class="text-caption font-weight-bold text-uppercase">{{ pillar.name }}</span>
+    </div>
+    <div class="d-flex justify-space-between">
+      <div>
+        <div class="text-caption text-grey-darken-1">Physical</div>
+        <div class="text-subtitle-2 font-weight-bold">{{ pillar.physicalPct }}%</div>
+      </div>
+      <v-divider vertical class="mx-2" />
+      <div>
+        <div class="text-caption text-grey-darken-1">Financial</div>
+        <div class="text-subtitle-2 font-weight-bold">{{ pillar.financialPct }}%</div>
+      </div>
+    </div>
+  </v-card>
+</v-col>
+```
+
+Add `compactPillarData` computed that zips physical + financial pillar summaries by name.
+
+Move trend charts into `v-expansion-panels` at the bottom of the UO Summary card:
+```html
+<v-expansion-panels class="mt-3" variant="accordion">
+  <v-expansion-panel title="Quarterly Trend Charts">
+    <!-- existing uoTrendChart + uoFinancialTrendChart content -->
+  </v-expansion-panel>
+</v-expansion-panels>
+```
+Default: collapsed (no `v-model` binding = all panels collapsed).
+
+**Acceptance:**
+- [ ] 4 compact dual-stat pillar cards replace 8 separate cards
+- [ ] Each card shows physical % and financial % for the pillar
+- [ ] Trend charts inside collapsible panel, default collapsed
+- [ ] UO Summary card height significantly reduced vs current state
+- [ ] Fiscal year change still reloads all UO data
+
+---
+
+### KKK-D: Quick Actions — Compact v-list Navigation
+
+**Goal:** Replace 4 large block buttons with a compact `v-list` navigation list.
+
+**Changes to `pmo-frontend/pages/dashboard.vue` — Quick Actions card:**
+
+Replace current `v-btn size="large" block` grid with:
+```html
+<v-list density="compact" nav rounded="lg">
+  <v-list-item
+    prepend-icon="mdi-office-building"
+    title="Infrastructure Projects"
+    subtitle="View and manage COI portfolio"
+    to="/coi"
+    rounded="lg"
+  >
+    <template #append><v-icon size="16">mdi-chevron-right</v-icon></template>
+  </v-list-item>
+  <v-list-item
+    prepend-icon="mdi-chart-timeline-variant"
+    title="Physical Accomplishments"
+    subtitle="BAR No. 1 performance tracking"
+    to="/university-operations/physical"
+    rounded="lg"
+  >
+    <template #append><v-icon size="16">mdi-chevron-right</v-icon></template>
+  </v-list-item>
+  <v-list-item
+    prepend-icon="mdi-currency-usd"
+    title="Financial Accomplishments"
+    subtitle="BAR No. 2 financial utilization"
+    to="/university-operations/financial"
+    rounded="lg"
+  >
+    <template #append><v-icon size="16">mdi-chevron-right</v-icon></template>
+  </v-list-item>
+  <v-list-item
+    v-if="isAdmin"
+    prepend-icon="mdi-account-group"
+    title="User Management"
+    subtitle="Manage system accounts and roles"
+    to="/users"
+    rounded="lg"
+  >
+    <template #append><v-icon size="16">mdi-chevron-right</v-icon></template>
+  </v-list-item>
+</v-list>
+```
+
+Remove the old `size="large" block` button grid and associated 2-column layout wrapper.
+
+**Acceptance:**
+- [ ] Quick Actions shows compact v-list (not large buttons)
+- [ ] Each item has icon, title, subtitle, and chevron
+- [ ] Navigation works identically to before
+- [ ] Admin-only "User Management" still gated by role
+- [ ] Quick Actions card takes significantly less vertical space
+
+---
+
+### KKK-E: Other Modules — Remove Stat Cards, Navigation-Only
+
+**Goal:** Remove `gadReports`, `repairProjects`, `universityOperations` stat card section entirely. Replace with compact navigation links appended to Quick Actions list.
+
+**Changes to `pmo-frontend/pages/dashboard.vue`:**
+- Remove `gadReports`, `repairProjects`, `universityOperations` from `stats` reactive object
+- Remove API calls: `fetchRepairProjects()`, `fetchUniversityOperations()`, `fetchGadReports()` (or equivalent)
+- Remove the "Other Modules" stat card row template block
+- Append 2 navigation `v-list-item` entries to the Quick Actions list (Repair Projects + University Operations) — no count display, navigation-only
+
+**Acceptance:**
+- [ ] No "GAD Reports" card visible anywhere on dashboard
+- [ ] No stat card row for "Other Modules"
+- [ ] Repair Projects and UO accessible via Quick Actions list entries
+- [ ] No full-list API calls for /api/repair-projects or /api/university-operations on dashboard load
+
+---
+
+### KKK-F: Welcome Heading — Typography Reduction
+
+**Goal:** Downsize welcome heading from `text-h4` to `text-h5` per R-091 benchmark.
+
+**Changes to `pmo-frontend/pages/dashboard.vue`:**
+- Change welcome heading class from `text-h4` to `text-h5`
+- No other changes to welcome section
+
+**Acceptance:**
+- [ ] Welcome heading renders as `text-h5`
+
+---
+
+### KKK-G: Context Banner — Text Update
+
+**Goal:** Update context banner text to reflect executive dashboard framing.
+
+**Changes to `pmo-frontend/pages/dashboard.vue` — dismissible banner:**
+- Update banner subtitle from current description to: "Executive view — key metrics and portfolio summary for decision support. Use module tabs for detailed reporting."
+
+**Acceptance:**
+- [ ] Banner shows updated guidance text
+
+---
+
+### KKK Verification Checklist
+
+- [ ] KKK-A: "Published Projects" tile visible with success color
+- [ ] KKK-A: All KpiRow tile values use text-subtitle-1
+- [ ] KKK-B: "Completed" stat replaces "Delayed" in Infrastructure card
+- [ ] KKK-B: Infrastructure stat values use text-h6
+- [ ] KKK-C: 4 compact dual-stat pillar cards visible
+- [ ] KKK-C: Trend charts in collapsible panel, default collapsed
+- [ ] KKK-D: Quick Actions shows v-list (no large buttons)
+- [ ] KKK-E: No GAD Reports card, no stat-card Other Modules row
+- [ ] KKK-F: Welcome heading is text-h5
+- [ ] KKK-G: Banner updated text visible
+- [ ] vue-tsc 0 new errors
+
+---
+
+## Phase LLL — COI Dashboard Executive Refactor
+
+**Status:** PENDING Phase 3 authorization
+**Research:** R-089, R-090, R-093, R-094, R-095, R-096, R-097, R-098, R-102, R-103
+**Files:** `pmo-frontend/pages/coi/index.vue`
+
+### LLL-A: KPI Cards — Compact 5-Card Row (Remove Delayed)
+
+**Goal:** Reduce 8 KPI cards to 5 compact cards. Remove "Delayed" card. Downsize typography.
+
+**Current 8 cards:** Total, Published, Delayed, Under Construction, Planning, Completed, On Hold, Suspended
+
+**Proposed 5 cards:** Total Projects, Published, Under Construction, Completed, Pending Review
+
+**Changes to `pmo-frontend/pages/coi/index.vue` — KPI row section:**
+- Remove "Delayed" card (card 3)
+- Remove "On Hold" card (card 7)
+- Add "Pending Review" card: value from `analyticsSummary?.by_publication_status` where status = PENDING_REVIEW
+- Change all KPI card value class from `text-h4 font-weight-bold` to `text-h6 font-weight-bold`
+- Change all KPI card `v-icon size="32"` to `size="20"`
+- Change all KPI card label class from `text-body-2` to `text-caption text-grey-darken-1`
+- Update `cols="12" sm="6" md="3"` to `cols="12" sm="6" md="4" lg="auto"` for 5 cards to fill row evenly (or use md="2" for 6 per row on lg)
+
+**Card definitions (5-card row):**
+
+| # | Label | Value Source | Icon | Color |
+|---|---|---|---|---|
+| 1 | Total Projects | `analyticsSummary.total` | mdi-office-building | primary |
+| 2 | Published | `analyticsSummary.by_publication_status[PUBLISHED]` | mdi-check-decagram | success |
+| 3 | Under Construction | `analyticsSummary.by_status[UNDER_CONSTRUCTION]` | mdi-hard-hat | warning |
+| 4 | Completed | `analyticsSummary.by_status[COMPLETED]` | mdi-check-circle | success |
+| 5 | Pending Review | `analyticsSummary.by_publication_status[PENDING_REVIEW]` | mdi-clock-outline | info |
+
+**Acceptance:**
+- [ ] 5 KPI cards visible (not 8)
+- [ ] "Delayed" card removed
+- [ ] "On Hold" card removed
+- [ ] All KPI values use text-h6 font-weight-bold
+- [ ] All icons use size="20"
+- [ ] Labels use text-caption
+
+---
+
+### LLL-B: Project Table — Add Default Columns (Fund Source, Project Code, End Date)
+
+**Goal:** Add Fund Source, Project Code, and Original Completion Date to default visible columns.
+
+**Changes to `pmo-frontend/pages/coi/index.vue` — `headers` computed / array:**
+
+Update the headers array to include (in order):
+1. Project Name (existing)
+2. Project Code (NEW — `key: 'projectCode'`)
+3. Campus (existing)
+4. Status (existing)
+5. Publication (existing)
+6. Fund Source (NEW — `key: 'fundSource'`)
+7. Orig. End (NEW — `key: 'originalCompletionDate'`, format: date string)
+8. Contract Amount (existing)
+9. Progress (existing)
+10. Actions (existing)
+
+Add `optional: true` flag metadata to enable Column Manager in LLL-C.
+
+**Acceptance:**
+- [ ] Project Code column visible in table by default
+- [ ] Fund Source column visible in table by default
+- [ ] Orig. End column visible in table by default
+- [ ] Existing columns unchanged
+
+---
+
+### LLL-C: Column Manager — v-menu Checkbox Selector + localStorage
+
+**Goal:** Add column visibility toggle for optional columns. Persist selections in localStorage.
+
+**Changes to `pmo-frontend/pages/coi/index.vue`:**
+
+Add `hiddenColumns = ref<Set<string>>(new Set())` initialized from localStorage `coi_hidden_columns`.
+
+Update headers to use the ALL_COLUMNS + filter pattern:
+```ts
+const ALL_COLUMNS = [
+  { title: 'Project Name', key: 'projectName', sortable: true },
+  { title: 'Project Code', key: 'projectCode', optional: true },
+  { title: 'Campus', key: 'campus' },
+  { title: 'Status', key: 'status' },
+  { title: 'Publication', key: 'publicationStatus' },
+  { title: 'Fund Source', key: 'fundSource' },
+  { title: 'Orig. End', key: 'originalCompletionDate', optional: true },
+  { title: 'Contract Amount', key: 'totalContractAmount' },
+  { title: 'Progress', key: 'physicalAccomplishment' },
+  // additional optional columns
+  { title: 'Original Start', key: 'originalStartDate', optional: true },
+  { title: 'Revised End', key: 'revisedCompletionDate', optional: true },
+  { title: 'Contractor', key: 'contractor', optional: true },
+  { title: 'Created', key: 'createdAt', optional: true },
+  { title: 'Actions', key: 'actions', sortable: false },
+]
+const hiddenColumns = ref<Set<string>>(
+  new Set(JSON.parse(localStorage.getItem('coi_hidden_columns') || '[]'))
+)
+const headers = computed(() =>
+  ALL_COLUMNS.filter(c => !(c as any).optional || !hiddenColumns.value.has(c.key))
+)
+watch(hiddenColumns, (v) => {
+  localStorage.setItem('coi_hidden_columns', JSON.stringify([...v]))
+}, { deep: true })
+```
+
+Add column manager `v-menu` trigger button in the filter bar area (before the filter chip row):
+```html
+<v-menu :close-on-content-click="false">
+  <template #activator="{ props }">
+    <v-btn v-bind="props" icon="mdi-table-column-plus-after" size="small" variant="tonal" density="compact" />
+  </template>
+  <v-list density="compact" min-width="200">
+    <v-list-subheader>Toggle Columns</v-list-subheader>
+    <v-list-item v-for="col in ALL_COLUMNS.filter(c => c.optional)" :key="col.key">
+      <template #prepend>
+        <v-checkbox
+          :model-value="!hiddenColumns.has(col.key)"
+          @update:model-value="v => v ? hiddenColumns.delete(col.key) : hiddenColumns.add(col.key)"
+          density="compact" hide-details
+        />
+      </template>
+      <v-list-item-title>{{ col.title }}</v-list-item-title>
+    </v-list-item>
+  </v-list>
+</v-menu>
+```
+
+Wrap `v-data-table` in `<div style="overflow-x:auto">` to support horizontal scroll for many columns.
+
+**Acceptance:**
+- [ ] Column Manager button visible in filter bar
+- [ ] Clicking button shows v-menu with optional column checkboxes
+- [ ] Toggling checkbox shows/hides column in table
+- [ ] Column visibility persists after page reload (localStorage)
+- [ ] Table scrolls horizontally when many columns are visible
+
+---
+
+### LLL-D: Recent Activity — Admin-Only Collapsible (Default Collapsed)
+
+**Goal:** Wrap Recent Activity in v-expansion-panels, default collapsed. Lazy-fetch on first expand.
+
+**Changes to `pmo-frontend/pages/coi/index.vue`:**
+- Add `activityExpanded = ref<number[]>([])` (empty = collapsed)
+- Wrap existing Recent Activity content in:
+```html
+<template v-if="canViewActivity">
+  <v-expansion-panels v-model="activityExpanded" variant="accordion" class="mb-4">
+    <v-expansion-panel>
+      <v-expansion-panel-title>
+        <v-icon size="16" class="mr-2">mdi-history</v-icon>
+        <span class="text-subtitle-2">System Activity</span>
+        <v-chip v-if="activityLogs.length" size="x-small" class="ml-2">{{ activityLogs.length }}</v-chip>
+      </v-expansion-panel-title>
+      <v-expansion-panel-text>
+        <!-- existing activity logs content -->
+      </v-expansion-panel-text>
+    </v-expansion-panel>
+  </v-expansion-panels>
+</template>
+```
+- Remove `fetchRecentActivity()` from `onMounted()`
+- Add `watch(activityExpanded, (v) => { if (v.length && !activityLogs.value.length) fetchRecentActivity() })`
+
+**Acceptance:**
+- [ ] Recent Activity section hidden from Staff/Contractor
+- [ ] Recent Activity section shows as collapsed panel for Admin by default
+- [ ] Activity logs load only when panel is first expanded
+- [ ] Activity count badge shows after loaded
+
+---
+
+### LLL-E: Filter Bar — Simplification to 3-Tier Architecture
+
+**Goal:** Primary 3 filters always visible; advanced collapse shows 3 fields only; full search dialog for power users.
+
+**Changes to `pmo-frontend/pages/coi/index.vue` — filter section:**
+
+**Primary filters (unchanged, always visible):** Search text field, Status v-select, Campus v-select
+
+**Advanced collapse panel (simplified to 3 fields):**
+```html
+<v-expansion-panels v-model="advancedOpen" variant="accordion">
+  <v-expansion-panel>
+    <v-expansion-panel-title class="text-caption">Advanced Filters</v-expansion-panel-title>
+    <v-expansion-panel-text>
+      <v-row dense>
+        <v-col cols="12" sm="4">
+          <v-select v-model="selectedYear" :items="fiscalYearOptions" label="Fiscal Year" density="compact" clearable />
+        </v-col>
+        <v-col cols="12" sm="4">
+          <v-text-field v-model="dateFrom" type="date" label="Date From" density="compact" clearable />
+        </v-col>
+        <v-col cols="12" sm="4">
+          <v-text-field v-model="dateTo" type="date" label="Date To" density="compact" clearable />
+        </v-col>
+      </v-row>
+    </v-expansion-panel-text>
+  </v-expansion-panel>
+</v-expansion-panels>
+```
+
+**Full search dialog trigger:** Add `mdi-filter-cog` icon button next to the filter bar that opens a `v-dialog` containing all 9 original advanced filter fields (Project Code + all 4 date range pairs). This is for power users who need precise date filtering.
+
+Remove the existing advanced filter panel with 9 fields; replace with the 3-field simplified version above. Move all 9 original fields into the dialog.
+
+**Acceptance:**
+- [ ] Primary 3 filters (Search, Status, Campus) always visible
+- [ ] Advanced collapse shows exactly 3 fields (Year, Date From, Date To)
+- [ ] "Advanced Search" icon button opens dialog with all 9 original filter fields
+- [ ] All existing filter functionality preserved (no filtering capability lost)
+
+---
+
+### LLL-F: Section Banners
+
+**Goal:** Add section banners above KPI row and above project table per brief.
+
+**Changes to `pmo-frontend/pages/coi/index.vue`:**
+
+Before KPI row:
+```html
+<div class="d-flex align-center mb-3">
+  <div>
+    <div class="text-subtitle-1 font-weight-bold">Portfolio Summary</div>
+    <div class="text-caption text-grey-darken-1">Real-time overview of infrastructure project metrics across all campuses.</div>
+  </div>
+</div>
+```
+
+Before project table (after filter bar):
+```html
+<div class="d-flex align-center mb-2">
+  <div>
+    <div class="text-subtitle-2 font-weight-bold">Project List</div>
+    <div class="text-caption text-grey-darken-1">{{ filteredProjects.length }} project{{ filteredProjects.length !== 1 ? 's' : '' }} — use filters to narrow results.</div>
+  </div>
+</div>
+```
+
+**Acceptance:**
+- [ ] "Portfolio Summary" label + subtitle visible above KPI row
+- [ ] "Project List" label + dynamic count visible above table
+- [ ] No banner displayed on analytics tab (banners on overview tab only)
+
+---
+
+### LLL-G: Remove Negative Monitoring Panels from Landing
+
+**Goal:** Remove "Needs Attention" and "Slow-Moving Projects" panels from the portfolio landing tab. Retain data only in the Analytics tab.
+
+**Changes to `pmo-frontend/pages/coi/index.vue`:**
+- Remove the Executive Monitoring row (`v-row` containing "Needs Attention" v-card + "Slow-Moving Projects" v-card)
+- Remove refs: `needsAttention`, `slowMovingProjects` (or retain if used in Analytics tab)
+- Remove computed derivations for these lists if they are ONLY used by the now-removed panels
+- Verify Analytics tab still shows relevant status distribution data (it does — via status donut)
+
+**Acceptance:**
+- [ ] "Needs Attention" panel not visible on portfolio (Overview) tab
+- [ ] "Slow-Moving Projects" panel not visible on portfolio (Overview) tab
+- [ ] Analytics tab status distribution unchanged
+- [ ] No JavaScript errors after removal
+
+---
+
+### LLL-H: Hero Analytics Strip — Remove (Duplicate Data)
+
+**Goal:** Remove the hero analytics strip (EEE-A) which duplicates data already shown in KPI cards above and Analytics tab below.
+
+**Changes to `pmo-frontend/pages/coi/index.vue`:**
+- Remove the full hero analytics strip section (budget total, progress bar, status chips row)
+- Confirm KPI cards already show total, published, under construction, completed, pending review
+
+**Note:** If hero strip contains any data point NOT covered by the 5-card KPI row, retain that specific data point only (do not remove information that has no other representation).
+
+**Acceptance:**
+- [ ] Hero analytics strip not visible on portfolio tab
+- [ ] KPI cards still show all key metrics
+- [ ] Page loads without JavaScript errors
+
+---
+
+### LLL Verification Checklist
+
+- [ ] LLL-A: 5 KPI cards visible (Total, Published, Under Construction, Completed, Pending Review)
+- [ ] LLL-A: All KPI values text-h6, icons size=20
+- [ ] LLL-B: Project Code, Fund Source, Orig. End visible in table by default
+- [ ] LLL-C: Column Manager v-menu button visible in filter area
+- [ ] LLL-C: Toggling columns persists via localStorage
+- [ ] LLL-C: Table scrolls horizontally when needed
+- [ ] LLL-D: Recent Activity collapsible, default collapsed, admin-only
+- [ ] LLL-D: Activity logs load lazily on first expand
+- [ ] LLL-E: Primary 3 filters always visible
+- [ ] LLL-E: Advanced collapse shows 3 fields only
+- [ ] LLL-E: Full search dialog opens with all original fields
+- [ ] LLL-F: "Portfolio Summary" banner above KPI row
+- [ ] LLL-F: "Project List" banner with dynamic count above table
+- [ ] LLL-G: Needs Attention + Slow-Moving panels removed from Overview tab
+- [ ] LLL-H: Hero analytics strip removed
+- [ ] vue-tsc 0 new errors
+

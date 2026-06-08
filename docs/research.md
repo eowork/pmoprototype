@@ -1,6 +1,7 @@
 # PMO Dashboard — Research Repository
 > Research findings only. Not plans, not decisions, not history.
 > **Last Updated:** 2026-06-08 | **Governance:** ACE v2.4
+> **New entries:** R-088–R-103 (KKK/LLL executive dashboard refactor — 2026-06-08)
 
 ---
 
@@ -2450,3 +2451,324 @@ Returns `by_contractor: Array<{contractor_name, count, total_contract}>`.
 **Assessment:** Both extensions are additive to the existing `getAnalyticsSummary()` response. No DTO change (endpoint already returns `any`). No migration needed. Backend tsc passes because return type is `Promise<any>`. Estimated implementation: 15 minutes per extension.
 
 **Recommendation for Phase III:** Add both extensions. Replace client-side groupings with authoritative DB aggregates. Frontend change: swap `fundingSourceChart` computed from `p.fundSource` grouping to `analyticsSummary.value?.by_funding_source`. Add new `contractorChart` computed from `analyticsSummary.value?.by_contractor`.
+
+
+---
+
+## Phase KKK / LLL — Executive Dashboard Refactor Research (2026-06-08)
+
+> Research basis for Phase KKK (CSU CORE Dashboard) and Phase LLL (COI Dashboard) executive refactors.
+
+---
+
+### R-088: CSU CORE Dashboard — Current State Audit
+
+**File:** `pmo-frontend/pages/dashboard.vue`, `pmo-frontend/components/AdminKpiRow.vue`
+
+**AdminKpiRow issues:**
+- Tile 2 = "Delayed Projects" — negative metric on executive landing page (violates executive dashboard principles)
+- `text-h5 font-weight-bold` for tile values — oversized; executive benchmarks recommend `text-subtitle-1` or `text-h6`
+- Avatar size 44px — too large for compact KPI tiles
+- Tile colors primary/error/warning/success — error tile (Delayed) dominates visually
+
+**Infrastructure mini-summary card issues:**
+- "Delayed" is stat #3 of 4 — negative metric prominent above fold
+- `text-h5 font-weight-bold` for all 4 stats — oversized for a secondary summary card
+- No executive guidance subtitle
+
+**UO Summary card issues:**
+- 8 pillar cards (4 physical + 4 financial) expand to very long card requiring scroll
+- Trend charts inline below pillar cards — no way to collapse
+- "Q1-Q4" section labels use `text-uppercase font-weight-bold` — aggressive visual weight
+
+**Quick Actions card issues:**
+- 4 `size="large" block` buttons — uses ~200-280px vertical space for navigation only
+- HCI violation: navigation links should not use primary action affordances (large buttons)
+- Contractors see only 1 button — section looks broken for that role
+
+**Other Modules section issues:**
+- GAD Reports: hardcoded `gadReports: 0` (Directive 218: module does not exist)
+- Repair + UO counts: fetched via full-list API — network-inefficient for a simple count
+- `text-h5 font-weight-bold` module card values — oversized; GAD always shows 0
+
+---
+
+### R-089: COI Dashboard — Current State Audit
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+
+**KPI row (8 cards) issues:**
+- `text-h4 font-weight-bold` for numeric values — 4 typography levels too large for KPI card context
+- Icon size 32px — appropriate for feature icons, not compact KPI rows
+- 8 cards at `md="3"` creates 2 rows of 4 — high cognitive load, exceeds executive benchmark (<=5 primary KPIs)
+- Card 3 = "Delayed" — negative metric as a primary, always-visible KPI
+- Card 7 = "On Hold" — low signal value; rarely action-relevant
+
+**Hero analytics strip (EEE-A) issues:**
+- Duplicates data already shown in KPI row (budget, progress, status chips)
+- Adds a third representation of status distribution (chips in hero + KPI count cards + status donut in analytics tab)
+
+**Executive monitoring row issues:**
+- "Needs Attention" panel (delayed + pending + rejected) = permanent negative metric surface
+- "Slow-Moving Projects" panel (<25%) = permanent negative metric surface
+- Both panels belong in analytics/drill-down views, not on the portfolio landing page
+
+**Recent Activity:**
+- Always rendered, always fetches on mount (admin-gated fetch but always-visible container)
+- Positioned between analytics summary and filter bar — interrupts user flow to table
+
+**Advanced filters:**
+- Expanded state reveals 10+ date range fields simultaneously
+- Cognitive overload; most users need search + status + campus only
+
+---
+
+### R-090: Typography Audit — COI Dashboard
+
+| Element | Current | Executive Standard | Gap |
+|---|---|---|---|
+| KPI card values | `text-h4` | `text-h6` or `text-subtitle-1` | 2-3 sizes too large |
+| KPI card icons | size=32 | size=20 or `size="small"` | Too large |
+| KPI card labels | `text-body-2` | `text-caption` | 1 size too large |
+| Hero budget stat | `text-h4` | `text-h4` | OK (hero stat) |
+| Analytics chart labels | `text-body-1 font-weight-bold` | `text-subtitle-2 font-weight-bold` | 1 size too large |
+| Filter bar | compact, density="compact" | OK | OK |
+| Table header | v-data-table default | OK | OK |
+
+---
+
+### R-091: Typography Audit — CSU CORE Dashboard
+
+| Element | Current | Executive Standard | Gap |
+|---|---|---|---|
+| AdminKpiRow values | `text-h5` | `text-subtitle-1` | 1-2 sizes too large |
+| AdminKpiRow avatars | size=44 | size=36 | Slightly large |
+| Welcome heading | `text-h4` | `text-h5` | 1 size too large |
+| Infrastructure stats | `text-h5` | `text-h6` | 1 size too large |
+| UO pillar values | `text-h6` | `text-h6` | OK |
+| Quick Actions buttons | `size="large" block` | compact list items | Wrong component |
+| Module card values | `text-h5` | `text-subtitle-1` | 1-2 sizes too large |
+
+---
+
+### R-092: Data Source Validation — CSU CORE Dashboard
+
+| Data Point | Source | Status |
+|---|---|---|
+| Infrastructure total | `analytics/summary.total` | DB aggregate |
+| Delayed count | `analytics/summary.delayed_count` | DB aggregate |
+| Pending reviews | `analytics/summary.by_publication_status` | DB aggregate |
+| UO Compliance Rate | `pillar-summary.pillars[].accomplishment_rate_pct` | DB aggregate |
+| COI mini-summary | `analytics/summary` + `analytics/financial-summary` | DB aggregate |
+| UO pillar physical | `analytics/pillar-summary` | DB aggregate |
+| UO pillar financial | `analytics/financial-pillar-summary` | DB aggregate |
+| Q1-Q4 trend charts | `quarterly-trend` + `financial-quarterly-trend` | DB aggregate |
+| Repair count | `/api/repair-projects` (full list) | WARN — inefficient full-list fetch |
+| UO count | `/api/university-operations` (full list) | WARN — inefficient full-list fetch |
+| GAD Reports | Hardcoded `0` | FAIL — module non-existent (Directive 218) |
+
+**Finding:** GAD Reports must be removed entirely. Repair/UO full-list fetches eliminated once "Other Modules" is refactored to navigation-only.
+
+---
+
+### R-093: Data Source Validation — COI Dashboard
+
+| Data Point | Source | Status |
+|---|---|---|
+| Project list | `/api/construction-projects` (full list) | Required for table |
+| KPI stats | `analytics/summary` via `syncStatsFromAnalytics()` | DB aggregate (authoritative) |
+| Delayed count | `analytics/summary.delayed_count` | DB aggregate |
+| Recent activity | `/api/activity-logs?entityType=CONSTRUCTION_PROJECT` | Backend paginated |
+| Campus filter options | Hardcoded `["MAIN","CABADBARAN"]` | WARN — not DB-driven |
+| Advanced date filters | Client-side filtering of loaded array | OK — data already loaded |
+| Analytics summary | `analytics/summary` + `analytics/financial-summary` | DB aggregate |
+
+**Finding:** Campus filter hardcoded — acceptable (campuses stable). Advanced date filters client-side — acceptable as data is already loaded.
+
+---
+
+### R-094: HCI Assessment — Executive Usability
+
+**Violations against Nielsen Usability Heuristics:**
+
+1. **Aesthetic and minimalist design (COI):** 8 KPI cards — each additional element competes for attention. Executive dashboards should surface 3-5 primary KPIs.
+2. **Recognition vs recall (COI):** 8 cards + hero strip + campus panel + attention panel + upcoming completions panel — users must process 30+ data points before reaching the table. Exceeds working memory capacity (Miller Law: 7+-2 items).
+3. **Consistency and standards (CORE + COI):** Navigation actions (Quick Actions) use `size="large" block` buttons — same affordance as primary form actions. Navigation should use text/tonal variants.
+4. **Error prevention (COI filters):** Advanced filter with 10+ visible date range fields simultaneously increases user error likelihood.
+5. **Help and documentation (both):** Section banners exist but inconsistently applied.
+
+**HCI Recommendations:**
+- COI KPI row: reduce to 5 cards maximum; downsize typography per R-090
+- CORE Quick Actions: replace block buttons with compact icon-link list
+- COI: move Needs Attention + Slow-Moving to analytics tab (drill-down)
+- Both: negative metrics (Delayed, High Risk) only in drill-down views
+- COI filter: primary = 3 fields; advanced = 3 additional fields max
+
+---
+
+### R-095: Negative Metric Policy — Current Violations
+
+Per brief: Remove Delayed Projects, High Risk Warnings, Negative Status Projections from CSU CORE and COI landing pages.
+
+**CORE violations:**
+- AdminKpiRow tile 2: "Delayed Projects" (error color, always visible)
+- Infrastructure mini-summary stat 3: "Delayed" (always visible)
+
+**COI violations:**
+- KPI card 3: "Delayed" (error color, always visible)
+- Executive monitoring panel: "Needs Attention" (delayed + rejected + pending — negative framing)
+- Executive monitoring panel: "Slow-Moving Projects" (<25% progress — negative framing)
+
+**Permitted drill-down locations:**
+- COI Analytics tab: Status Distribution donut shows delayed count — OK as drill-down
+- COI project list: filter by Delayed status — OK as drill-down
+
+**Replacement positive metrics:**
+- CORE AdminKpiRow tile 2: "Published Projects" (from `by_publication_status`) or "Avg Portfolio Progress"
+- CORE Infrastructure card stat 3: "Completed" (from `by_status.COMPLETE`)
+- COI KPI card 3: "Pending Review" (actionable, not negative) or remove card entirely
+
+---
+
+### R-096: COI Project Table — Column Coverage vs Brief Requirements
+
+**Brief-required default columns:** Project Code, Project Name, Campus, Status, Publication, Contract Amount, Original End Date, Fund Source, Physical Progress, Actions
+
+**Current default headers (7):** Project Name, Campus, Status, Publication, Contract Amount, Progress, Actions
+
+**Missing from current defaults:** Project Code, Original End Date, Fund Source
+
+**UIProject interface coverage (all required columns already exist):**
+- `projectCode` — mapped from `backend.project_code`
+- `originalCompletionDate` — mapped from `backend.original_completion_date`
+- `endDate` — mapped from `backend.end_date`
+- `fundSource` — mapped from `backend.funding_source_name`
+
+**Optional columns (UIProject coverage):**
+- `revisedStartDate`, `revisedCompletionDate`, `contractor`, `createdAt`, `updatedAt` — all present
+- Duration (days) — computed client-side from dates
+- Financial Status, Last Progress Report — require UIProjectDetail; not in list endpoint; deferred
+
+**Finding:** All required columns exist in UIProject. Only `headers` computed and Column Manager need updating.
+
+---
+
+### R-097: COI Recent Activity — Admin-Only Collapsible Assessment
+
+**Current behavior:**
+- `fetchRecentActivity()` called in `onMounted()` — always runs if `canViewActivity.value` is true
+- Component renders regardless of fetch result (shows empty list when no data)
+- Position: between analytics panels and filter bar — interrupts user flow to table
+
+**Proposed collapsible design:**
+- `v-expansion-panels` wrapping the activity section, default collapsed (`modelValue = []`)
+- Header: "System Activity" with `mdi-history` icon + record count chip (loaded lazily)
+- Gate: `v-if="canViewActivity"` — Staff/Contractor never see the section
+- Fetch: trigger on first expand, not on mount (lazy fetch saves network on initial load)
+
+**Finding:** Admin-only collapsible appropriate and feasible. Lazy fetch improves initial page load performance.
+
+---
+
+### R-098: COI Filter Complexity Analysis
+
+**Current Advanced Filters (when expanded):**
+- Project Code (1 text field)
+- Original Start From/To (2 date fields), Original End From/To (2), Revised Start From/To (2), Revised End From/To (2)
+= 9 fields in the advanced panel
+
+**HCI principle:** Advanced panel should reveal at most 4-6 additional options. 9 fields simultaneously is excessive.
+
+**Proposed 3-tier architecture:**
+- **Primary (always visible):** Search + Status + Campus (3 fields, unchanged)
+- **Advanced collapse panel:** Fiscal Year (v-select) + Date Range From/To (2 date pickers) = 3 additional fields
+- **Full search dialog:** `v-dialog` triggered by secondary icon button — all 9 original advanced fields for power users
+
+**Finding:** Progressive disclosure — casual users see 6 fields max; power users click through to dialog.
+
+---
+
+### R-099: CORE Dashboard — Module Cards Elimination
+
+**Current Other Modules section:**
+- Repair Projects card: count from `/api/repair-projects` (full list fetch for a single number)
+- University Operations card: count from `/api/university-operations` (quarterly reports; count is meaningless)
+- GAD Reports card: always shows 0
+
+**Recommendation:** Eliminate stat cards entirely. Replace with navigation links inside Quick Actions or as compact link chips.
+
+**Finding:** Remove `repairProjects`, `universityOperations`, `gadReports` refs and their API calls. "Other Modules" becomes navigation-only.
+
+---
+
+### R-100: Quick Actions — Optimal Pattern for CSU CORE
+
+**Current:** 4 `size="large" block variant="outlined"` buttons in a 2-col grid
+
+**Evaluated options:**
+1. **Compact icon-link list** — `v-list` with `density="compact"`, icon + label + chevron-right. Space-efficient, familiar. Best for 4-8 actions.
+2. **Speed Dial FAB** — hover-to-reveal. Inappropriate for desktop-primary app.
+3. **Grouped Dropdown** — overkill for 4 items; adds click overhead.
+4. **Icon button grid** — 2x2 grid of icon-only buttons. Loses label legibility.
+
+**Recommendation:** Compact `v-list` layout with `prepend-icon`, `title`, optional `subtitle`, and `to` prop. 2-column layout on lg+.
+
+---
+
+### R-101: UO Summary — Information Architecture
+
+**Current:** Single card with 8 pillar cards (4 physical + 4 financial) + 2 trend charts below
+
+**Issues:**
+- Physical + financial pillar cards visually identical — hard to distinguish at a glance
+- Trend charts appended below — very long card; no collapse option
+- Users who do not need trends must scroll past them
+
+**Proposed pattern:**
+- Replace 8 pillar cards with 4 compact dual-stat pillar cards (physical % + financial % per pillar side-by-side)
+- Move trend charts into `v-expansion-panels` inside the UO card (default collapsed)
+- Saves ~60% vertical space in collapsed state
+
+---
+
+### R-102: Column Manager Implementation Pattern
+
+**Technology:** Vuetify `v-data-table` supports dynamic `:headers` prop natively.
+
+**Pattern:**
+- `ALL_COLUMNS` array with `optional: boolean` flag per column header object
+- `hiddenColumns = ref<Set<string>>(new Set())` — keys of hidden optional columns
+- `headers = computed(() => ALL_COLUMNS.filter(c => !c.optional || !hiddenColumns.value.has(c.key)))`
+- Column selector: `v-menu` triggered by `mdi-table-column-plus-after` icon button; lists optional columns as `v-checkbox` items
+- Horizontal scroll: wrap table in `<div style="overflow-x:auto">`
+- localStorage persist: `watch(hiddenColumns, v => localStorage.setItem('coi_hidden_columns', JSON.stringify([...v])), { deep: true })`
+
+**Toggleable optional columns (initial set):** Project Code, Original Start, Orig. Completion, Revised Completion, Contractor, Created Date
+
+---
+
+### R-103: Executive Dashboard Benchmark Summary
+
+**Best practices (Nielsen Norman Group, Gartner EIS):**
+
+1. **<=5 primary KPIs** on landing — more requires scanning, reduces decision speed
+2. **Positive metrics first** — negative metrics in drill-down only
+3. **Progressive disclosure** — summary then drill-down, not all data at once
+4. **Consistent typography hierarchy** — 3 levels max: heading / value / label
+5. **Navigation != primary action** — nav items use text/icon affordances, not CTA buttons
+6. **Collapsible trend analytics** — executives who need trends find them; do not force scroll
+7. **Table density** — `density="compact"` with fixed columns + horizontal scroll for optional columns
+8. **Section guidance** — one-line subtitle per section
+
+**Applied to CSU CORE:**
+- 4 KPIs in AdminKpiRow — count is fine (<=5) but tile 2 must be positive, not "Delayed"
+- Welcome header text-h4 — reduce to text-h5
+- Quick Actions — compact list (navigation affordance, not CTA)
+- UO trend charts — collapsible (default collapsed)
+
+**Applied to COI:**
+- 8 KPIs — reduce to 5 (remove Delayed; merge On Hold into status analytics)
+- KPI value size text-h4 — reduce to text-h6 (2-level reduction)
+- Negative panels — analytics tab only
+- Filter bar — primary 3 fields + advanced 3 fields + full-search dialog
+
