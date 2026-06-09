@@ -1,4 +1,12 @@
-import { IsString, IsNotEmpty, IsOptional, IsDateString, IsNumber } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsDateString,
+  IsNumber,
+  Min,
+  Max,
+} from 'class-validator';
 
 export class CreateMilestoneDto {
   @IsString()
@@ -12,7 +20,7 @@ export class CreateMilestoneDto {
   @IsOptional()
   @IsDateString()
   target_date?: string;
-  
+
   @IsOptional()
   @IsDateString()
   actual_date?: string;
@@ -25,5 +33,22 @@ export class CreateMilestoneDto {
   @IsString()
   remarks?: string;
 
+  // Phase JU-A-3
+  @IsOptional()
+  @IsDateString()
+  start_date?: string;
 
+  @IsOptional()
+  @IsDateString()
+  actual_start_date?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  progress?: number;
+
+  @IsOptional()
+  @IsString()
+  category?: string;
 }

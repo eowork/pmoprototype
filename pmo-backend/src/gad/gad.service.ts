@@ -1,234 +1,537 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { DatabaseService } from '../database/database.service';
+import { InjectRepository } from '@mikro-orm/nestjs';
+import { EntityRepository, EntityManager } from '@mikro-orm/core';
+import type { FilterQuery } from '@mikro-orm/core';
 import { createPaginatedResponse, PaginatedResponse } from '../common/dto';
 import {
-  CreateStudentParityDto, CreateFacultyParityDto, CreateStaffParityDto,
-  CreatePwdParityDto, CreateIndigenousParityDto, ReviewParityDto,
-  CreateGpbAccomplishmentDto, CreateBudgetPlanDto,
-  QueryParityDto, QueryPlanningDto,
+  CreateStudentParityDto,
+  CreateFacultyParityDto,
+  CreateStaffParityDto,
+  CreatePwdParityDto,
+  CreateIndigenousParityDto,
+  ReviewParityDto,
+  CreateGpbAccomplishmentDto,
+  CreateBudgetPlanDto,
+  QueryParityDto,
+  QueryPlanningDto,
 } from './dto';
+import {
+  GadStudentParityData,
+  GadFacultyParityData,
+  GadStaffParityData,
+  GadPwdParityData,
+  GadIndigenousParityData,
+  GadGpbAccomplishment,
+  GadBudgetPlan,
+} from '../database/entities';
 
 @Injectable()
 export class GadService {
   private readonly logger = new Logger(GadService.name);
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    @InjectRepository(GadStudentParityData)
+    private readonly studentRepo: EntityRepository<GadStudentParityData>,
+    @InjectRepository(GadFacultyParityData)
+    private readonly facultyRepo: EntityRepository<GadFacultyParityData>,
+    @InjectRepository(GadStaffParityData)
+    private readonly staffRepo: EntityRepository<GadStaffParityData>,
+    @InjectRepository(GadPwdParityData)
+    private readonly pwdRepo: EntityRepository<GadPwdParityData>,
+    @InjectRepository(GadIndigenousParityData)
+    private readonly indigenousRepo: EntityRepository<GadIndigenousParityData>,
+    @InjectRepository(GadGpbAccomplishment)
+    private readonly gpbRepo: EntityRepository<GadGpbAccomplishment>,
+    @InjectRepository(GadBudgetPlan)
+    private readonly budgetRepo: EntityRepository<GadBudgetPlan>,
+    private readonly em: EntityManager,
+  ) {}
 
-  // --- Generic CRUD helpers ---
-  private async findAllParity(table: string, query: QueryParityDto): Promise<PaginatedResponse<any>> {
-    const { page = 1, limit = 20 } = query;
-    const offset = (page - 1) * limit;
-    const conditions: string[] = ['deleted_at IS NULL'];
-    const params: any[] = [];
-    let idx = 1;
-
-    if (query.academic_year) { conditions.push(`academic_year = $${idx++}`); params.push(query.academic_year); }
-    if (query.status) { conditions.push(`status = $${idx++}`); params.push(query.status); }
-
-    const where = conditions.join(' AND ');
-    const countRes = await this.db.query(`SELECT COUNT(*) FROM ${table} WHERE ${where}`, params);
-    const total = parseInt(countRes.rows[0].count, 10);
-    const dataRes = await this.db.query(
-      `SELECT * FROM ${table} WHERE ${where} ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx}`,
-      [...params, limit, offset],
-    );
-    return createPaginatedResponse(dataRes.rows, total, page, limit);
+  // --- Generic helpers ---
+  private async findAllWithPagination<T extends object>(
+    repo: EntityRepository<T>,
+    where: FilterQuery<T>,
+    page: number,
+    limit: number,
+  ): Promise<PaginatedResponse<T>> {
+    const [items, total] = await repo.findAndCount(where, {
+      limit,
+      offset: (page - 1) * limit,
+      orderBy: { createdAt: 'desc' } as any,
+    });
+    return createPaginatedResponse(items, total, page, limit);
   }
 
-  private async createParity(table: string, columns: string[], values: any[], userId: string): Promise<any> {
-    const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
-    const result = await this.db.query(
-      `INSERT INTO ${table} (${columns.join(', ')}, submitted_by) VALUES (${placeholders}, $${columns.length + 1}) RETURNING *`,
-      [...values, userId],
-    );
-    this.logger.log(`GAD_PARITY_CREATED: table=${table}, id=${result.rows[0].id}, by=${userId}`);
-    return result.rows[0];
+  private async findOneOrFail<T extends object>(
+    repo: EntityRepository<T>,
+    id: string,
+    label: string,
+  ): Promise<T> {
+    const entity = await repo.findOne({ id } as FilterQuery<T>);
+    if (!entity) throw new NotFoundException(`${label} ${id} not found`);
+    return entity;
   }
 
-  private async updateParity(table: string, id: string, dto: any, userId: string): Promise<any> {
-    const fields = Object.keys(dto).filter(k => dto[k] !== undefined);
-    if (fields.length === 0) {
-      const current = await this.db.query(`SELECT * FROM ${table} WHERE id = $1 AND deleted_at IS NULL`, [id]);
-      if (current.rows.length === 0) throw new NotFoundException(`Record ${id} not found`);
-      return current.rows[0];
-    }
-    const setClause = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
-    const values = fields.map(f => dto[f]);
-    const result = await this.db.query(
-      `UPDATE ${table} SET ${setClause}, updated_at = NOW() WHERE id = $${fields.length + 1} AND deleted_at IS NULL RETURNING *`,
-      [...values, id],
-    );
-    if (result.rows.length === 0) throw new NotFoundException(`Record ${id} not found`);
-    this.logger.log(`GAD_PARITY_UPDATED: table=${table}, id=${id}, by=${userId}`);
-    return result.rows[0];
+  private async softDelete<T extends { deletedAt?: Date }>(
+    repo: EntityRepository<T>,
+    id: string,
+    label: string,
+  ): Promise<void> {
+    const entity = await this.findOneOrFail(repo, id, label);
+    entity.deletedAt = new Date();
+    await this.em.flush();
+    this.logger.log(`GAD_PARITY_DELETED: ${label}, id=${id}`);
   }
 
-  private async removeParity(table: string, id: string): Promise<void> {
-    const result = await this.db.query(`UPDATE ${table} SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`, [id]);
-    if (result.rowCount === 0) throw new NotFoundException(`Record ${id} not found`);
-    this.logger.log(`GAD_PARITY_DELETED: table=${table}, id=${id}`);
-  }
-
-  private async reviewParity(table: string, id: string, dto: ReviewParityDto, userId: string): Promise<any> {
-    const result = await this.db.query(
-      `UPDATE ${table} SET status = $1, reviewed_by = $2, reviewed_at = NOW(), updated_at = NOW()
-       WHERE id = $3 AND deleted_at IS NULL RETURNING *`,
-      [dto.status, userId, id],
+  private async reviewEntity<
+    T extends { status: string; reviewedBy?: string; reviewedAt?: Date },
+  >(
+    repo: EntityRepository<T>,
+    id: string,
+    dto: ReviewParityDto,
+    userId: string,
+    label: string,
+  ): Promise<T> {
+    const entity = await this.findOneOrFail(repo, id, label);
+    entity.status = dto.status;
+    entity.reviewedBy = userId;
+    entity.reviewedAt = new Date();
+    await this.em.flush();
+    this.logger.log(
+      `GAD_PARITY_REVIEWED: ${label}, id=${id}, status=${dto.status}, by=${userId}`,
     );
-    if (result.rows.length === 0) throw new NotFoundException(`Record ${id} not found`);
-    this.logger.log(`GAD_PARITY_REVIEWED: table=${table}, id=${id}, status=${dto.status}, by=${userId}`);
-    return result.rows[0];
+    return entity;
   }
 
   // --- Student Parity ---
-  findStudentParity(query: QueryParityDto) { return this.findAllParity('gad_student_parity_data', query); }
-  createStudentParity(dto: CreateStudentParityDto, userId: string) {
-    return this.createParity('gad_student_parity_data',
-      ['academic_year', 'program', 'admission_male', 'admission_female', 'graduation_male', 'graduation_female'],
-      [dto.academic_year, dto.program, dto.admission_male || 0, dto.admission_female || 0, dto.graduation_male || 0, dto.graduation_female || 0],
-      userId);
+  findStudentParity(query: QueryParityDto) {
+    const { page = 1, limit = 20 } = query;
+    const where: FilterQuery<GadStudentParityData> = {};
+    if (query.academic_year) where.academicYear = query.academic_year;
+    if (query.status) where.status = query.status;
+    return this.findAllWithPagination(this.studentRepo, where, page, limit);
   }
-  updateStudentParity(id: string, dto: Partial<CreateStudentParityDto>, userId: string) {
-    return this.updateParity('gad_student_parity_data', id, dto, userId);
+
+  async createStudentParity(dto: CreateStudentParityDto, userId: string) {
+    const entity = this.studentRepo.create({
+      academicYear: dto.academic_year,
+      program: dto.program,
+      admissionMale: dto.admission_male ?? 0,
+      admissionFemale: dto.admission_female ?? 0,
+      graduationMale: dto.graduation_male ?? 0,
+      graduationFemale: dto.graduation_female ?? 0,
+      submittedBy: userId,
+    });
+    await this.em.persist(entity).flush();
+    this.logger.log(
+      `GAD_PARITY_CREATED: student, id=${entity.id}, by=${userId}`,
+    );
+    return entity;
   }
-  removeStudentParity(id: string) { return this.removeParity('gad_student_parity_data', id); }
+
+  async updateStudentParity(
+    id: string,
+    dto: Partial<CreateStudentParityDto>,
+    userId: string,
+  ) {
+    const entity = await this.findOneOrFail(
+      this.studentRepo,
+      id,
+      'Student parity',
+    );
+    if (dto.academic_year !== undefined)
+      entity.academicYear = dto.academic_year;
+    if (dto.program !== undefined) entity.program = dto.program;
+    if (dto.admission_male !== undefined)
+      entity.admissionMale = dto.admission_male;
+    if (dto.admission_female !== undefined)
+      entity.admissionFemale = dto.admission_female;
+    if (dto.graduation_male !== undefined)
+      entity.graduationMale = dto.graduation_male;
+    if (dto.graduation_female !== undefined)
+      entity.graduationFemale = dto.graduation_female;
+    await this.em.flush();
+    this.logger.log(`GAD_PARITY_UPDATED: student, id=${id}, by=${userId}`);
+    return entity;
+  }
+
+  removeStudentParity(id: string) {
+    return this.softDelete(this.studentRepo, id, 'Student parity');
+  }
   reviewStudentParity(id: string, dto: ReviewParityDto, userId: string) {
-    return this.reviewParity('gad_student_parity_data', id, dto, userId);
+    return this.reviewEntity(
+      this.studentRepo,
+      id,
+      dto,
+      userId,
+      'Student parity',
+    );
   }
 
   // --- Faculty Parity ---
-  findFacultyParity(query: QueryParityDto) { return this.findAllParity('gad_faculty_parity_data', query); }
-  createFacultyParity(dto: CreateFacultyParityDto, userId: string) {
-    return this.createParity('gad_faculty_parity_data',
-      ['academic_year', 'college', 'category', 'total_faculty', 'male_count', 'female_count', 'gender_balance'],
-      [dto.academic_year, dto.college, dto.category, dto.total_faculty || 0, dto.male_count || 0, dto.female_count || 0, dto.gender_balance],
-      userId);
+  findFacultyParity(query: QueryParityDto) {
+    const { page = 1, limit = 20 } = query;
+    const where: FilterQuery<GadFacultyParityData> = {};
+    if (query.academic_year) where.academicYear = query.academic_year;
+    if (query.status) where.status = query.status;
+    return this.findAllWithPagination(this.facultyRepo, where, page, limit);
   }
-  updateFacultyParity(id: string, dto: Partial<CreateFacultyParityDto>, userId: string) {
-    return this.updateParity('gad_faculty_parity_data', id, dto, userId);
+
+  async createFacultyParity(dto: CreateFacultyParityDto, userId: string) {
+    const entity = this.facultyRepo.create({
+      academicYear: dto.academic_year,
+      college: dto.college,
+      category: dto.category,
+      totalFaculty: dto.total_faculty ?? 0,
+      maleCount: dto.male_count ?? 0,
+      femaleCount: dto.female_count ?? 0,
+      genderBalance: dto.gender_balance,
+      submittedBy: userId,
+    });
+    await this.em.persist(entity).flush();
+    this.logger.log(
+      `GAD_PARITY_CREATED: faculty, id=${entity.id}, by=${userId}`,
+    );
+    return entity;
   }
-  removeFacultyParity(id: string) { return this.removeParity('gad_faculty_parity_data', id); }
+
+  async updateFacultyParity(
+    id: string,
+    dto: Partial<CreateFacultyParityDto>,
+    userId: string,
+  ) {
+    const entity = await this.findOneOrFail(
+      this.facultyRepo,
+      id,
+      'Faculty parity',
+    );
+    if (dto.academic_year !== undefined)
+      entity.academicYear = dto.academic_year;
+    if (dto.college !== undefined) entity.college = dto.college;
+    if (dto.category !== undefined) entity.category = dto.category;
+    if (dto.total_faculty !== undefined)
+      entity.totalFaculty = dto.total_faculty;
+    if (dto.male_count !== undefined) entity.maleCount = dto.male_count;
+    if (dto.female_count !== undefined) entity.femaleCount = dto.female_count;
+    if (dto.gender_balance !== undefined)
+      entity.genderBalance = dto.gender_balance;
+    await this.em.flush();
+    this.logger.log(`GAD_PARITY_UPDATED: faculty, id=${id}, by=${userId}`);
+    return entity;
+  }
+
+  removeFacultyParity(id: string) {
+    return this.softDelete(this.facultyRepo, id, 'Faculty parity');
+  }
   reviewFacultyParity(id: string, dto: ReviewParityDto, userId: string) {
-    return this.reviewParity('gad_faculty_parity_data', id, dto, userId);
+    return this.reviewEntity(
+      this.facultyRepo,
+      id,
+      dto,
+      userId,
+      'Faculty parity',
+    );
   }
 
   // --- Staff Parity ---
-  findStaffParity(query: QueryParityDto) { return this.findAllParity('gad_staff_parity_data', query); }
-  createStaffParity(dto: CreateStaffParityDto, userId: string) {
-    return this.createParity('gad_staff_parity_data',
-      ['academic_year', 'department', 'staff_category', 'total_staff', 'male_count', 'female_count', 'gender_balance'],
-      [dto.academic_year, dto.department, dto.staff_category, dto.total_staff || 0, dto.male_count || 0, dto.female_count || 0, dto.gender_balance],
-      userId);
+  findStaffParity(query: QueryParityDto) {
+    const { page = 1, limit = 20 } = query;
+    const where: FilterQuery<GadStaffParityData> = {};
+    if (query.academic_year) where.academicYear = query.academic_year;
+    if (query.status) where.status = query.status;
+    return this.findAllWithPagination(this.staffRepo, where, page, limit);
   }
-  updateStaffParity(id: string, dto: Partial<CreateStaffParityDto>, userId: string) {
-    return this.updateParity('gad_staff_parity_data', id, dto, userId);
+
+  async createStaffParity(dto: CreateStaffParityDto, userId: string) {
+    const entity = this.staffRepo.create({
+      academicYear: dto.academic_year,
+      department: dto.department,
+      staffCategory: dto.staff_category,
+      totalStaff: dto.total_staff ?? 0,
+      maleCount: dto.male_count ?? 0,
+      femaleCount: dto.female_count ?? 0,
+      genderBalance: dto.gender_balance,
+      submittedBy: userId,
+    });
+    await this.em.persist(entity).flush();
+    this.logger.log(`GAD_PARITY_CREATED: staff, id=${entity.id}, by=${userId}`);
+    return entity;
   }
-  removeStaffParity(id: string) { return this.removeParity('gad_staff_parity_data', id); }
+
+  async updateStaffParity(
+    id: string,
+    dto: Partial<CreateStaffParityDto>,
+    userId: string,
+  ) {
+    const entity = await this.findOneOrFail(this.staffRepo, id, 'Staff parity');
+    if (dto.academic_year !== undefined)
+      entity.academicYear = dto.academic_year;
+    if (dto.department !== undefined) entity.department = dto.department;
+    if (dto.staff_category !== undefined)
+      entity.staffCategory = dto.staff_category;
+    if (dto.total_staff !== undefined) entity.totalStaff = dto.total_staff;
+    if (dto.male_count !== undefined) entity.maleCount = dto.male_count;
+    if (dto.female_count !== undefined) entity.femaleCount = dto.female_count;
+    if (dto.gender_balance !== undefined)
+      entity.genderBalance = dto.gender_balance;
+    await this.em.flush();
+    this.logger.log(`GAD_PARITY_UPDATED: staff, id=${id}, by=${userId}`);
+    return entity;
+  }
+
+  removeStaffParity(id: string) {
+    return this.softDelete(this.staffRepo, id, 'Staff parity');
+  }
   reviewStaffParity(id: string, dto: ReviewParityDto, userId: string) {
-    return this.reviewParity('gad_staff_parity_data', id, dto, userId);
+    return this.reviewEntity(this.staffRepo, id, dto, userId, 'Staff parity');
   }
 
   // --- PWD Parity ---
-  findPwdParity(query: QueryParityDto) { return this.findAllParity('gad_pwd_parity_data', query); }
-  createPwdParity(dto: CreatePwdParityDto, userId: string) {
-    return this.createParity('gad_pwd_parity_data',
-      ['academic_year', 'pwd_category', 'subcategory', 'total_beneficiaries', 'male_count', 'female_count'],
-      [dto.academic_year, dto.pwd_category, dto.subcategory, dto.total_beneficiaries || 0, dto.male_count || 0, dto.female_count || 0],
-      userId);
+  findPwdParity(query: QueryParityDto) {
+    const { page = 1, limit = 20 } = query;
+    const where: FilterQuery<GadPwdParityData> = {};
+    if (query.academic_year) where.academicYear = query.academic_year;
+    if (query.status) where.status = query.status;
+    return this.findAllWithPagination(this.pwdRepo, where, page, limit);
   }
-  updatePwdParity(id: string, dto: Partial<CreatePwdParityDto>, userId: string) {
-    return this.updateParity('gad_pwd_parity_data', id, dto, userId);
+
+  async createPwdParity(dto: CreatePwdParityDto, userId: string) {
+    const entity = this.pwdRepo.create({
+      academicYear: dto.academic_year,
+      pwdCategory: dto.pwd_category,
+      subcategory: dto.subcategory,
+      totalBeneficiaries: dto.total_beneficiaries ?? 0,
+      maleCount: dto.male_count ?? 0,
+      femaleCount: dto.female_count ?? 0,
+      submittedBy: userId,
+    });
+    await this.em.persist(entity).flush();
+    this.logger.log(`GAD_PARITY_CREATED: pwd, id=${entity.id}, by=${userId}`);
+    return entity;
   }
-  removePwdParity(id: string) { return this.removeParity('gad_pwd_parity_data', id); }
+
+  async updatePwdParity(
+    id: string,
+    dto: Partial<CreatePwdParityDto>,
+    userId: string,
+  ) {
+    const entity = await this.findOneOrFail(this.pwdRepo, id, 'PWD parity');
+    if (dto.academic_year !== undefined)
+      entity.academicYear = dto.academic_year;
+    if (dto.pwd_category !== undefined) entity.pwdCategory = dto.pwd_category;
+    if (dto.subcategory !== undefined) entity.subcategory = dto.subcategory;
+    if (dto.total_beneficiaries !== undefined)
+      entity.totalBeneficiaries = dto.total_beneficiaries;
+    if (dto.male_count !== undefined) entity.maleCount = dto.male_count;
+    if (dto.female_count !== undefined) entity.femaleCount = dto.female_count;
+    await this.em.flush();
+    this.logger.log(`GAD_PARITY_UPDATED: pwd, id=${id}, by=${userId}`);
+    return entity;
+  }
+
+  removePwdParity(id: string) {
+    return this.softDelete(this.pwdRepo, id, 'PWD parity');
+  }
   reviewPwdParity(id: string, dto: ReviewParityDto, userId: string) {
-    return this.reviewParity('gad_pwd_parity_data', id, dto, userId);
+    return this.reviewEntity(this.pwdRepo, id, dto, userId, 'PWD parity');
   }
 
   // --- Indigenous Parity ---
-  findIndigenousParity(query: QueryParityDto) { return this.findAllParity('gad_indigenous_parity_data', query); }
-  createIndigenousParity(dto: CreateIndigenousParityDto, userId: string) {
-    return this.createParity('gad_indigenous_parity_data',
-      ['academic_year', 'indigenous_category', 'subcategory', 'total_participants', 'male_count', 'female_count'],
-      [dto.academic_year, dto.indigenous_category, dto.subcategory, dto.total_participants || 0, dto.male_count || 0, dto.female_count || 0],
-      userId);
+  findIndigenousParity(query: QueryParityDto) {
+    const { page = 1, limit = 20 } = query;
+    const where: FilterQuery<GadIndigenousParityData> = {};
+    if (query.academic_year) where.academicYear = query.academic_year;
+    if (query.status) where.status = query.status;
+    return this.findAllWithPagination(this.indigenousRepo, where, page, limit);
   }
-  updateIndigenousParity(id: string, dto: Partial<CreateIndigenousParityDto>, userId: string) {
-    return this.updateParity('gad_indigenous_parity_data', id, dto, userId);
+
+  async createIndigenousParity(dto: CreateIndigenousParityDto, userId: string) {
+    const entity = this.indigenousRepo.create({
+      academicYear: dto.academic_year,
+      indigenousCategory: dto.indigenous_category,
+      subcategory: dto.subcategory,
+      totalParticipants: dto.total_participants ?? 0,
+      maleCount: dto.male_count ?? 0,
+      femaleCount: dto.female_count ?? 0,
+      submittedBy: userId,
+    });
+    await this.em.persist(entity).flush();
+    this.logger.log(
+      `GAD_PARITY_CREATED: indigenous, id=${entity.id}, by=${userId}`,
+    );
+    return entity;
   }
-  removeIndigenousParity(id: string) { return this.removeParity('gad_indigenous_parity_data', id); }
+
+  async updateIndigenousParity(
+    id: string,
+    dto: Partial<CreateIndigenousParityDto>,
+    userId: string,
+  ) {
+    const entity = await this.findOneOrFail(
+      this.indigenousRepo,
+      id,
+      'Indigenous parity',
+    );
+    if (dto.academic_year !== undefined)
+      entity.academicYear = dto.academic_year;
+    if (dto.indigenous_category !== undefined)
+      entity.indigenousCategory = dto.indigenous_category;
+    if (dto.subcategory !== undefined) entity.subcategory = dto.subcategory;
+    if (dto.total_participants !== undefined)
+      entity.totalParticipants = dto.total_participants;
+    if (dto.male_count !== undefined) entity.maleCount = dto.male_count;
+    if (dto.female_count !== undefined) entity.femaleCount = dto.female_count;
+    await this.em.flush();
+    this.logger.log(`GAD_PARITY_UPDATED: indigenous, id=${id}, by=${userId}`);
+    return entity;
+  }
+
+  removeIndigenousParity(id: string) {
+    return this.softDelete(this.indigenousRepo, id, 'Indigenous parity');
+  }
   reviewIndigenousParity(id: string, dto: ReviewParityDto, userId: string) {
-    return this.reviewParity('gad_indigenous_parity_data', id, dto, userId);
+    return this.reviewEntity(
+      this.indigenousRepo,
+      id,
+      dto,
+      userId,
+      'Indigenous parity',
+    );
   }
 
   // --- GPB Accomplishments ---
-  async findGpbAccomplishments(query: QueryPlanningDto): Promise<PaginatedResponse<any>> {
+  findGpbAccomplishments(
+    query: QueryPlanningDto,
+  ): Promise<PaginatedResponse<GadGpbAccomplishment>> {
     const { page = 1, limit = 20 } = query;
-    const offset = (page - 1) * limit;
-    const conditions: string[] = ['deleted_at IS NULL'];
-    const params: any[] = [];
-    let idx = 1;
-
-    if (query.year) { conditions.push(`year = $${idx++}`); params.push(query.year); }
-    if (query.category) { conditions.push(`category = $${idx++}`); params.push(query.category); }
-    if (query.status) { conditions.push(`status = $${idx++}`); params.push(query.status); }
-
-    const where = conditions.join(' AND ');
-    const countRes = await this.db.query(`SELECT COUNT(*) FROM gad_gpb_accomplishments WHERE ${where}`, params);
-    const total = parseInt(countRes.rows[0].count, 10);
-    const dataRes = await this.db.query(
-      `SELECT * FROM gad_gpb_accomplishments WHERE ${where} ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx}`,
-      [...params, limit, offset],
-    );
-    return createPaginatedResponse(dataRes.rows, total, page, limit);
+    const where: FilterQuery<GadGpbAccomplishment> = {};
+    if (query.year) where.year = query.year;
+    if (query.category) where.category = query.category;
+    if (query.status) where.status = query.status;
+    return this.findAllWithPagination(this.gpbRepo, where, page, limit);
   }
 
-  async createGpbAccomplishment(dto: CreateGpbAccomplishmentDto, userId: string): Promise<any> {
-    const result = await this.db.query(
-      `INSERT INTO gad_gpb_accomplishments (title, description, category, priority, status, target_beneficiaries, actual_beneficiaries, target_budget, actual_budget, year, responsible, submitted_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-      [dto.title, dto.description, dto.category, dto.priority, dto.status, dto.target_beneficiaries, dto.actual_beneficiaries, dto.target_budget, dto.actual_budget, dto.year, dto.responsible, userId],
+  async createGpbAccomplishment(
+    dto: CreateGpbAccomplishmentDto,
+    userId: string,
+  ) {
+    const entity = this.gpbRepo.create({
+      title: dto.title,
+      description: dto.description,
+      category: dto.category,
+      priority: dto.priority,
+      status: dto.status,
+      targetBeneficiaries: dto.target_beneficiaries,
+      actualBeneficiaries: dto.actual_beneficiaries,
+      targetBudget:
+        dto.target_budget != null ? String(dto.target_budget) : undefined,
+      actualBudget:
+        dto.actual_budget != null ? String(dto.actual_budget) : undefined,
+      year: dto.year,
+      responsible: dto.responsible,
+      submittedBy: userId,
+    });
+    await this.em.persist(entity).flush();
+    this.logger.log(
+      `GPB_ACCOMPLISHMENT_CREATED: id=${entity.id}, by=${userId}`,
     );
-    this.logger.log(`GPB_ACCOMPLISHMENT_CREATED: id=${result.rows[0].id}, by=${userId}`);
-    return result.rows[0];
+    return entity;
   }
 
-  async updateGpbAccomplishment(id: string, dto: Partial<CreateGpbAccomplishmentDto>, userId: string): Promise<any> {
-    return this.updateParity('gad_gpb_accomplishments', id, dto, userId);
+  async updateGpbAccomplishment(
+    id: string,
+    dto: Partial<CreateGpbAccomplishmentDto>,
+    userId: string,
+  ) {
+    const entity = await this.findOneOrFail(
+      this.gpbRepo,
+      id,
+      'GPB accomplishment',
+    );
+    if (dto.title !== undefined) entity.title = dto.title;
+    if (dto.description !== undefined) entity.description = dto.description;
+    if (dto.category !== undefined) entity.category = dto.category;
+    if (dto.priority !== undefined) entity.priority = dto.priority;
+    if (dto.status !== undefined) entity.status = dto.status;
+    if (dto.target_beneficiaries !== undefined)
+      entity.targetBeneficiaries = dto.target_beneficiaries;
+    if (dto.actual_beneficiaries !== undefined)
+      entity.actualBeneficiaries = dto.actual_beneficiaries;
+    if (dto.target_budget !== undefined)
+      entity.targetBudget =
+        dto.target_budget != null ? String(dto.target_budget) : undefined;
+    if (dto.actual_budget !== undefined)
+      entity.actualBudget =
+        dto.actual_budget != null ? String(dto.actual_budget) : undefined;
+    if (dto.year !== undefined) entity.year = dto.year;
+    if (dto.responsible !== undefined) entity.responsible = dto.responsible;
+    await this.em.flush();
+    this.logger.log(`GPB_ACCOMPLISHMENT_UPDATED: id=${id}, by=${userId}`);
+    return entity;
   }
 
   // --- Budget Plans ---
-  async findBudgetPlans(query: QueryPlanningDto): Promise<PaginatedResponse<any>> {
+  findBudgetPlans(
+    query: QueryPlanningDto,
+  ): Promise<PaginatedResponse<GadBudgetPlan>> {
     const { page = 1, limit = 20 } = query;
-    const offset = (page - 1) * limit;
-    const conditions: string[] = ['deleted_at IS NULL'];
-    const params: any[] = [];
-    let idx = 1;
-
-    if (query.year) { conditions.push(`year = $${idx++}`); params.push(query.year); }
-    if (query.category) { conditions.push(`category = $${idx++}`); params.push(query.category); }
-    if (query.status) { conditions.push(`status = $${idx++}`); params.push(query.status); }
-
-    const where = conditions.join(' AND ');
-    const countRes = await this.db.query(`SELECT COUNT(*) FROM gad_budget_plans WHERE ${where}`, params);
-    const total = parseInt(countRes.rows[0].count, 10);
-    const dataRes = await this.db.query(
-      `SELECT * FROM gad_budget_plans WHERE ${where} ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx}`,
-      [...params, limit, offset],
-    );
-    return createPaginatedResponse(dataRes.rows, total, page, limit);
+    const where: FilterQuery<GadBudgetPlan> = {};
+    if (query.year) where.year = query.year;
+    if (query.category) where.category = query.category;
+    if (query.status) where.status = query.status;
+    return this.findAllWithPagination(this.budgetRepo, where, page, limit);
   }
 
-  async createBudgetPlan(dto: CreateBudgetPlanDto, userId: string): Promise<any> {
-    const result = await this.db.query(
-      `INSERT INTO gad_budget_plans (title, description, category, priority, status, budget_allocated, budget_utilized, target_beneficiaries, start_date, end_date, year, responsible, submitted_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
-      [dto.title, dto.description, dto.category, dto.priority, dto.status, dto.budget_allocated, dto.budget_utilized, dto.target_beneficiaries, dto.start_date, dto.end_date, dto.year, dto.responsible, userId],
-    );
-    this.logger.log(`BUDGET_PLAN_CREATED: id=${result.rows[0].id}, by=${userId}`);
-    return result.rows[0];
+  async createBudgetPlan(dto: CreateBudgetPlanDto, userId: string) {
+    const entity = this.budgetRepo.create({
+      title: dto.title,
+      description: dto.description,
+      category: dto.category,
+      priority: dto.priority,
+      status: dto.status,
+      budgetAllocated:
+        dto.budget_allocated != null ? String(dto.budget_allocated) : undefined,
+      budgetUtilized:
+        dto.budget_utilized != null ? String(dto.budget_utilized) : undefined,
+      targetBeneficiaries: dto.target_beneficiaries,
+      startDate: dto.start_date ? new Date(dto.start_date) : undefined,
+      endDate: dto.end_date ? new Date(dto.end_date) : undefined,
+      year: dto.year,
+      responsible: dto.responsible,
+      submittedBy: userId,
+    });
+    await this.em.persist(entity).flush();
+    this.logger.log(`BUDGET_PLAN_CREATED: id=${entity.id}, by=${userId}`);
+    return entity;
   }
 
-  async updateBudgetPlan(id: string, dto: Partial<CreateBudgetPlanDto>, userId: string): Promise<any> {
-    return this.updateParity('gad_budget_plans', id, dto, userId);
+  async updateBudgetPlan(
+    id: string,
+    dto: Partial<CreateBudgetPlanDto>,
+    userId: string,
+  ) {
+    const entity = await this.findOneOrFail(this.budgetRepo, id, 'Budget plan');
+    if (dto.title !== undefined) entity.title = dto.title;
+    if (dto.description !== undefined) entity.description = dto.description;
+    if (dto.category !== undefined) entity.category = dto.category;
+    if (dto.priority !== undefined) entity.priority = dto.priority;
+    if (dto.status !== undefined) entity.status = dto.status;
+    if (dto.budget_allocated !== undefined)
+      entity.budgetAllocated =
+        dto.budget_allocated != null ? String(dto.budget_allocated) : undefined;
+    if (dto.budget_utilized !== undefined)
+      entity.budgetUtilized =
+        dto.budget_utilized != null ? String(dto.budget_utilized) : undefined;
+    if (dto.target_beneficiaries !== undefined)
+      entity.targetBeneficiaries = dto.target_beneficiaries;
+    if (dto.start_date !== undefined)
+      entity.startDate = dto.start_date ? new Date(dto.start_date) : undefined;
+    if (dto.end_date !== undefined)
+      entity.endDate = dto.end_date ? new Date(dto.end_date) : undefined;
+    if (dto.year !== undefined) entity.year = dto.year;
+    if (dto.responsible !== undefined) entity.responsible = dto.responsible;
+    await this.em.flush();
+    this.logger.log(`BUDGET_PLAN_UPDATED: id=${id}, by=${userId}`);
+    return entity;
   }
 }

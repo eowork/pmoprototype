@@ -3,7 +3,7 @@ import { useDisplay } from 'vuetify'
 
 const router = useRouter()
 const authStore = useAuthStore()
-const { canAccessAdmin, canManageUsers, canAccessModule, currentRole, isSuperAdmin } = usePermissions()
+const { canAccessAdmin, canManageUsers, canAccessModule, currentRole, isSuperAdmin, isContractor } = usePermissions()
 
 // Responsive drawer - closed on mobile, open on desktop
 const { mdAndUp } = useDisplay()
@@ -11,7 +11,6 @@ const drawer = ref(mdAndUp.value)
 
 // Dropdown expand states - persist in localStorage
 const referenceDataOpen = ref(false)
-const administrationOpen = ref(false)
 
 // Initialize states from localStorage
 onMounted(() => {
@@ -23,7 +22,6 @@ onMounted(() => {
     }
     // Dropdown states
     referenceDataOpen.value = localStorage.getItem('sidebar_referenceData') === 'true'
-    administrationOpen.value = localStorage.getItem('sidebar_administration') === 'true'
   }
 })
 
@@ -41,27 +39,22 @@ watch(referenceDataOpen, (val) => {
   }
 })
 
-watch(administrationOpen, (val) => {
-  if (import.meta.client) {
-    localStorage.setItem('sidebar_administration', String(val))
-  }
-})
-
 // Main operational modules - filtered by user permissions
 const mainModules = computed(() => {
+  // MMM-C: workflow-ordered — Dashboard → UO → Infrastructure → Repair → GAD
   const allModules = [
     { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/dashboard', key: 'dashboard' },
+    { title: 'University Operations', icon: 'mdi-school', to: '/university-operations', key: 'university_operations' },
     { title: 'Infrastructure Projects', icon: 'mdi-office-building', to: '/coi', key: 'coi' },
     { title: 'Repair Projects', icon: 'mdi-tools', to: '/repairs', key: 'repairs' },
-    { title: 'University Operations', icon: 'mdi-school', to: '/university-operations', key: 'university_operations' },
     { title: 'GAD Parity', icon: 'mdi-gender-male-female', to: '/gad', key: 'gad' },
   ]
 
   return allModules.filter(m => {
     // Dashboard always visible
     if (m.key === 'dashboard') return true
-    // GAD not yet in permission system, always show
-    if (m.key === 'gad') return true
+    // QA-B: GAD uses canAccessModule (contractors excluded via CONTRACTOR_ALLOWED_MODULES)
+    if (m.key === 'gad') return canAccessModule('gad')
     // Check module access
     return canAccessModule(m.key)
   })
@@ -80,19 +73,28 @@ const referenceData = computed(() => {
 // Check if any reference data modules are accessible
 const hasReferenceDataAccess = computed(() => referenceData.value.length > 0)
 
-// Administration - only visible to users with admin access
-const administration = computed(() => {
+// NNN-E: Administration split into two role-scoped groups.
+// Group 1 — Operations & Monitoring (Admin + SuperAdmin): daily operational workflows.
+const operationsItems = computed(() => {
   const items: Array<{ title: string; icon: string; to: string }> = []
-  // Pending Reviews - Admin can review submissions
   if (canAccessAdmin.value) {
     items.push({ title: 'Pending Reviews', icon: 'mdi-clipboard-check-outline', to: '/admin/pending-reviews' })
+    items.push({ title: 'COI Activity Logs', icon: 'mdi-history', to: '/coi/activity-logs' })
   }
-  // User Management
+  return items
+})
+
+// Group 2 — System Administration (gated by canManageUsers, SuperAdmin in practice): system setup.
+const systemAdminItems = computed(() => {
+  const items: Array<{ title: string; icon: string; to: string }> = []
   if (canManageUsers.value) {
     items.push({ title: 'User Management', icon: 'mdi-account-group', to: '/users' })
   }
   return items
 })
+
+const hasOperationsAccess = computed(() => operationsItems.value.length > 0)
+const hasSystemAdminAccess = computed(() => systemAdminItems.value.length > 0)
 
 async function handleLogout() {
   await authStore.logout()
@@ -116,8 +118,15 @@ async function handleLogout() {
       <v-menu>
         <template #activator="{ props }">
           <v-btn v-bind="props" variant="text">
+            <!-- NNN-F: avatar image when present, else initials fallback -->
             <v-avatar color="secondary" size="32" class="mr-2">
-              <span class="text-caption font-weight-bold text-primary">
+              <v-img
+                v-if="authStore.userAvatarUrl"
+                :src="authStore.userAvatarUrl"
+                alt="Profile"
+                cover
+              />
+              <span v-else class="text-caption font-weight-bold text-primary">
                 {{ authStore.userFullName?.charAt(0) || 'U' }}
               </span>
             </v-avatar>
@@ -139,9 +148,29 @@ async function handleLogout() {
             </template>
           </v-list-item>
           <v-divider />
+          <!-- MMM-E: account navigation (hidden for contractors) -->
+          <template v-if="!isContractor">
+            <v-list-item
+              prepend-icon="mdi-account-circle"
+              title="My Profile"
+              to="/profile"
+            />
+            <v-list-item
+              prepend-icon="mdi-cog-outline"
+              title="Account Settings"
+              to="/profile?tab=settings"
+            />
+            <v-list-item
+              prepend-icon="mdi-lock-reset"
+              title="Change Password"
+              to="/profile?tab=security"
+            />
+            <v-divider />
+          </template>
           <v-list-item
             prepend-icon="mdi-logout"
             title="Logout"
+            base-color="error"
             @click="handleLogout"
           />
         </v-list>
@@ -150,17 +179,19 @@ async function handleLogout() {
 
     <!-- Navigation Drawer -->
     <v-navigation-drawer v-model="drawer" elevation="1">
-      <!-- Logo Header - Horizontal Layout -->
-      <div class="d-flex align-center pa-3 ga-2">
+      <!-- Logo Header - Horizontal Layout
+           NNN-A: logo restored to 44×44 (branding proportions preserved per Section C1);
+           horizontal gap kept at me-1 (~50% reduction from original me-2). -->
+      <div class="d-flex align-center px-2 py-2">
         <v-img
           src="/csu-logo.svg"
           alt="CSU Logo"
           width="44"
           height="44"
-          class="flex-shrink-0"
+          class="flex-shrink-0 me-1"
         />
-        <span class="font-weight-bold text-grey-darken-2 text-align-left sidebar-header-text">
-        Caraga State University
+        <span class="font-weight-bold text-darken-2 sidebar-header-text">
+          Caraga State University
         </span>
       </div>
 
@@ -208,36 +239,45 @@ async function handleLogout() {
         </v-list>
       </template>
 
-      <!-- Administration (SuperAdmin only, Collapsible Dropdown) -->
-      <template v-if="canAccessAdmin">
+      <!-- NNN-E: Operations & Monitoring (Admin + SuperAdmin) -->
+      <template v-if="hasOperationsAccess">
         <v-divider class="my-2" />
         <v-list nav density="comfortable">
-          <v-list-group v-model="administrationOpen" value="administration">
-            <template #activator="{ props }">
-              <v-list-item
-                v-bind="props"
-                prepend-icon="mdi-shield-account"
-                title="Administration"
-                color="primary"
-              />
-            </template>
-            <v-list-item
-              v-for="item in administration"
-              :key="item.to"
-              :to="item.to"
-              :prepend-icon="item.icon"
-              :title="item.title"
-              color="primary"
-              rounded="lg"
-              class="mb-1"
-            />
-          </v-list-group>
+          <v-list-subheader>OPERATIONS &amp; MONITORING</v-list-subheader>
+          <v-list-item
+            v-for="item in operationsItems"
+            :key="item.to"
+            :to="item.to"
+            :prepend-icon="item.icon"
+            :title="item.title"
+            color="primary"
+            rounded="lg"
+            class="mb-1"
+          />
+        </v-list>
+      </template>
+
+      <!-- NNN-E: System Administration (SuperAdmin / user-management access) -->
+      <template v-if="hasSystemAdminAccess">
+        <v-divider class="my-2" />
+        <v-list nav density="comfortable">
+          <v-list-subheader>SYSTEM ADMINISTRATION</v-list-subheader>
+          <v-list-item
+            v-for="item in systemAdminItems"
+            :key="item.to"
+            :to="item.to"
+            :prepend-icon="item.icon"
+            :title="item.title"
+            color="primary"
+            rounded="lg"
+            class="mb-1"
+          />
         </v-list>
       </template>
     </v-navigation-drawer>
 
-    <!-- Main Content -->
-    <v-main>
+    <!-- Main Content — NNN-B: subtle grey background so white cards visibly float -->
+    <v-main class="bg-grey-lighten-5">
       <v-container fluid class="pa-4">
         <slot />
       </v-container>

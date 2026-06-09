@@ -2,7 +2,9 @@ import { PartialType } from '@nestjs/mapped-types';
 import { CreateRepairProjectDto } from './create-repair-project.dto';
 import { IsOptional, IsNumber, Min, Max, IsUUID } from 'class-validator';
 
-export class UpdateRepairProjectDto extends PartialType(CreateRepairProjectDto) {
+export class UpdateRepairProjectDto extends PartialType(
+  CreateRepairProjectDto,
+) {
   @IsOptional()
   @IsNumber()
   @Min(0)

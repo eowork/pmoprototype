@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
+import { MikroOrmModule } from '@mikro-orm/nestjs';
 import { DepartmentsController } from './departments.controller';
 import { DepartmentsService } from './departments.service';
-import { DatabaseModule } from '../database/database.module';
+import { Department, UserDepartment } from '../database/entities';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [MikroOrmModule.forFeature([Department, UserDepartment])],
   controllers: [DepartmentsController],
   providers: [DepartmentsService],
   exports: [DepartmentsService],

@@ -10,8 +10,15 @@ nul
 .claude/
 .trae/
 
+# MCP configuration files (may contain API keys)
+.vscode/mcp.json
+.mcp.json
+
 # Runtime / operational artifacts (not source code)
 database/backups/
 database/staging/
 pmo-backend/uploads/
 prototype/
+
+# Local-only documentation (research, planning, internal notes — not shared via Git)
+docs/

@@ -40,8 +40,18 @@ export class UploadsService {
     }
 
     // Check for executable extensions
-    const dangerousExtensions = ['.exe', '.sh', '.bat', '.cmd', '.ps1', '.vbs', '.js'];
-    const ext = file.originalname.toLowerCase().slice(file.originalname.lastIndexOf('.'));
+    const dangerousExtensions = [
+      '.exe',
+      '.sh',
+      '.bat',
+      '.cmd',
+      '.ps1',
+      '.vbs',
+      '.js',
+    ];
+    const ext = file.originalname
+      .toLowerCase()
+      .slice(file.originalname.lastIndexOf('.'));
     if (dangerousExtensions.includes(ext)) {
       throw new BadRequestException(
         `File extension ${ext} is not allowed for security reasons`,

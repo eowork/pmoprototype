@@ -4,6 +4,16 @@ export default defineNuxtConfig({
   compatibilityDate: '2024-11-01',
   devtools: { enabled: true },
 
+  // OB (2026-05-21): Disable Nuxt's default path-prefix for nested component dirs.
+  // Without this, components/coi/CiFoo.vue auto-resolves as <CoiCiFoo> not <CiFoo>,
+  // causing silent render failures for any component used as a bare tag.
+  // Safe: all coi/ components already use the "Ci" prefix — no basename collisions.
+  components: {
+    dirs: [
+      { path: '~/components', pathPrefix: false },
+    ],
+  },
+
   build: {
     transpile: ['vuetify'],
   },
@@ -44,11 +54,21 @@ export default defineNuxtConfig({
 
   ssr: false, // SPA mode for admin dashboard (auth-required pages)
 
-  // Dev proxy to forward /api requests to NestJS backend
+  // Dev proxy: /api → NestJS backend; /uploads → NestJS static file server (KY-A3)
   nitro: {
     devProxy: {
       '/api': {
         target: 'http://localhost:3000/api',
+        changeOrigin: true,
+      },
+      '/uploads': {
+        target: 'http://localhost:3000/uploads',
+        changeOrigin: true,
+      },
+      // UUU-A: Serve seeded document templates from NestJS static dir (/templates).
+      // Without this, template download links hit the Nuxt dev server and 404.
+      '/templates': {
+        target: 'http://localhost:3000/templates',
         changeOrigin: true,
       },
     },

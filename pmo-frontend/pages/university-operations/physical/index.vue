@@ -11,6 +11,7 @@
  */
 
 import type { PublicationStatus } from '~/utils/adapters'
+import { getPublicationStatusColor } from '~/utils/status-colors'
 // Phase DQ-A: VueApexCharts removed — analytics belong on main module page only
 
 definePageMeta({
@@ -544,16 +545,6 @@ async function handleMovFileUpload(event: Event) {
 }
 
 // Publication status helpers
-function getPublicationStatusColor(status: PublicationStatus | string): string {
-  const colors: Record<string, string> = {
-    DRAFT: 'grey',
-    PENDING_REVIEW: 'orange',
-    PUBLISHED: 'success',
-    REJECTED: 'error',
-    FETCH_ERROR: 'warning',
-  }
-  return colors[status] || 'grey'
-}
 
 function getPublicationStatusLabel(status: PublicationStatus | string): string {
   const labels: Record<string, string> = {

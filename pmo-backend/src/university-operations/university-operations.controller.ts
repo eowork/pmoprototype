@@ -94,7 +94,11 @@ export class UniversityOperationsController {
     @Query('quarter') quarter?: string,
   ) {
     if (pillarType && fiscalYear) {
-      return this.service.findIndicatorsByPillarAndYear(pillarType, fiscalYear, quarter);
+      return this.service.findIndicatorsByPillarAndYear(
+        pillarType,
+        fiscalYear,
+        quarter,
+      );
     }
     // Fallback: return empty if no pillar_type specified
     return [];
@@ -130,7 +134,12 @@ export class UniversityOperationsController {
   @Get('analytics/yearly-comparison')
   getYearlyComparison(@Query('years') years: string) {
     // Parse comma-separated years (e.g., "2024,2025,2026")
-    const yearList = years ? years.split(',').map((y) => parseInt(y.trim(), 10)).filter((y) => !isNaN(y)) : [];
+    const yearList = years
+      ? years
+          .split(',')
+          .map((y) => parseInt(y.trim(), 10))
+          .filter((y) => !isNaN(y))
+      : [];
     return this.service.getYearlyComparison(yearList);
   }
 
@@ -151,7 +160,12 @@ export class UniversityOperationsController {
 
   @Get('analytics/financial-yearly-comparison')
   getFinancialYearlyComparison(@Query('years') years: string) {
-    const yearList = years ? years.split(',').map((y) => parseInt(y.trim(), 10)).filter((y) => !isNaN(y)) : [];
+    const yearList = years
+      ? years
+          .split(',')
+          .map((y) => parseInt(y.trim(), 10))
+          .filter((y) => !isNaN(y))
+      : [];
     return this.service.getFinancialYearlyComparison(yearList);
   }
 
@@ -215,10 +229,7 @@ export class UniversityOperationsController {
 
   @Get('quarterly-reports')
   findQuarterlyReports(@Query() query: QueryQuarterlyReportsDto) {
-    return this.service.findQuarterlyReports(
-      query.fiscal_year,
-      query.quarter,
-    );
+    return this.service.findQuarterlyReports(query.fiscal_year, query.quarter);
   }
 
   @Get('quarterly-reports/pending-review')
@@ -245,7 +256,20 @@ export class UniversityOperationsController {
     @CurrentUser() user: JwtPayload,
     @Query() query: QueryQuarterlyReportsDto,
   ) {
-    return this.service.findSubmissionHistory(user, query.fiscal_year, query.quarter);
+    return this.service.findSubmissionHistory(
+      user,
+      query.fiscal_year,
+      query.quarter,
+    );
+  }
+
+  @Get('quarterly-reports/:id/history')
+  @Roles('Admin')
+  getQuarterlyReportHistory(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.findQuarterlyReportHistory(id, user);
   }
 
   @Get('quarterly-reports/:id')
@@ -446,6 +470,32 @@ export class UniversityOperationsController {
     return this.service.withdrawQuarter(id, quarter, user.sub);
   }
 
+  // ─── Phase IJ: Assignment CRUD ────────────────────────────────────────────────
+
+  @Get(':id/assignments')
+  getAssignments(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.getOperationAssignments(id);
+  }
+
+  @Post(':id/assignments')
+  @HttpCode(HttpStatus.CREATED)
+  addAssignment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('user_id') userId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.addOperationAssignment(id, userId, user.sub);
+  }
+
+  @Delete(':id/assignments/:userId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  removeAssignment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return this.service.removeOperationAssignment(id, userId);
+  }
+
   @Patch(':id')
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -458,7 +508,10 @@ export class UniversityOperationsController {
   @Delete(':id')
   @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.remove(id, user.sub);
   }
 
@@ -507,7 +560,13 @@ export class UniversityOperationsController {
     @Body() dto: Partial<CreateIndicatorQuarterlyDto>,
     @CurrentUser() user: JwtPayload,
   ) {
-    return this.service.updateIndicatorQuarterlyData(id, indicatorId, dto, user.sub, user);
+    return this.service.updateIndicatorQuarterlyData(
+      id,
+      indicatorId,
+      dto,
+      user.sub,
+      user,
+    );
   }
 
   /**
@@ -556,7 +615,13 @@ export class UniversityOperationsController {
     @Query('fund_type') fundType?: FundType,
     @Query('expense_class') expenseClass?: string,
   ) {
-    return this.service.findFinancials(id, fiscalYear, quarter, fundType, expenseClass);
+    return this.service.findFinancials(
+      id,
+      fiscalYear,
+      quarter,
+      fundType,
+      expenseClass,
+    );
   }
 
   // Phase CN: Financial CRUD with ownership + publication status validation
@@ -607,5 +672,4 @@ export class UniversityOperationsController {
   ) {
     return this.service.updateOrganizationalInfo(id, dto, user.sub);
   }
-
 }

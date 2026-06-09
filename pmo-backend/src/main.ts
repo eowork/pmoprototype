@@ -1,13 +1,29 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { GlobalExceptionFilter } from './common/filters';
 import { LoggingInterceptor } from './common/interceptors';
+import { join } from 'path';
+import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // KY-A1: Serve uploaded files as static assets at /uploads prefix
+  const configService = app.get(ConfigService);
+  const uploadDir = configService.get<string>('UPLOAD_DIR', './uploads');
+  const absoluteUploadDir = join(process.cwd(), uploadDir);
+  app.useStaticAssets(absoluteUploadDir, { prefix: '/uploads' });
+
+  // LLL-E3: Serve seeded document templates (public, no auth) at /templates prefix.
+  // Files live in pmo-backend/public/templates/{type_code}.docx — see
+  // Migration20260601010000_SeedDocumentTypeTemplateUrls which seeds template_url.
+  app.useStaticAssets(join(process.cwd(), 'public', 'templates'), {
+    prefix: '/templates',
+  });
 
   // Enable CORS for frontend integration (future)
   app.enableCors();
@@ -38,7 +54,9 @@ async function bootstrap() {
   // Swagger/OpenAPI documentation
   const config = new DocumentBuilder()
     .setTitle('PMO Dashboard API')
-    .setDescription('Project Management Office REST API for managing construction projects, repairs, university operations, and administrative functions.')
+    .setDescription(
+      'Project Management Office REST API for managing construction projects, repairs, university operations, and administrative functions.',
+    )
     .setVersion('2.8.0')
     .addBearerAuth(
       {
@@ -61,7 +79,10 @@ async function bootstrap() {
     .addTag('Reference: Funding Sources', 'Funding source reference data')
     .addTag('Reference: Departments', 'Department reference data')
     .addTag('Reference: Repair Types', 'Repair type reference data')
-    .addTag('Reference: Subcategories', 'Construction subcategory reference data')
+    .addTag(
+      'Reference: Subcategories',
+      'Construction subcategory reference data',
+    )
     .addTag('System Settings', 'System configuration settings')
     .addTag('File Uploads', 'File upload management')
     .addTag('Documents', 'Document attachment management')

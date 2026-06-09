@@ -44,7 +44,10 @@ export class ConstructionSubcategoriesController {
   @Post()
   @Roles('Admin')
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() dto: CreateConstructionSubcategoryDto, @CurrentUser() user: JwtPayload) {
+  create(
+    @Body() dto: CreateConstructionSubcategoryDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.create(dto, user.sub);
   }
 
@@ -61,7 +64,10 @@ export class ConstructionSubcategoriesController {
   @Delete(':id')
   @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.remove(id, user.sub);
   }
 }

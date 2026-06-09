@@ -18,7 +18,7 @@ export interface ModulePermissions {
   canDelete: boolean
 }
 
-export type RoleName = 'SuperAdmin' | 'Admin' | 'Staff' | 'Viewer' | string
+export type RoleName = 'SuperAdmin' | 'Admin' | 'Staff' | 'Viewer' | 'Auditor' | string
 
 /**
  * Module key mapping for consistency between routes and overrides
@@ -51,7 +51,15 @@ const ROLE_PERMISSIONS: Record<RoleName, ModulePermissions> = {
   Admin: { canView: true, canAdd: true, canEdit: true, canDelete: true },
   Staff: { canView: true, canAdd: true, canEdit: true, canDelete: false },
   Viewer: { canView: true, canAdd: false, canEdit: false, canDelete: false },
+  // Phase JT-E: read-only role with activity-log access (see canViewActivityLog).
+  Auditor: { canView: true, canAdd: false, canEdit: false, canDelete: false },
 }
+
+// Phase JT-E-3 — Restricted Editor (section overrides) — DESIGN ONLY (no enforcement here).
+// Override keys: 'coi:contract', 'coi:progress', 'coi:documents', 'coi:personnel'.
+// Pattern: moduleOverrides['coi:contract'] === true → allow contract section actions
+// regardless of base role. Enforcement deferred to a follow-up phase per JT-D4.
+// Example consumer (future): v-if="canEditCurrentProject || moduleOverrides['coi:contract']"
 
 /**
  * Modules that require Admin or SuperAdmin access by default (no override)
@@ -72,6 +80,9 @@ const ADMIN_ONLY_MODULES = ['users', 'contractors', 'funding-sources', 'funding_
  * contractor/funding source data via form dropdowns or API calls.
  */
 const REFERENCE_DATA_MODULES = ['contractors', 'funding-sources', 'funding_sources']
+
+// QA-A: Modules contractors are permitted to access (sidebar + route guard)
+const CONTRACTOR_ALLOWED_MODULES = ['coi', 'dashboard']
 
 export function usePermissions() {
   const authStore = useAuthStore()
@@ -111,7 +122,16 @@ export function usePermissions() {
     if (roleName.toLowerCase() === 'admin') return 'Admin'
     if (roleName.toLowerCase() === 'staff') return 'Staff'
     if (roleName.toLowerCase() === 'viewer') return 'Viewer'
+    if (roleName.toLowerCase() === 'auditor') return 'Auditor'
     return roleName || 'Viewer' // Default to Viewer for unknown roles
+  })
+
+  /**
+   * QA-A: Check if current user is a Contractor
+   * Contractors have scoped project access — COI + Dashboard only.
+   */
+  const isContractor = computed(() => {
+    return currentRole.value === 'Contractor'
   })
 
   /**
@@ -170,6 +190,11 @@ export function usePermissions() {
   function canAccessModule(moduleId: string): boolean {
     // SuperAdmin bypasses all checks
     if (isSuperAdmin.value) return true
+
+    // QA-A: Contractors see only their permitted modules — no override bypass
+    if (isContractor.value) {
+      return CONTRACTOR_ALLOWED_MODULES.includes(moduleId.toLowerCase())
+    }
 
     // Check for user override first
     const override = getModuleOverride(moduleId)
@@ -282,6 +307,15 @@ export function usePermissions() {
   }
 
   /**
+   * Phase JT-E-2: Activity log access — SuperAdmin, Admin, or Auditor only.
+   */
+  function canViewActivityLog(): boolean {
+    if (isSuperAdmin.value) return true
+    const role = currentRole.value
+    return role === 'Admin' || role === 'Auditor'
+  }
+
+  /**
    * Check if user can access administration section
    */
   const canAccessAdmin = computed(() => {
@@ -300,6 +334,7 @@ export function usePermissions() {
     isSuperAdmin,
     isAdmin,
     isStaff,
+    isContractor,
     currentRole,
     rankLevel,
 
@@ -315,6 +350,7 @@ export function usePermissions() {
     canEdit,
     canDelete,
     canApprove,
+    canViewActivityLog,
 
     // Special permissions
     canAccessAdmin,

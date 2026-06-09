@@ -22,6 +22,13 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => !!token.value)
   const userFullName = computed(() => user.value?.fullName || '')
   const userEmail = computed(() => user.value?.email || '')
+  // NNN-F: avatar URL surfaced for app-bar + profile page
+  const userAvatarUrl = computed(() => user.value?.avatarUrl || '')
+
+  // NNN-I: merge a partial profile update into the cached user (after PATCH /auth/me)
+  function patchUser(partial: Partial<UIUser>): void {
+    if (user.value) user.value = { ...user.value, ...partial }
+  }
 
   // Actions
   async function login(identifier: string, password: string): Promise<void> {
@@ -35,6 +42,10 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('access_token', response.access_token)
     }
     user.value = adaptUser(response.user)
+    // VG-B: load per-project permission map for stateless render-time access
+    if (import.meta.client) {
+      await useProjectPermissionsStore().fetch()
+    }
   }
 
   async function logout(): Promise<void> {
@@ -47,6 +58,8 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = null
       if (import.meta.client) {
         localStorage.removeItem('access_token')
+        // VG-B: clear cached project permissions on logout
+        useProjectPermissionsStore().clear()
       }
     }
   }
@@ -57,6 +70,10 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const backendUser = await api.get<BackendUser>('/api/auth/me')
       user.value = adaptUser(backendUser)
+      // VG-B: load per-project permission map for stateless render-time access
+      if (import.meta.client) {
+        await useProjectPermissionsStore().fetch()
+      }
     } catch (err: any) {
       if (err?.statusCode === 401) {
         token.value = null
@@ -104,11 +121,13 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     userFullName,
     userEmail,
+    userAvatarUrl,
     // Actions
     login,
     loginWithToken,
     logout,
     fetchCurrentUser,
+    patchUser,
     hasPermission,
     hasAnyPermission,
     initialize,

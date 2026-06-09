@@ -4,152 +4,143 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
-import { DatabaseService } from '../database/database.service';
+import { InjectRepository } from '@mikro-orm/nestjs';
+import { EntityRepository, EntityManager } from '@mikro-orm/core';
+import type { FilterQuery } from '@mikro-orm/core';
 import { createPaginatedResponse, PaginatedResponse } from '../common/dto';
 import { CreateProjectDto, UpdateProjectDto, QueryProjectDto } from './dto';
+import { Project } from '../database/entities';
 
 @Injectable()
 export class ProjectsService {
   private readonly logger = new Logger(ProjectsService.name);
-  private readonly ALLOWED_SORTS = ['created_at', 'title', 'status', 'start_date', 'end_date', 'project_code'];
+  private readonly ALLOWED_SORTS = [
+    'createdAt',
+    'title',
+    'status',
+    'startDate',
+    'endDate',
+    'projectCode',
+  ];
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    @InjectRepository(Project)
+    private readonly repo: EntityRepository<Project>,
+    private readonly em: EntityManager,
+  ) {}
 
-  async findAll(query: QueryProjectDto): Promise<PaginatedResponse<any>> {
-    const { page = 1, limit = 20, sort = 'created_at', order = 'desc' } = query;
-    const offset = (page - 1) * limit;
+  async findAll(query: QueryProjectDto): Promise<PaginatedResponse<Project>> {
+    const { page = 1, limit = 20, sort = 'createdAt', order = 'desc' } = query;
 
-    const sortColumn = this.ALLOWED_SORTS.includes(sort) ? sort : 'created_at';
-    const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const sortKey = this.ALLOWED_SORTS.includes(sort) ? sort : 'createdAt';
+    const sortOrder = (order.toLowerCase() === 'asc' ? 'asc' : 'desc') as
+      | 'asc'
+      | 'desc';
 
-    const conditions: string[] = ['deleted_at IS NULL'];
-    const params: any[] = [];
-    let paramIndex = 1;
+    const where: FilterQuery<Project> = {};
+    if (query.type) where.projectType = query.type;
+    if (query.status) where.status = query.status;
+    if (query.campus) where.campus = query.campus;
 
-    if (query.type) {
-      conditions.push(`project_type = $${paramIndex++}`);
-      params.push(query.type);
-    }
-    if (query.status) {
-      conditions.push(`status = $${paramIndex++}`);
-      params.push(query.status);
-    }
-    if (query.campus) {
-      conditions.push(`campus = $${paramIndex++}`);
-      params.push(query.campus);
-    }
+    const [items, total] = await this.repo.findAndCount(where, {
+      limit,
+      offset: (page - 1) * limit,
+      orderBy: { [sortKey]: sortOrder },
+    });
 
-    const whereClause = conditions.join(' AND ');
-
-    const countResult = await this.db.query(
-      `SELECT COUNT(*) FROM projects WHERE ${whereClause}`,
-      params,
-    );
-    const total = parseInt(countResult.rows[0].count, 10);
-
-    const dataResult = await this.db.query(
-      `SELECT id, project_code, title, description, project_type, start_date, end_date,
-              status, budget, campus, created_at, updated_at
-       FROM projects
-       WHERE ${whereClause}
-       ORDER BY ${sortColumn} ${sortOrder}
-       LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
-      [...params, limit, offset],
-    );
-
-    return createPaginatedResponse(dataResult.rows, total, page, limit);
+    return createPaginatedResponse(items, total, page, limit);
   }
 
-  async findOne(id: string): Promise<any> {
-    const result = await this.db.query(
-      `SELECT * FROM projects WHERE id = $1 AND deleted_at IS NULL`,
-      [id],
-    );
-
-    if (result.rows.length === 0) {
+  async findOne(id: string): Promise<Project> {
+    const entity = await this.repo.findOne({ id });
+    if (!entity) {
       throw new NotFoundException(`Project with ID ${id} not found`);
     }
-
-    return result.rows[0];
+    return entity;
   }
 
-  async create(dto: CreateProjectDto, userId: string): Promise<any> {
-    // Check for duplicate project_code
-    const existing = await this.db.query(
-      `SELECT id FROM projects WHERE project_code = $1 AND deleted_at IS NULL`,
-      [dto.project_code],
-    );
-    if (existing.rows.length > 0) {
-      throw new ConflictException(`Project code ${dto.project_code} already exists`);
+  async create(dto: CreateProjectDto, userId: string): Promise<Project> {
+    const existing = await this.repo.findOne({ projectCode: dto.project_code });
+    if (existing) {
+      throw new ConflictException(
+        `Project code ${dto.project_code} already exists`,
+      );
     }
 
-    const result = await this.db.query(
-      `INSERT INTO projects
-       (project_code, title, description, project_type, start_date, end_date, status, budget, campus, metadata, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING *`,
-      [
-        dto.project_code,
-        dto.title,
-        dto.description,
-        dto.project_type,
-        dto.start_date,
-        dto.end_date,
-        dto.status,
-        dto.budget,
-        dto.campus,
-        dto.metadata ? JSON.stringify(dto.metadata) : null,
-        userId,
-      ],
-    );
+    const entity = this.repo.create({
+      projectCode: dto.project_code,
+      title: dto.title,
+      description: dto.description,
+      projectType: dto.project_type,
+      startDate: dto.start_date ? new Date(dto.start_date) : undefined,
+      endDate: dto.end_date ? new Date(dto.end_date) : undefined,
+      status: dto.status,
+      budget: dto.budget != null ? String(dto.budget) : undefined,
+      campus: dto.campus,
+      metadata: dto.metadata,
+      createdBy: userId,
+    });
 
-    this.logger.log(`PROJECT_CREATED: id=${result.rows[0].id}, by=${userId}`);
-    return result.rows[0];
+    await this.em.persist(entity).flush();
+    this.logger.log(`PROJECT_CREATED: id=${entity.id}, by=${userId}`);
+    return entity;
   }
 
-  async update(id: string, dto: UpdateProjectDto, userId: string): Promise<any> {
-    await this.findOne(id);
+  async update(
+    id: string,
+    dto: UpdateProjectDto,
+    userId: string,
+  ): Promise<Project> {
+    const entity = await this.findOne(id);
 
-    // Check for duplicate project_code if updating
     const dtoAny = dto as any;
-    if (dtoAny.project_code) {
-      const existing = await this.db.query(
-        `SELECT id FROM projects WHERE project_code = $1 AND id != $2 AND deleted_at IS NULL`,
-        [dtoAny.project_code, id],
-      );
-      if (existing.rows.length > 0) {
-        throw new ConflictException(`Project code ${dtoAny.project_code} already exists`);
+    if (dtoAny.project_code && dtoAny.project_code !== entity.projectCode) {
+      const existing = await this.repo.findOne({
+        projectCode: dtoAny.project_code,
+        id: { $ne: id },
+      });
+      if (existing) {
+        throw new ConflictException(
+          `Project code ${dtoAny.project_code} already exists`,
+        );
       }
     }
 
-    const fields = Object.keys(dto).filter((k) => dto[k] !== undefined);
-    if (fields.length === 0) {
-      return this.findOne(id);
-    }
+    if (dtoAny.project_code !== undefined)
+      entity.projectCode = dtoAny.project_code;
+    if (dto.title !== undefined) entity.title = dto.title;
+    if (dto.description !== undefined) entity.description = dto.description;
+    if (dtoAny.project_type !== undefined)
+      entity.projectType = dtoAny.project_type;
+    if (dtoAny.start_date !== undefined)
+      entity.startDate = dtoAny.start_date
+        ? new Date(dtoAny.start_date)
+        : undefined;
+    if (dtoAny.end_date !== undefined)
+      entity.endDate = dtoAny.end_date ? new Date(dtoAny.end_date) : undefined;
+    if (dto.status !== undefined) entity.status = dto.status;
+    if (dto.budget !== undefined)
+      entity.budget = dto.budget != null ? String(dto.budget) : undefined;
+    if (dto.campus !== undefined) entity.campus = dto.campus;
+    if (dto.metadata !== undefined) entity.metadata = dto.metadata;
+    entity.updatedBy = userId;
 
-    const setClause = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
-    const values = fields.map((f) => (f === 'metadata' ? JSON.stringify(dto[f]) : dto[f]));
+    await this.em.flush();
 
-    const result = await this.db.query(
-      `UPDATE projects
-       SET ${setClause}, updated_by = $${fields.length + 1}, updated_at = NOW()
-       WHERE id = $${fields.length + 2} AND deleted_at IS NULL
-       RETURNING *`,
-      [...values, userId, id],
+    const fields = Object.keys(dto).filter(
+      (k) => (dto as any)[k] !== undefined,
     );
-
-    this.logger.log(`PROJECT_UPDATED: id=${id}, by=${userId}, fields=[${fields.join(',')}]`);
-    return result.rows[0];
+    this.logger.log(
+      `PROJECT_UPDATED: id=${id}, by=${userId}, fields=[${fields.join(',')}]`,
+    );
+    return entity;
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    await this.findOne(id);
-
-    await this.db.query(
-      `UPDATE projects SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
-      [userId, id],
-    );
-
+    const entity = await this.findOne(id);
+    entity.deletedAt = new Date();
+    entity.deletedBy = userId;
+    await this.em.flush();
     this.logger.log(`PROJECT_DELETED: id=${id}, by=${userId}`);
   }
 }

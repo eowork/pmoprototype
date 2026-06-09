@@ -6,7 +6,7 @@ import { OperationType, ProjectStatus, Campus } from '../../common/enums';
 export class QueryOperationDto extends PaginationDto {
   @IsOptional()
   @IsEnum(OperationType)
-  type?: OperationType;
+  operation_type?: OperationType;
 
   @IsOptional()
   @IsEnum(ProjectStatus)

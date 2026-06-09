@@ -1,4 +1,11 @@
-import { IsString, IsBoolean, IsIn, IsArray, ValidateNested, IsOptional } from 'class-validator';
+import {
+  IsString,
+  IsBoolean,
+  IsIn,
+  IsArray,
+  ValidateNested,
+  IsOptional,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -15,7 +22,7 @@ export const VALID_MODULE_KEYS = [
   'users',
 ] as const;
 
-export type ModuleKey = typeof VALID_MODULE_KEYS[number];
+export type ModuleKey = (typeof VALID_MODULE_KEYS)[number];
 
 export class SetPermissionOverrideDto {
   @ApiProperty({
@@ -56,7 +63,8 @@ export class BulkPermissionUpdateItem {
   module_key: ModuleKey;
 
   @ApiProperty({
-    description: 'Access permission: true=grant, false=revoke, null=remove override (use role default)',
+    description:
+      'Access permission: true=grant, false=revoke, null=remove override (use role default)',
     example: true,
     nullable: true,
   })
@@ -112,7 +120,8 @@ export class BulkCrossUserAccessDto {
   action: 'grant' | 'revoke';
 
   @ApiProperty({
-    description: 'Key identifying the resource (module_key, module type, or pillar_type)',
+    description:
+      'Key identifying the resource (module_key, module type, or pillar_type)',
     example: 'university_operations',
   })
   @IsString()

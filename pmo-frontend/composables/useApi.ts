@@ -136,6 +136,36 @@ export function useApi() {
     }
   }
 
+  // CCC-A: Authenticated blob download — preserves original filename via the
+  // backend Content-Disposition header; falls back to the passed name.
+  async function download(endpoint: string, fileName: string): Promise<void> {
+    const token = import.meta.client ? localStorage.getItem('access_token') : null
+    const baseUrl = config.public.apiBase
+    const response = await fetch(`${baseUrl}${endpoint}`, {
+      method: 'GET',
+      headers: { ...(token && { Authorization: `Bearer ${token}` }) },
+    })
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type') || ''
+      const errorData = contentType.includes('application/json')
+        ? await response.json().catch(() => ({}))
+        : {}
+      throw {
+        message: (errorData as ApiError).message || `Download error ${response.status}`,
+        statusCode: response.status,
+      }
+    }
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName || 'download'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
   return {
     loading,
     error,
@@ -146,5 +176,6 @@ export function useApi() {
     patch,
     del,
     upload,
+    download,
   }
 }

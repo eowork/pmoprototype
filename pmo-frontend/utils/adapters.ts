@@ -9,6 +9,21 @@
 // Publication status type for draft governance
 export type PublicationStatus = 'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'REJECTED'
 
+// HHH-E: Recursive folder tree node (backed by construction_document_folders table)
+// nodeType values must match backend DTO: CONTAINER | FORM | TEMPLATE | SUBMISSIONS
+export interface FolderNode {
+  id: string
+  projectId: string
+  parentId: string | null
+  folderName: string
+  groupCode: string | null
+  nodeType: 'CONTAINER' | 'FORM' | 'TEMPLATE' | 'SUBMISSIONS' | string
+  sortOrder: number
+  children: FolderNode[]
+  createdAt: string
+  updatedAt: string
+}
+
 // Approval metadata interface for draft governance workflow
 export interface ApprovalMetadata {
   createdBy: string | null
@@ -37,6 +52,13 @@ export interface BackendProject {
   contractor_name?: string
   start_date?: string
   end_date?: string
+  // LLL-C: list endpoint now also returns these for advanced index filtering
+  project_code?: string
+  original_start_date?: string
+  revised_start_date?: string
+  original_completion_date?: string
+  revised_completion_date?: string
+  project_duration?: string
   publication_status?: PublicationStatus
   created_by?: string
   created_by_name?: string
@@ -54,7 +76,18 @@ export interface BackendProject {
   assigned_to?: string
   assigned_to_name?: string
   // Phase AW: Multi-select assignment
-  assigned_users?: { id: string; name: string }[]
+  assigned_users?: {
+    id: string
+    name: string
+    email?: string | null
+    role?: string | null
+    department?: string | null
+    phone?: string | null
+    personnel_category?: string | null
+    project_role?: string | null
+    permissions?: Record<string, any> | null
+    user_role?: string | null
+  }[]
 }
 
 export interface BackendUser {
@@ -70,6 +103,13 @@ export interface BackendUser {
   rank_level?: number
   campus?: string  // Phase Y: Office-scoped visibility
   role?: { name: string }
+  // NNN-F/H: surfaced from /api/auth/me for avatar + profile page
+  avatar_url?: string
+  phone?: string
+  display_name?: string
+  last_login_at?: string
+  last_password_change_at?: string
+  is_sso?: boolean
 }
 
 // Frontend UI-expected shapes
@@ -84,6 +124,13 @@ export interface UIProject {
   contractor: string
   startDate: string
   endDate: string
+  // LLL-C: surfaced on the list type for advanced index filtering
+  projectCode: string
+  originalStartDate: string
+  revisedStartDate: string
+  originalCompletionDate: string
+  revisedCompletionDate: string
+  projectDuration: string
   publicationStatus: PublicationStatus
   createdBy: string
   createdAt: string
@@ -93,7 +140,18 @@ export interface UIProject {
   delegatedTo: string
   delegatedToName: string
   // Phase AW: Multi-select assignment
-  assignedUsers: { id: string; name: string }[]
+  assignedUsers: {
+    id: string
+    name: string
+    email?: string | null
+    role?: string | null
+    department?: string | null
+    phone?: string | null
+    personnelCategory?: string | null
+    personnel_category?: string | null
+    projectRole?: string | null
+    permissions?: Record<string, any> | null
+  }[]
 }
 
 export interface UIUser {
@@ -110,6 +168,13 @@ export interface UIUser {
   rankLevel: number
   campus: string  // Phase Y: Office-scoped visibility
   roleName: string
+  // NNN-F/H: avatar + profile fields
+  avatarUrl: string
+  phone: string
+  displayName: string
+  lastLoginAt: string
+  lastPasswordChangeAt: string
+  isSso: boolean
 }
 
 /**
@@ -121,12 +186,19 @@ export function adaptProject(backend: BackendProject): UIProject {
     projectName: backend.title,
     campus: backend.campus || '',
     status: backend.status,
-    totalContractAmount: backend.contract_amount || 0,
-    physicalAccomplishment: backend.physical_progress || 0,
+    totalContractAmount: Number(backend.contract_amount) || 0,
+    physicalAccomplishment: Number(backend.physical_progress) || 0,
     fundSource: backend.funding_source_name || '',
     contractor: backend.contractor_name || '',
     startDate: backend.start_date || '',
     endDate: backend.end_date || '',
+    // LLL-C: list-level fields for advanced index filtering
+    projectCode: backend.project_code || '',
+    originalStartDate: backend.original_start_date || '',
+    revisedStartDate: backend.revised_start_date || '',
+    originalCompletionDate: backend.original_completion_date || '',
+    revisedCompletionDate: backend.revised_completion_date || '',
+    projectDuration: backend.project_duration || '',
     publicationStatus: backend.publication_status || 'PUBLISHED',
     createdBy: backend.created_by || '',
     createdAt: backend.created_at,
@@ -176,6 +248,13 @@ export function adaptUser(backend: BackendUser): UIUser {
     rankLevel: backend.rank_level ?? 100,
     campus: backend.campus || '',  // Phase Y: Office-scoped visibility
     roleName: backend.role?.name || '',
+    // NNN-F/H: avatar + profile fields
+    avatarUrl: backend.avatar_url || '',
+    phone: backend.phone || '',
+    displayName: backend.display_name || '',
+    lastLoginAt: backend.last_login_at || '',
+    lastPasswordChangeAt: backend.last_password_change_at || '',
+    isSso: backend.is_sso ?? false,
   }
 }
 
@@ -202,7 +281,10 @@ export function reverseAdaptProject(ui: Partial<UIProject>): Partial<BackendProj
 export interface BackendProjectDetail extends BackendProject {
   project_code: string
   description?: string
-  beneficiaries?: string
+  beneficiaries?: number | string | null
+  summary?: string | null
+  scope?: string | null
+  facilities?: string | null
   objectives?: string[]
   key_features?: string[]
   contract_number?: string
@@ -214,65 +296,236 @@ export interface BackendProjectDetail extends BackendProject {
   building_type?: string
   floor_area?: number
   number_of_floors?: number
+  latitude?: number
+  longitude?: number
+  original_contract_duration?: string
+  // MG: Location
+  spatial_coverage?: string
+  municipality?: string
+  province?: string
+  // MG: Implementation agencies (additional)
+  co_implementing_agency?: string
+  attached_agency?: string
+  // MG: Funding + beneficiaries
+  additional_funding_sources?: { type: string; name: string; notes?: string }[]
+  beneficiary_list?: string[]
+  // MH: Revision orders
+  original_start_date?: string
+  revised_start_date?: string
+  original_completion_date?: string
+  revised_completion_date?: string
+  revised_project_duration?: string
+  // MI: Progress snapshot
+  as_of_date?: string
+  cost_incurred_to_date?: number | null
+  cost_incurred_this_period?: number | null
+  date_completed?: string
+  remarks_log?: { text: string; author?: string; created_at?: string }[]
+  physical_progress?: number
+  financial_progress?: number
+  target_physical_progress?: number
+  target_financial_progress?: number
   subcategory?: { id: string; name: string }
   milestones?: BackendMilestone[]
   financials?: BackendFinancial[]
+  // AAA-A: latest-first progress reports (nested by findOne) — source of cost_incurred_this_period
+  progress_reports?: Array<{
+    id: string
+    cost_incurred_this_period?: string | number | null
+    cost_incurred_to_date?: string | number | null
+    report_date?: string
+    report_number?: string | null
+  }>
+  // KC-C: Project Profile fields
+  strategic_alignment?: string
+  output_indicators?: string[]
+  outcome_indicators?: string[]
+  implementing_agency?: string
+  project_status_category?: string
+  status_updates?: Record<string, any>[]
+  readiness_documents?: Record<string, any>[]
+  signatories?: Record<string, any>[]
+  // LA-A: monitoring fields added to BackendProjectDetail (were missing, causing TypeScript errors)
+  document_checklist_remarks?: Record<string, string>
+  custom_key_sections?: { id: string; label: string; typeCode: string }[]
+  custom_supporting_sections?: { id: string; label: string; typeCode: string }[]
+  incident_log?: Record<string, any>[]
+  risk_register?: Record<string, any>[]
+  escalation_records?: Record<string, any>[]
+  // OU-A: strategic planning arrays
+  rdp_alignment?: any[]
+  socioeconomic_agenda?: any[]
+  csu_likha_goals?: any[]
+  sdg_goals?: string[]
+  personnel_groups?: {
+    csu?: { name: string; position: string; role: string }[]
+    contractor?: { name: string; position: string; company: string }[]
+    others?: { name: string; position: string; affiliation: string }[]
+  } | null
 }
 
 export interface BackendMilestone {
   id: string
-  milestone_name: string
-  target_date?: string
-  actual_date?: string
-  weight_percentage?: number
-  progress_percentage?: number
+  title: string
+  description?: string
+  targetDate?: string
+  actualDate?: string
   status: string
+  remarks?: string
+  createdAt?: string
+  startDate?: string
+  actualStartDate?: string
+  progress?: string | number
+  category?: string
 }
 
 export interface BackendFinancial {
   id: string
-  description: string
-  amount: number
-  date_recorded?: string
-  financial_type: string
+  projectId: string
+  fiscalYear: number
+  appropriation: string
+  obligation: string
+  disbursement: string
+  metadata?: Record<string, unknown>
+  createdAt?: string
+}
+
+export interface BackendGalleryItem {
+  id: string
+  projectId: string
+  imageUrl: string
+  caption?: string
+  category: string
+  isFeatured: boolean
+  uploadedAt: string
+  // LB-C: user-supplied photo capture date (may come as snake_case or camelCase)
+  image_taken_date?: string
+  imageTakenDate?: string
 }
 
 export interface UIProjectDetail extends UIProject {
   projectCode: string
   description: string
-  beneficiaries: string
+  beneficiaries: number | null
+  summary: string
+  scope: string
+  facilities: string
   objectives: string[]
   keyFeatures: string[]
   contractNumber: string
   targetCompletionDate: string
   actualCompletionDate: string
   projectDuration: string
+  originalContractDuration: string
+  // MG: Location
+  spatialCoverage: string
+  municipality: string
+  province: string
+  // MG: Implementation agencies (additional)
+  coImplementingAgency: string
+  attachedAgency: string
+  // MG: Funding + beneficiaries
+  additionalFundingSources: { type: string; name: string; notes?: string }[]
+  beneficiaryList: string[]
+  // MH: Revision orders
+  originalStartDate: string
+  revisedStartDate: string
+  originalCompletionDate: string
+  revisedCompletionDate: string
+  revisedProjectDuration: string
+  // MI: Progress snapshot
+  asOfDate: string
+  costIncurredToDate: number | null
+  costIncurredThisPeriod: number | null
+  // AAA-A: source reference for the latest progress report (analytics drill-down)
+  latestProgressReportId: string | null
+  latestProgressReportDate: string | null
+  dateCompleted: string
+  remarksLog: { text: string; author?: string; createdAt?: string }[]
   projectEngineer: string
   projectManager: string
   buildingType: string
   floorArea: number
   numberOfFloors: number
+  latitude: number | null
+  longitude: number | null
+  physicalProgress: number
+  financialProgress: number
+  targetPhysicalProgress: number
+  targetFinancialProgress: number
   subcategory: string
   milestones: UIMilestone[]
   financials: UIFinancial[]
+  gallery: UIGalleryItem[]
+  // KC-C: Project Profile fields
+  strategicAlignment: string
+  outputIndicators: string[]
+  outcomeIndicators: string[]
+  rdpAlignment: any[]
+  socioeconomicAgenda: any[]
+  csuLikhaGoals: any[]
+  sdgGoals: string[]
+  implementingAgency: string
+  projectStatusCategory: string
+  statusUpdates: Record<string, any>[]
+  readinessDocuments: Record<string, any>[]
+  signatories: Record<string, any>[]
+  documentChecklistRemarks: Record<string, string>
+  customKeySections: { id: string; label: string; typeCode: string }[]
+  customSupportingSections: { id: string; label: string; typeCode: string }[]
+  incidentLog: Record<string, any>[]
+  riskRegister: Record<string, any>[]
+  escalationRecords: Record<string, any>[]
+  projectNotesBanking: {
+    additionalNotes?: string
+    projectReferences?: { label: string; url?: string; notes?: string }[]
+    specialInstructions?: string
+    historicalReferences?: { date: string; description: string }[]
+    customMetadata?: Record<string, string>
+    // ZZZ-D Extension: lightweight construction-project support functions
+    lessonsLearned?: { phase: string; observation: string; recommendation: string; addedBy?: string; addedAt?: string }[]
+    siteObservations?: { date: string; observer: string; observation: string; location?: string; actionRequired: boolean }[]
+  } | null
+  personnelGroups: {
+    csu: { name: string; position: string; role: string }[]
+    contractor: { name: string; position: string; company: string }[]
+    others: { name: string; position: string; affiliation: string }[]
+  }
 }
 
 export interface UIMilestone {
   id: string
   name: string
+  description: string
   targetDate: string
   actualDate: string
-  weight: number
-  progress: number
   status: string
+  remarks: string
+  startDate: string
+  actualStartDate: string
+  progress: number
+  category: string
 }
 
 export interface UIFinancial {
   id: string
-  description: string
-  amount: number
-  dateRecorded: string
-  type: string
+  fiscalYear: number
+  appropriation: number
+  obligation: number
+  disbursement: number
+  utilizationRate: number
+  disbursementRate: number
+}
+
+export interface UIGalleryItem {
+  id: string
+  imageUrl: string
+  caption: string
+  category: string
+  isFeatured: boolean
+  uploadedAt: string
+  // LB-C: user-supplied photo capture date
+  imageTakenDate?: string
 }
 
 export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDetail {
@@ -280,43 +533,147 @@ export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDeta
     ...adaptProject(backend),
     projectCode: backend.project_code || '',
     description: backend.description || '',
-    beneficiaries: backend.beneficiaries || '',
+    beneficiaries: backend.beneficiaries == null || backend.beneficiaries === ''
+      ? null
+      : Number(backend.beneficiaries),
+    summary: backend.summary || '',
+    scope: backend.scope || '',
+    facilities: backend.facilities || '',
     objectives: backend.objectives || [],
     keyFeatures: backend.key_features || [],
     contractNumber: backend.contract_number || '',
     targetCompletionDate: backend.target_completion_date || '',
     actualCompletionDate: backend.actual_completion_date || '',
     projectDuration: backend.project_duration || '',
+    originalContractDuration: backend.original_contract_duration || '',
+    spatialCoverage: backend.spatial_coverage || '',
+    municipality: backend.municipality || '',
+    province: backend.province || '',
+    coImplementingAgency: backend.co_implementing_agency || '',
+    attachedAgency: backend.attached_agency || '',
+    additionalFundingSources: backend.additional_funding_sources || [],
+    beneficiaryList: backend.beneficiary_list || [],
+    originalStartDate: backend.original_start_date || '',
+    revisedStartDate: backend.revised_start_date || '',
+    originalCompletionDate: backend.original_completion_date || '',
+    revisedCompletionDate: backend.revised_completion_date || '',
+    revisedProjectDuration: backend.revised_project_duration || '',
+    asOfDate: backend.as_of_date || '',
+    costIncurredToDate: backend.cost_incurred_to_date ?? null,
+    // CCC-A: progress_reports are MikroORM entities (camelCase) at runtime, not snake_case.
+    // Read camelCase first, snake_case as fallback (covers both ORM and any future raw-SQL path).
+    costIncurredThisPeriod: (() => {
+      const r0 = Array.isArray(backend.progress_reports) && backend.progress_reports.length > 0
+        ? (backend.progress_reports[0] as any)
+        : null
+      const val = r0?.costIncurredThisPeriod ?? r0?.cost_incurred_this_period
+      return val != null ? Number(val) : null
+    })(),
+    latestProgressReportId: (() => {
+      const r0 = Array.isArray(backend.progress_reports) && backend.progress_reports.length > 0
+        ? (backend.progress_reports[0] as any)
+        : null
+      return r0?.id ?? null
+    })(),
+    latestProgressReportDate: (() => {
+      const r0 = Array.isArray(backend.progress_reports) && backend.progress_reports.length > 0
+        ? (backend.progress_reports[0] as any)
+        : null
+      if (!r0) return null
+      // MikroORM returns reportDate as a JS Date object; raw-SQL path returns a string
+      const d = r0.reportDate ?? r0.report_date
+      return d ? (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10)) : null
+    })(),
+    dateCompleted: backend.date_completed || '',
+    remarksLog: (backend.remarks_log || []).map((r: any) => ({
+      text: r.text || '',
+      author: r.author || r.updated_by || '',
+      createdAt: r.created_at || r.createdAt || '',
+    })),
     projectEngineer: backend.project_engineer || '',
     projectManager: backend.project_manager || '',
     buildingType: backend.building_type || '',
     floorArea: backend.floor_area || 0,
     numberOfFloors: backend.number_of_floors || 0,
+    latitude: typeof backend.latitude === 'number' ? backend.latitude : (backend.latitude ? Number(backend.latitude) : null),
+    longitude: typeof backend.longitude === 'number' ? backend.longitude : (backend.longitude ? Number(backend.longitude) : null),
+    physicalProgress: typeof backend.physical_progress === 'number' ? backend.physical_progress : Number(backend.physical_progress || 0),
+    financialProgress: typeof backend.financial_progress === 'number' ? backend.financial_progress : Number(backend.financial_progress || 0),
+    targetPhysicalProgress: typeof backend.target_physical_progress === 'number' ? backend.target_physical_progress : Number(backend.target_physical_progress || 100),
+    targetFinancialProgress: typeof backend.target_financial_progress === 'number' ? backend.target_financial_progress : Number(backend.target_financial_progress || 100),
     subcategory: backend.subcategory?.name || '',
     milestones: (backend.milestones || []).map(adaptMilestone),
     financials: (backend.financials || []).map(adaptFinancial),
+    gallery: [],
+    strategicAlignment: backend.strategic_alignment || '',
+    outputIndicators: backend.output_indicators || [],
+    outcomeIndicators: backend.outcome_indicators || [],
+    rdpAlignment: backend.rdp_alignment || [],
+    socioeconomicAgenda: backend.socioeconomic_agenda || [],
+    csuLikhaGoals: backend.csu_likha_goals || [],
+    sdgGoals: backend.sdg_goals || [],
+    implementingAgency: backend.implementing_agency || '',
+    projectStatusCategory: backend.project_status_category || '',
+    statusUpdates: (backend.status_updates || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    readinessDocuments: (backend.readiness_documents || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    signatories: (backend.signatories || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    documentChecklistRemarks: backend.document_checklist_remarks || {},
+    customKeySections: backend.custom_key_sections || [],
+    customSupportingSections: backend.custom_supporting_sections || [],
+    // KY-B2: filter out non-object items (guards against [[]] double-wrap corruption)
+    incidentLog: (backend.incident_log || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    riskRegister: (backend.risk_register || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    escalationRecords: (backend.escalation_records || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    projectNotesBanking: (backend as any).project_notes_banking || null,
+    personnelGroups: {
+      csu: (backend.personnel_groups?.csu || []) as { name: string; position: string; role: string }[],
+      contractor: (backend.personnel_groups?.contractor || []) as { name: string; position: string; company: string }[],
+      others: (backend.personnel_groups?.others || []) as { name: string; position: string; affiliation: string }[],
+    },
   }
 }
 
 export function adaptMilestone(backend: BackendMilestone): UIMilestone {
   return {
     id: backend.id,
-    name: backend.milestone_name,
-    targetDate: backend.target_date || '',
-    actualDate: backend.actual_date || '',
-    weight: backend.weight_percentage || 0,
-    progress: backend.progress_percentage || 0,
-    status: backend.status,
+    name: backend.title || '',
+    description: backend.description || '',
+    targetDate: backend.targetDate || '',
+    actualDate: backend.actualDate || '',
+    status: backend.status || 'PENDING',
+    remarks: backend.remarks || '',
+    startDate: backend.startDate || '',
+    actualStartDate: backend.actualStartDate || '',
+    progress: backend.progress != null ? Number(backend.progress) : 0,
+    category: backend.category || '',
   }
 }
 
 export function adaptFinancial(backend: BackendFinancial): UIFinancial {
+  const appropriation = parseFloat(backend.appropriation || '0')
+  const obligation = parseFloat(backend.obligation || '0')
+  const disbursement = parseFloat(backend.disbursement || '0')
   return {
     id: backend.id,
-    description: backend.description,
-    amount: backend.amount,
-    dateRecorded: backend.date_recorded || '',
-    type: backend.financial_type,
+    fiscalYear: backend.fiscalYear,
+    appropriation,
+    obligation,
+    disbursement,
+    utilizationRate: appropriation > 0 ? (obligation / appropriation) * 100 : 0,
+    disbursementRate: obligation > 0 ? (disbursement / obligation) * 100 : 0,
+  }
+}
+
+export function adaptGalleryItem(backend: BackendGalleryItem): UIGalleryItem {
+  return {
+    id: backend.id,
+    imageUrl: backend.imageUrl,
+    caption: backend.caption || '',
+    category: backend.category || 'IN_PROGRESS',
+    isFeatured: backend.isFeatured || false,
+    uploadedAt: backend.uploadedAt || '',
+    // LB-C: accept either snake_case (raw SQL result) or camelCase (ORM result)
+    imageTakenDate: backend.imageTakenDate ?? backend.image_taken_date ?? undefined,
   }
 }
 
@@ -357,7 +714,7 @@ export interface BackendUniversityOperation {
   assigned_to?: string
   assigned_to_name?: string
   // Phase AW: Multi-select assignment
-  assigned_users?: { id: string; name: string }[]
+  assigned_users?: { id: string; name: string; role?: string | null; department?: string | null; phone?: string | null }[]
 }
 
 export interface UIUniversityOperation {
@@ -385,7 +742,7 @@ export interface UIUniversityOperation {
   delegatedTo: string
   delegatedToName: string
   // Phase AW: Multi-select assignment
-  assignedUsers: { id: string; name: string }[]
+  assignedUsers: { id: string; name: string; role?: string | null; department?: string | null; phone?: string | null }[]
 }
 
 export function adaptUniversityOperation(backend: BackendUniversityOperation): UIUniversityOperation {
@@ -474,7 +831,7 @@ export interface BackendRepairProject {
   assigned_to?: string
   assigned_to_name?: string
   // Phase AW: Multi-select assignment
-  assigned_users?: { id: string; name: string }[]
+  assigned_users?: { id: string; name: string; role?: string | null; department?: string | null; phone?: string | null }[]
 }
 
 export interface UIRepairProject {
@@ -506,7 +863,7 @@ export interface UIRepairProject {
   delegatedTo: string
   delegatedToName: string
   // Phase AW: Multi-select assignment
-  assignedUsers: { id: string; name: string }[]
+  assignedUsers: { id: string; name: string; role?: string | null; department?: string | null; phone?: string | null }[]
 }
 
 export function adaptRepairProject(backend: BackendRepairProject): UIRepairProject {
@@ -528,8 +885,8 @@ export function adaptRepairProject(backend: BackendRepairProject): UIRepairProje
     actualCost: backend.actual_cost || 0,
     reportedBy: backend.reported_by || '',
     assignedTo: backend.assigned_technician || '',
-    physicalProgress: backend.physical_progress || 0,
-    financialProgress: backend.financial_progress || 0,
+    physicalProgress: Number(backend.physical_progress) || 0,
+    financialProgress: Number(backend.financial_progress) || 0,
     publicationStatus: backend.publication_status || 'PUBLISHED',
     createdBy: backend.created_by || '',
     createdAt: backend.created_at,
@@ -602,7 +959,7 @@ export interface UIRepairDetail {
   delegatedTo: string
   delegatedToName: string
   // Phase AW: Multi-select assignment
-  assignedUsers: { id: string; name: string }[]
+  assignedUsers: { id: string; name: string; role?: string | null; department?: string | null; phone?: string | null }[]
   assignedUserIds: string[]
 }
 

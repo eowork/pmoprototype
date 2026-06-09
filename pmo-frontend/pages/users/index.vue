@@ -27,6 +27,10 @@ const pendingResetRequests = ref<any[]>([])
 const resetRequestsLoading = ref(false)
 const showResetPanel = ref(true)
 
+// PQ-D: Self-registration pending approvals
+const pendingRegistrations = ref<any[]>([])
+const pendingRegLoading = ref(false)
+
 // Filter state
 const statusFilter = ref<boolean | null>(null)
 const roleFilter = ref<string>('')
@@ -235,9 +239,41 @@ async function bulkAccessUpdate(type: 'permission' | 'module' | 'pillar', action
   }
 }
 
+// PQ-D: fetch pending registrations
+async function fetchPendingRegistrations() {
+  pendingRegLoading.value = true
+  try {
+    const res = await api.get<{ data: any[]; total: number }>('/api/users?status=PENDING&limit=100')
+    pendingRegistrations.value = (res.data || [])
+  } catch { pendingRegistrations.value = [] }
+  finally { pendingRegLoading.value = false }
+}
+
+async function approveRegistration(id: string) {
+  try {
+    await api.post(`/api/users/${id}/activate`, {})
+    toast.success('User activated')
+    await fetchPendingRegistrations()
+    await fetchUsers()
+  } catch (err: any) { toast.error(err?.message || 'Failed to activate') }
+}
+
+async function rejectRegistration(id: string) {
+  try {
+    await api.post(`/api/users/${id}/reject-registration`, {})
+    toast.success('Registration rejected')
+    await fetchPendingRegistrations()
+  } catch (err: any) { toast.error(err?.message || 'Failed to reject') }
+}
+
+function pendingUserType(user: any): string {
+  return user.metadata?.userType?.replace(/_/g, ' ') || 'CSU Personnel'
+}
+
 onMounted(() => {
   fetchUsers()
   fetchResetRequests()
+  fetchPendingRegistrations()
 })
 </script>
 
@@ -319,6 +355,65 @@ onMounted(() => {
         </v-table>
       </v-alert>
     </v-expand-transition>
+
+    <!-- PQ-D: Pending Registrations Panel -->
+    <v-expansion-panels v-if="pendingRegistrations.length > 0" class="mb-4">
+      <v-expansion-panel rounded="lg" elevation="2">
+        <v-expansion-panel-title>
+          <div class="d-flex align-center ga-2">
+            <v-icon color="warning">mdi-account-clock</v-icon>
+            <span class="font-weight-medium">Pending Registrations</span>
+            <v-chip size="x-small" color="warning" variant="tonal">{{ pendingRegistrations.length }}</v-chip>
+          </div>
+        </v-expansion-panel-title>
+        <v-expansion-panel-text>
+          <v-list density="compact" class="py-0">
+            <v-list-item
+              v-for="user in pendingRegistrations"
+              :key="user.id"
+              class="px-0 py-2"
+            >
+              <template #prepend>
+                <v-avatar size="36" color="warning" variant="tonal" class="mr-3 text-caption font-weight-bold">
+                  {{ (user.firstName || user.first_name || '?').charAt(0).toUpperCase() }}
+                </v-avatar>
+              </template>
+              <v-list-item-title class="font-weight-medium">
+                {{ user.firstName || user.first_name || '' }} {{ user.lastName || user.last_name || '' }}
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption">
+                {{ user.email }} &middot;
+                <v-chip size="x-small" variant="tonal" color="info" class="mx-1">{{ pendingUserType(user) }}</v-chip>
+                &middot; Registered {{ user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }) : '—' }}
+              </v-list-item-subtitle>
+              <template #append>
+                <div class="d-flex ga-2">
+                  <v-btn
+                    size="x-small"
+                    color="success"
+                    variant="tonal"
+                    prepend-icon="mdi-check"
+                    :loading="pendingRegLoading"
+                    @click="approveRegistration(user.id)"
+                  >
+                    Approve
+                  </v-btn>
+                  <v-btn
+                    size="x-small"
+                    color="error"
+                    variant="outlined"
+                    prepend-icon="mdi-close"
+                    @click="rejectRegistration(user.id)"
+                  >
+                    Reject
+                  </v-btn>
+                </div>
+              </template>
+            </v-list-item>
+          </v-list>
+        </v-expansion-panel-text>
+      </v-expansion-panel>
+    </v-expansion-panels>
 
     <!-- Data Table Card -->
     <v-card>

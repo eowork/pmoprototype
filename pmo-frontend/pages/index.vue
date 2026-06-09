@@ -1,12 +1,25 @@
 <script setup lang="ts">
+const authStore = useAuthStore()
+
 definePageMeta({
-  middleware: 'auth',
+  layout: 'blank',
 })
 
-// Redirect to dashboard
-navigateTo('/dashboard')
+const checked = ref(false)
+
+if (import.meta.client) {
+  if (authStore.isAuthenticated) {
+    navigateTo('/dashboard', { replace: true })
+  } else {
+    checked.value = true
+  }
+}
 </script>
 
 <template>
-  <div />
+  <div v-if="checked && !authStore.isAuthenticated">
+    <PublicHero />
+    <PublicCategoryShowcase />
+    <PublicStatsOverview />
+  </div>
 </template>

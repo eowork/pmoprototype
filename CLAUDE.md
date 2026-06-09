@@ -1,8 +1,18 @@
 # PMO Dashboard — Project Context
 
 > **Governance:** ACE Framework v2.4 (Operator LTS)
-> **Last Updated:** 2026-04-13
-> **Status:** Phase HE COMPLETE — UI/UX + Data Structure Enhancement (Physical & Financial)
+> **Last Updated:** 2026-06-02
+> **Status:** Phase DDD ✅ COMPLETE — COI Phase 3 sprint; docs refactored to 5-artifact AI-first structure
+
+## Documentation Structure (AI-First, 2026-06-02)
+```
+docs/state.md        ← READ FIRST — current project state, blockers, constraints
+docs/plan.md         ← Active work only — pending tasks, smoke tests, candidates
+docs/research.md     ← Research findings only (R-001 through R-012)
+docs/history.md      ← Completed work archive, approved decisions, bug fixes
+docs/architecture.md ← Technical reference — stack, patterns, conventions
+```
+**AI Onboarding:** Read `docs/state.md` + `docs/plan.md` for implementation work. Others only when needed.
 
 ---
 
@@ -38,7 +48,7 @@ pmo-dash/
 │       ├── index.vue              Landing page + analytics dashboard
 │       ├── physical/index.vue     Physical Accomplishment (BAR No. 1)
 │       └── financial/index.vue    Financial Accomplishment (BAR No. 2)
-├── database/migrations/  PostgreSQL migration files (001–036)
+├── database/migrations/  PostgreSQL migration files (001–047+)
 ├── docs/
 │   ├── plan.md           Execution contract (ACE Phase 2 artifact)
 │   ├── research.md       Research findings (ACE Phase 1 artifact)
@@ -71,17 +81,24 @@ pmo-dash/
 
 ## Active Governance Directives (Summary)
 
-97+ governance directives established across Phases H through HE.
-Full table: `docs/plan.md` lines 9–111 (directives 1–97), plus Phase-specific directives (385–391 in Phase HE).
+122 UO directives (1–122, Phases D–HI) + 14 COI directives (JB-D1–JB-D14) — full tables in `docs/plan.md` header section.
 
-**Critical active rules:**
+**Critical active rules — University Operations:**
 - Backend enforcement is authoritative; frontend is presentation only
 - `validateOperationEditable()` must receive `quarter` parameter for publication lock
 - `autoRevertQuarterlyReport()` must be called after every CUD operation
 - Financial and Physical modules share `quarterly_reports` entity
 - BAR1 indicator taxonomy (migration 019) is READONLY — never modify
-- Override fields (`override_total_target`, `override_total_actual`) use `??` merge pattern in `computeIndicatorMetrics()` — effective values returned as `total_target`/`total_accomplishment`
-- Narrative fields (`catch_up_plan`, `facilitating_factors`, `ways_forward`) rendered via expandable row only — never as direct table columns
+- Override fields (`override_total_target`, `override_total_actual`) use `??` merge pattern in `computeIndicatorMetrics()`
+- Narrative fields (`catch_up_plan`, `facilitating_factors`, `ways_forward`) rendered via expandable row only
+
+**Critical active rules — COI Module:**
+- Backend route `/api/construction-projects` is IMMUTABLE; public endpoint is `/api/public/construction-projects`
+- `pmo-frontend/utils/adapters.ts` is the ONLY place frontend type interfaces are defined
+- Gallery fetched separately via `GET /api/construction-projects/:id/gallery` — NOT embedded in `findOne`
+- Public pages at `/coi/public/` use `@Public()` decorator — no JWT guard
+- `api.del()` not `api.delete()` for all DELETE calls
+- Figma MCP = design reference ONLY; never implementation authority
 
 ---
 
@@ -89,8 +106,8 @@ Full table: `docs/plan.md` lines 9–111 (directives 1–97), plus Phase-specifi
 
 | # | Item | Priority |
 |---|------|----------|
-| 66 | UO operation assignment CRUD endpoints | Backend required |
-| 75 | Quarter-level submission (per-QN status) | Backend required |
+| 66 | UO operation assignment CRUD endpoints | ✅ Built in Phase IJ |
+| 75 | Quarter-level submission (per-QN status) | ✅ Built in Phase DY-D — stale entry |
 | 87 | Cross-module analytics preparation | YAGNI |
 | 96 | Financial analytics endpoints | YAGNI (until data entry stable) |
 | 148 | Prior-quarter prefill for Physical Accomplishment page | ✅ Phase FJ |
@@ -106,6 +123,7 @@ Full table: `docs/plan.md` lines 9–111 (directives 1–97), plus Phase-specifi
 - **Override System:** Per-quarter overrides (Phase GZ) + override-effective merge in metrics (Phase HD)
 - **UI Theme Fix:** Vuetify primary color `##` → `#` bug fixed (Phase GQ)
 - **Data Population:** FY 2022–2025 financial data seeded from Continuing Appropriations + BAR1 Analytics
+- **COI Module Phase 1 (JA–JR):** Backend + frontend CRUD, public controller, gallery, analytics tab, profile tab redesign (6-tab structure), attachment system, activity logging infrastructure, assignment CRUD, MikroORM migration adoption (2026-04-13 – 2026-05-07)
 
 ---
 
@@ -116,6 +134,7 @@ Full table: `docs/plan.md` lines 9–111 (directives 1–97), plus Phase-specifi
 - Financial computed fields: `utilization_rate`, `disbursement_rate` — computed server-side in `computeFinancialMetrics()`
 - Financial table shows Disbursement (not Balance) — Balance removed from table display in Phase HE
 - DELETE requests use `api.del()` (not `api.delete()`)
+- Backend uses a **hybrid data access model**: ORM (`em.find`, `em.persist`) for CRUD; raw SQL (`em.getConnection().execute`) for complex analytics; legacy `DatabaseService` retained for health + auth strategies only — never introduce new `DatabaseService` usage.
 - Quarterly data uses `reported_quarter` column for quarter-specific isolation
 - Watchers that switch context must synchronously clear stale state BEFORE async calls
 
@@ -138,7 +157,7 @@ Full table: `docs/plan.md` lines 9–111 (directives 1–97), plus Phase-specifi
 - PowerShell 6+ (pwsh) is NOT available
 - Builds/tests verified by operator manually, not automated
 - Git remote: `https://github.com/eowork/pmoprototype.git`
-- Active branches: `main`, `pmo-test1`, `refactor/page-structure-feb9`
+- Active branches: `main`, `pmo-test1`, `pmo-coi`
 
 ---
 
@@ -151,3 +170,5 @@ Full table: `docs/plan.md` lines 9–111 (directives 1–97), plus Phase-specifi
 | 2026-03-26–31 | Data population, stakeholder prep |
 | **2026-04-06** | **Stakeholder feedback session (MIS/PMO Directors)** |
 | 2026-04-08–13 | Post-feedback phases (GQ–HE): UI fixes, data population, override system, narrative fields |
+| 2026-04-13 – 2026-05-07 | COI Module Phase 1 (JA–JR): full CRUD, public surface, gallery, analytics, profile redesign |
+| **2026-05-13** | **Artifact remediation (Phase KL) — 18 phases pending Phase 3 authorization** |

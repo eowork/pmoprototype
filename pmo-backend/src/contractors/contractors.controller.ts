@@ -14,7 +14,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ContractorsService } from './contractors.service';
-import { CreateContractorDto, UpdateContractorDto, QueryContractorDto } from './dto';
+import {
+  CreateContractorDto,
+  UpdateContractorDto,
+  QueryContractorDto,
+} from './dto';
 import { JwtAuthGuard, RolesGuard } from '../auth/guards';
 import { Roles, CurrentUser } from '../auth/decorators';
 import { JwtPayload } from '../common/interfaces';
@@ -68,7 +72,10 @@ export class ContractorsController {
   @Roles('Admin')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete contractor (Admin only)' })
-  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtPayload) {
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
     return this.service.remove(id, user.sub);
   }
 
