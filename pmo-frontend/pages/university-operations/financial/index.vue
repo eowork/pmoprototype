@@ -11,6 +11,7 @@
  */
 
 import type { PublicationStatus } from '~/utils/adapters'
+import { getPublicationStatusColor } from '~/utils/status-colors'
 
 definePageMeta({
   middleware: ['auth', 'permission'],
@@ -260,16 +261,6 @@ function canWithdrawAllPillars(): boolean {
 }
 
 // Publication status helpers
-function getPublicationStatusColor(status: PublicationStatus | string): string {
-  const colors: Record<string, string> = {
-    DRAFT: 'grey',
-    PENDING_REVIEW: 'orange',
-    PUBLISHED: 'success',
-    REJECTED: 'error',
-    FETCH_ERROR: 'warning',
-  }
-  return colors[status] || 'grey'
-}
 
 function getPublicationStatusLabel(status: PublicationStatus | string): string {
   const labels: Record<string, string> = {
@@ -1070,7 +1061,7 @@ onMounted(async () => {
     </v-card>
 
     <!-- Pillar Header Card -->
-    <v-card variant="outlined" class="mb-4">
+    <v-card elevation="1" rounded="lg" class="mb-4">
       <v-card-text class="d-flex flex-wrap align-center ga-2 py-3">
         <v-icon :color="currentPillar.color" class="mr-1">{{ currentPillar.icon }}</v-icon>
         <span class="text-subtitle-1 font-weight-bold">{{ currentPillar.fullName }}</span>
@@ -1169,7 +1160,7 @@ onMounted(async () => {
           <div class="text-body-2">
             <p class="font-weight-bold mb-2">Steps</p>
 
-            <p class="mb-1"><strong>Step 1 — Select the correct Pillar tab</strong> (MFO1–MFO4) at the top of this page. Each pillar has its own independent budget allocation. Do not mix data across pillars.</p>
+            <p class="mb-1"><strong>Step 1 — Select the correct Program tab</strong> (MFO1–MFO4) at the top of this page. Each program has its own independent budget allocation. Do not mix data across programs.</p>
 
             <p class="mb-1"><strong>Step 2 — Click "Add Financial Record"</strong> to open the data entry form for the selected quarter and fiscal year.</p>
 
@@ -1183,7 +1174,7 @@ onMounted(async () => {
               <li><em>Disbursement</em> (optional) — actual cash payments released (e.g., ₱2,800,000.00)</li>
             </ul>
 
-            <p class="mb-1"><strong>Step 4 — Submit for review</strong> when all records for the quarter are complete. Use the <strong>Submit</strong> button in the pillar header. Physical and Financial reports share the same quarterly submission.</p>
+            <p class="mb-1"><strong>Step 4 — Submit for review</strong> when all records for the quarter are complete. Use the <strong>Submit</strong> button in the program header. Physical and Financial reports share the same quarterly submission.</p>
 
             <v-divider class="my-2" />
 
@@ -1349,7 +1340,7 @@ onMounted(async () => {
       <!-- Campus-Grouped Financial Tables -->
       <template v-if="financialRecords.length > 0">
         <template v-for="campus in CAMPUSES" :key="campus.id">
-          <v-card v-if="campusHasData(campus.id)" variant="outlined" class="mb-4">
+          <v-card v-if="campusHasData(campus.id)" elevation="1" rounded="lg" class="mb-4">
             <v-card-title class="text-subtitle-1 bg-grey-lighten-4 py-2 px-4 d-flex align-center">
               <v-icon start size="small" color="primary">mdi-domain</v-icon>
               {{ campus.name }}

@@ -77,7 +77,7 @@ const financialPillarExpenseBreakdown = ref<any>(null)
 // Phase EE-D: Global pillar filter — controls all analytics charts simultaneously
 const selectedGlobalPillar = ref<string>('ALL')
 const globalPillarOptions = computed(() => [
-  { title: 'All Pillars', value: 'ALL' },
+  { title: 'All Programs', value: 'ALL' },
   ...PILLARS.map(p => ({ title: p.name, value: p.id })),
 ])
 
@@ -870,47 +870,68 @@ const quarterlyTrendOptions = computed(() => ({
     curve: 'smooth' as const,
     width: 3,
   },
-  colors: ['#1976D2', '#4CAF50'],
+  colors: ['#1976D2'],
   xaxis: {
     categories: ['Q1', 'Q2', 'Q3', 'Q4'],
   },
   yaxis: {
-    // Phase GJ-2: Clarified axis label — data is counts/sums, not percentages
-    title: { text: 'Achievement Score' },
+    // Phase PPP-A2: Plot the true accomplishment rate (%) instead of raw counts/sums
+    title: { text: 'Accomplishment Rate (%)' },
     min: 0,
+    max: 120,
+    forceNiceScale: false,
     labels: {
-      formatter: (val: number) => val.toFixed(1),
+      formatter: (val: number) => val.toFixed(0) + '%',
     },
   },
-  legend: {
-    position: 'top' as const,
-    horizontalAlign: 'center' as const,
+  annotations: {
+    yaxis: [{
+      y: 100,
+      borderColor: '#E53935',
+      strokeDashArray: 4,
+      label: {
+        text: 'Target (100%)',
+        position: 'left' as const,
+        offsetX: 5,
+        offsetY: -5,
+        style: {
+          color: '#E53935',
+          background: '#FFFFFF',
+          fontSize: '12px',
+          padding: { left: 4, right: 4, top: 2, bottom: 2 },
+        },
+      },
+    }],
   },
+  legend: { show: false },
   markers: {
     size: 5,
   },
+  dataLabels: {
+    enabled: true,
+    formatter: (val: number) => val.toFixed(1) + '%',
+    offsetY: -20,
+    style: { fontSize: '11px', colors: ['#333'] },
+  },
   tooltip: {
-    shared: true,
     y: {
-      // Phase GJ-2: Reduced from 4 to 2 decimal places
-      formatter: (val: number) => val.toFixed(2),
+      formatter: (val: number) => val.toFixed(1) + '%',
     },
   },
 }))
 
-// Phase EB-B: Quarterly trend series with descriptive labels
+// Phase PPP-A2: Single-series quarterly accomplishment rate (actual/target × 100)
 const quarterlyTrendSeries = computed(() => {
   if (!quarterlyTrend.value?.quarters) {
-    return [
-      { name: 'Indicators with Target', data: [0, 0, 0, 0] },
-      { name: 'Achievement Score', data: [0, 0, 0, 0] },
-    ]
+    return [{ name: 'Quarterly Accomplishment Rate (%)', data: [0, 0, 0, 0] }]
   }
   const quarters = quarterlyTrend.value.quarters
-  return [
-    { name: 'Indicators with Target', data: quarters.map((q: any) => q.target_rate || 0) },
-    { name: 'Achievement Score', data: quarters.map((q: any) => q.actual_rate || 0) },
-  ]
+  return [{
+    name: 'Quarterly Accomplishment Rate (%)',
+    data: quarters.map((q: any) => q.accomplishment_rate_pct != null
+      ? parseFloat(q.accomplishment_rate_pct.toFixed(1))
+      : 0),
+  }]
 })
 
 // Phase EE-C: YoY chart — all 4 pillars as separate series
@@ -1511,10 +1532,15 @@ onMounted(async () => {
 
       <v-divider />
 
-      <!-- Analytics Loading State -->
-      <v-card-text v-if="analyticsLoading" class="text-center py-8">
-        <v-progress-circular indeterminate color="primary" size="48" />
-        <div class="mt-4 text-grey">Loading analytics...</div>
+      <!-- Analytics Loading State (Phase PPP-A3: skeleton loaders) -->
+      <v-card-text v-if="analyticsLoading" class="pa-3">
+        <v-row dense class="mb-3">
+          <v-col v-for="n in 4" :key="n" cols="6" sm="3"><v-skeleton-loader type="card" height="80" /></v-col>
+        </v-row>
+        <v-row dense>
+          <v-col cols="12" md="6"><v-skeleton-loader type="card" height="280" /></v-col>
+          <v-col cols="12" md="6"><v-skeleton-loader type="card" height="280" /></v-col>
+        </v-row>
       </v-card-text>
 
       <!-- Analytics Charts -->
@@ -1610,7 +1636,7 @@ onMounted(async () => {
                       <template #prepend>
                         <v-icon size="small" color="amber-darken-2" class="mr-3">mdi-menu-down</v-icon>
                       </template>
-                      <v-list-item-title class="text-body-2 font-weight-bold">Pillar Filter</v-list-item-title>
+                      <v-list-item-title class="text-body-2 font-weight-bold">Program Filter</v-list-item-title>
                       <v-list-item-subtitle class="text-body-2" style="white-space: normal;">Use the dropdown at the top to view all pillars at once, or select a specific pillar to focus on its data.</v-list-item-subtitle>
                     </v-list-item>
                     <v-list-item class="px-0">
@@ -1643,7 +1669,7 @@ onMounted(async () => {
 
                   <div class="font-weight-bold mb-2">
                     <v-icon size="x-small" color="deep-purple" class="mr-1">mdi-compare</v-icon>
-                    Physical vs Financial Performance by Pillar
+                    Physical vs Financial Performance by Program
                   </div>
                   <p class="mb-1">This bar chart places Physical and Financial performance side by side for each pillar.</p>
                   <p class="mb-1">Each pillar has two bars — blue for Physical accomplishment rate, orange for Financial utilization rate.</p>
@@ -1666,13 +1692,13 @@ onMounted(async () => {
                   </div>
 
                   <div class="ml-3 mb-3">
-                    <p class="font-weight-medium mb-1">Pillar Completion Overview</p>
+                    <p class="font-weight-medium mb-1">Program Completion Overview</p>
                     <p class="mb-3">Four clickable cards — one per pillar — showing indicator counts, data completion rate, and accomplishment rate. Click any card to go directly to the Physical Accomplishment page for that pillar.</p>
 
-                    <p class="font-weight-medium mb-1">Achievement Rate by Pillar (%)</p>
+                    <p class="font-weight-medium mb-1">Achievement Rate by Program (%)</p>
                     <p class="mb-3">A bar chart showing each pillar's overall accomplishment rate. A bar at 100% means all indicator targets for that pillar were met.</p>
 
-                    <p class="font-weight-medium mb-1">Pillar Performance Ranking (horizontal bar)</p>
+                    <p class="font-weight-medium mb-1">Program Performance Ranking (horizontal bar)</p>
                     <p class="mb-3">A horizontal bar chart showing pillars ranked by accomplishment rate, highest to lowest. The red dashed line marks the 100% target. Click a bar to drill into that pillar's data.</p>
 
                     <p class="font-weight-medium mb-1">Quarterly Trend</p>
@@ -1707,7 +1733,7 @@ onMounted(async () => {
 
                   <div class="font-weight-bold mb-2">
                     <v-icon size="x-small" color="success" class="mr-1">mdi-chart-donut</v-icon>
-                    Utilization Rate by Pillar (%)
+                    Utilization Rate by Program (%)
                   </div>
                   <p class="mb-3">A radial chart showing what percentage of each pillar's approved budget has been committed. A fuller circle means higher utilization.</p>
 
@@ -1728,7 +1754,7 @@ onMounted(async () => {
 
                   <div class="font-weight-bold mb-2">
                     <v-icon size="x-small" color="success" class="mr-1">mdi-table</v-icon>
-                    Expense Class Breakdown by Pillar
+                    Expense Class Breakdown by Program
                   </div>
                   <p class="mb-3">A table showing PS, MOOE, and CO obligation amounts per pillar with utilization rates.</p>
 
@@ -1755,9 +1781,9 @@ onMounted(async () => {
                   <li>COUNT/WEIGHTED_COUNT: <code>(sum_actual ÷ sum_target) × 100</code></li>
                   <li>PERCENTAGE: <code>(avg_actual ÷ avg_target) × 100</code></li>
                 </ul>
-                <p class="mb-1"><strong>Per pillar per year:</strong><br>
+                <p class="mb-1"><strong>Per program per year:</strong><br>
                 Average of all valid indicator achievement rates (NULL indicators excluded).</p>
-                <p class="text-grey text-caption mb-0"><em>Pillars are computed independently — cross-pillar averaging is never applied to per-pillar rates.</em></p>
+                <p class="text-grey text-caption mb-0"><em>Programs are computed independently — cross-program averaging is never applied to per-program rates.</em></p>
               </div>
 
             </v-expansion-panel-text>
@@ -1802,11 +1828,17 @@ onMounted(async () => {
             </v-col>
           </v-row>
 
+          <!-- Phase PPP-A3: section label -->
+          <div class="d-flex align-center ga-2 mb-3 mt-2">
+            <v-icon size="16" color="grey-darken-2">mdi-compare</v-icon>
+            <span class="text-caption text-grey-darken-2 font-weight-bold text-uppercase">Cross-Module Performance</span>
+            <v-divider class="flex-grow-1 ml-2" />
+          </div>
           <!-- Per-Pillar Cross Comparison Chart -->
-          <v-card variant="outlined" class="mb-2">
+          <v-card elevation="1" rounded="lg" class="mb-2">
             <v-card-title class="text-subtitle-1 d-flex align-center">
               <v-icon start size="small" color="deep-purple">mdi-compare</v-icon>
-              Physical vs Financial Performance by Pillar
+              Physical vs Financial Performance by Program
             </v-card-title>
             <v-card-text class="pa-2">
               <VueApexCharts
@@ -1819,7 +1851,7 @@ onMounted(async () => {
           </v-card>
 
           <!-- Phase GT-4: Efficiency Classification Cards (Directive 323) -->
-          <v-card variant="outlined" class="mb-2 mt-3" v-if="pillarSummary?.pillars?.length && financialPillarSummary?.pillars?.length">
+          <v-card elevation="1" rounded="lg" class="mb-2 mt-3" v-if="pillarSummary?.pillars?.length && financialPillarSummary?.pillars?.length">
             <v-card-title class="text-subtitle-1 d-flex align-center">
               <v-icon start size="small" color="deep-purple">mdi-clipboard-check-outline</v-icon>
               Efficiency Classification — FY {{ selectedFiscalYear }}
@@ -1850,7 +1882,7 @@ onMounted(async () => {
           </v-card>
 
           <!-- Phase FO-3: Cross-Module Year-over-Year Comparison -->
-          <v-card variant="outlined" class="mb-2 mt-3" v-if="yearlyComparison?.years?.length || financialYearlyComparison?.years?.length">
+          <v-card elevation="1" rounded="lg" class="mb-2 mt-3" v-if="yearlyComparison?.years?.length || financialYearlyComparison?.years?.length">
             <v-card-title class="text-subtitle-1 d-flex align-center">
               <v-icon start size="small" color="deep-purple">mdi-chart-timeline-variant</v-icon>
               Year-over-Year — Physical vs Financial Performance
@@ -1882,12 +1914,18 @@ onMounted(async () => {
 
         <!-- Dashboard View: existing charts -->
         <div v-if="physicalViewMode === 'DASHBOARD'">
-        <!-- Phase DR-C1: Pillar Completion Overview (FIRST analytics section) -->
+        <!-- Phase PPP-A3: section label -->
+        <div class="d-flex align-center ga-2 mb-3 mt-2">
+          <v-icon size="16" color="grey-darken-2">mdi-clipboard-list-outline</v-icon>
+          <span class="text-caption text-grey-darken-2 font-weight-bold text-uppercase">Program Completion</span>
+          <v-divider class="flex-grow-1 ml-2" />
+        </div>
+        <!-- Phase DR-C1: Program Completion Overview (FIRST analytics section) -->
         <v-row class="mb-4" v-if="pillarSummary?.pillars">
           <v-col cols="12">
             <div class="text-subtitle-1 font-weight-medium mb-3 d-flex align-center">
               <v-icon start size="small" color="primary">mdi-view-dashboard</v-icon>
-              Pillar Completion Overview
+              Program Completion Overview
             </div>
           </v-col>
           <v-col v-for="pillar in PILLARS" :key="pillar.id" cols="6" md="3">
@@ -1950,13 +1988,19 @@ onMounted(async () => {
           </v-col>
         </v-row>
 
-        <!-- Phase EE-B: Achievement Rate by Pillar (%) — global filter controlled -->
+        <!-- Phase PPP-A3: section label -->
+        <div class="d-flex align-center ga-2 mb-3 mt-2">
+          <v-icon size="16" color="grey-darken-2">mdi-chart-bar</v-icon>
+          <span class="text-caption text-grey-darken-2 font-weight-bold text-uppercase">Physical Performance</span>
+          <v-divider class="flex-grow-1 ml-2" />
+        </div>
+        <!-- Phase EE-B: Achievement Rate by Program (%) — global filter controlled -->
         <v-row class="mb-4">
           <v-col cols="12">
             <v-card variant="tonal" class="h-100">
               <v-card-title class="text-subtitle-1 d-flex align-center">
                 <v-icon start size="small" color="primary">mdi-chart-bar-stacked</v-icon>
-                Target vs Actual Achievement Rate by Pillar — FY {{ selectedFiscalYear }}
+                Target vs Actual Achievement Rate by Program — FY {{ selectedFiscalYear }}
               </v-card-title>
               <v-card-text>
                 <ClientOnly>
@@ -1979,12 +2023,12 @@ onMounted(async () => {
 
         <!-- Phase GT-3: Row 2 — Ranked Bar + Trend in equal halves -->
         <v-row class="mb-4">
-          <!-- Pillar Performance Ranking -->
+          <!-- Program Performance Ranking -->
           <v-col cols="12" md="6">
             <v-card variant="tonal" class="h-100">
               <v-card-title class="text-subtitle-1 d-flex align-center">
                 <v-icon start size="small" color="primary">mdi-sort-descending</v-icon>
-                Pillar Performance Ranking
+                Program Performance Ranking
               </v-card-title>
               <v-card-text>
                 <ClientOnly>
@@ -2026,7 +2070,7 @@ onMounted(async () => {
             <v-card variant="tonal" class="h-100">
               <v-card-title class="text-subtitle-1 d-flex align-center">
                 <v-icon start size="small" color="orange">mdi-chart-bar</v-icon>
-                Year-over-Year Comparison — Accomplishment Rate by Pillar (%)
+                Year-over-Year Comparison — Accomplishment Rate by Program (%)
               </v-card-title>
               <v-card-text>
                 <ClientOnly>
@@ -2226,6 +2270,12 @@ onMounted(async () => {
         <!-- Phase EZ-D: Financial accomplishments analytics -->
         <template v-else-if="selectedReportingType === 'FINANCIAL'">
 
+        <!-- Phase PPP-A3: section label -->
+        <div class="d-flex align-center ga-2 mb-3 mt-2">
+          <v-icon size="16" color="grey-darken-2">mdi-cash-multiple</v-icon>
+          <span class="text-caption text-grey-darken-2 font-weight-bold text-uppercase">Budget Utilization</span>
+          <v-divider class="flex-grow-1 ml-2" />
+        </div>
         <!-- Row 1: Financial Pillar Overview Cards -->
         <v-row class="mb-4" v-if="financialPillarSummary?.pillars?.length">
           <v-col cols="12">
@@ -2290,7 +2340,7 @@ onMounted(async () => {
             <v-card variant="tonal" class="h-100">
               <v-card-title class="text-subtitle-1 d-flex align-center">
                 <v-icon start size="small" color="purple">mdi-office-building</v-icon>
-                Budget Obligations by Campus and Pillar
+                Budget Obligations by Campus and Program
               </v-card-title>
               <v-card-text>
                 <ClientOnly>
@@ -2311,13 +2361,19 @@ onMounted(async () => {
           </v-col>
         </v-row>
 
+        <!-- Phase PPP-A3: section label -->
+        <div class="d-flex align-center ga-2 mb-3 mt-2">
+          <v-icon size="16" color="grey-darken-2">mdi-chart-donut</v-icon>
+          <span class="text-caption text-grey-darken-2 font-weight-bold text-uppercase">Financial Analytics</span>
+          <v-divider class="flex-grow-1 ml-2" />
+        </div>
         <!-- Row 2: Utilization Radial + Expense Class Donut -->
         <v-row class="mb-4">
           <v-col cols="12" md="6">
             <v-card variant="tonal" class="h-100">
               <v-card-title class="text-subtitle-1 d-flex align-center">
                 <v-icon start size="small" color="primary">mdi-chart-donut</v-icon>
-                Utilization Rate by Pillar (%)
+                Utilization Rate by Program (%)
               </v-card-title>
               <v-card-text>
                 <ClientOnly>
@@ -2369,13 +2425,13 @@ onMounted(async () => {
             <v-card variant="tonal">
               <v-card-title class="text-subtitle-1 d-flex align-center">
                 <v-icon start size="small" color="primary">mdi-table</v-icon>
-                Expense Class Breakdown by Pillar (Obligations ₱)
+                Expense Class Breakdown by Program (Obligations ₱)
               </v-card-title>
               <v-card-text class="pa-0">
                 <v-table density="comfortable">
                   <thead>
                     <tr>
-                      <th>Pillar</th>
+                      <th>Program</th>
                       <th class="text-right">PS</th>
                       <th class="text-right">MOOE</th>
                       <th class="text-right">CO</th>
@@ -2408,7 +2464,7 @@ onMounted(async () => {
             <v-card variant="tonal" class="h-100">
               <v-card-title class="text-subtitle-1 d-flex align-center">
                 <v-icon start size="small" color="orange">mdi-chart-bar</v-icon>
-                Year-over-Year Comparison — Utilization Rate by Pillar (%)
+                Year-over-Year Comparison — Utilization Rate by Program (%)
               </v-card-title>
               <v-card-text>
                 <ClientOnly>
