@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { adaptProjects, type UIProject, type BackendProject, type PublicationStatus } from '~/utils/adapters'
+import { getStatusColor, getPublicationStatusColor, STATUS_HEX } from '~/utils/status-colors'
+import { formatDate, formatRelativeDate } from '~/utils/date-utils'
 import VueApexCharts from 'vue3-apexcharts'
 
 definePageMeta({
@@ -28,29 +30,75 @@ const rejecting = ref(false)
 // Action state
 const actionLoading = ref<string | null>(null)
 
-// Table headers - publication status visible to all users
-const headers = computed(() => {
-  return [
-    { title: 'Project Name', key: 'projectName', sortable: true },
-    { title: 'Campus', key: 'campus', sortable: true },
-    { title: 'Status', key: 'status', sortable: true },
-    { title: 'Publication', key: 'publicationStatus', sortable: true },
-    { title: 'Contract Amount', key: 'totalContractAmount', sortable: true, align: 'end' as const },
-    { title: 'Progress', key: 'physicalAccomplishment', sortable: true, align: 'center' as const },
-    { title: 'Actions', key: 'actions', sortable: false, align: 'center' as const },
-  ]
+// OOO-G: Table page-size and sort — persisted in localStorage.
+const itemsPerPage = ref(25)
+const sortBy = ref<Array<{ key: string; order: 'asc' | 'desc' }>>([{ key: 'projectName', order: 'asc' }])
+
+// LLL-B/C: Table headers + Column Manager.
+// `optional: true` columns can be toggled via the column manager (localStorage-persisted).
+// Default-hidden optional columns keep the default view focused (brief-required set visible).
+const ALL_COLUMNS = [
+  { title: 'Project Name',    key: 'projectName',           sortable: true, fixed: true, width: '260px' },
+  { title: 'Project Code',    key: 'projectCode',           sortable: true, optional: true },
+  { title: 'Campus',          key: 'campus',                sortable: true },
+  { title: 'Status',          key: 'status',                sortable: true },
+  { title: 'Publication',     key: 'publicationStatus',     sortable: true },
+  { title: 'Fund Source',     key: 'fundSource',            sortable: true },
+  { title: 'Orig. End',       key: 'originalCompletionDate', sortable: true, optional: true },
+  { title: 'Contract Amount', key: 'totalContractAmount',   sortable: true, align: 'end' as const },
+  { title: 'Progress',        key: 'physicalAccomplishment', sortable: true, align: 'center' as const },
+  { title: 'Original Start',  key: 'originalStartDate',     sortable: true, optional: true },
+  { title: 'Revised End',     key: 'revisedCompletionDate', sortable: true, optional: true },
+  { title: 'Contractor',      key: 'contractor',            sortable: true, optional: true },
+  { title: 'Revised Start',   key: 'revisedStartDate',      sortable: true, optional: true },
+  { title: 'Duration',        key: 'projectDuration',       sortable: false, optional: true },
+  { title: 'Created',         key: 'createdAt',             sortable: true, optional: true },
+  { title: 'Updated',         key: 'updatedAt',             sortable: true, optional: true },
+  { title: 'Actions',         key: 'actions',               sortable: false, align: 'center' as const },
+]
+const optionalColumns = ALL_COLUMNS.filter(c => (c as any).optional)
+// Brief-required columns visible by default; supplementary optionals hidden until toggled on.
+const DEFAULT_HIDDEN = ['originalStartDate', 'revisedCompletionDate', 'contractor', 'createdAt', 'revisedStartDate', 'projectDuration', 'updatedAt']
+const hiddenColumns = ref<Set<string>>(new Set(DEFAULT_HIDDEN))
+
+// MMM-H: filter instructional banner dismiss state
+const filterBannerDismissed = ref(false)
+function dismissFilterBanner() {
+  filterBannerDismissed.value = true
+  if (import.meta.client) localStorage.setItem('coi_filter_banner_dismissed', 'true')
+}
+
+onMounted(() => {
+  if (!import.meta.client) return
+  const stored = localStorage.getItem('coi_hidden_columns')
+  if (stored) {
+    try { hiddenColumns.value = new Set(JSON.parse(stored)) } catch { /* keep default */ }
+  }
+  filterBannerDismissed.value = localStorage.getItem('coi_filter_banner_dismissed') === 'true'
+  const savedPageSize = localStorage.getItem('coi_items_per_page')
+  if (savedPageSize) itemsPerPage.value = parseInt(savedPageSize, 10) || 25
+  const savedSort = localStorage.getItem('coi_sort_by')
+  if (savedSort) { try { sortBy.value = JSON.parse(savedSort) } catch { /* keep default */ } }
 })
 
-// Publication status color mapping
-function getPublicationStatusColor(status: PublicationStatus): string {
-  const colors: Record<PublicationStatus, string> = {
-    DRAFT: 'grey',
-    PENDING_REVIEW: 'orange',
-    PUBLISHED: 'success',
-    REJECTED: 'error',
-  }
-  return colors[status] || 'grey'
+watch(hiddenColumns, (v) => {
+  if (import.meta.client) localStorage.setItem('coi_hidden_columns', JSON.stringify([...v]))
+}, { deep: true })
+watch(itemsPerPage, (v) => {
+  if (import.meta.client) localStorage.setItem('coi_items_per_page', String(v))
+})
+watch(sortBy, (v) => {
+  if (import.meta.client) localStorage.setItem('coi_sort_by', JSON.stringify(v))
+}, { deep: true })
+
+function toggleColumn(key: string, visible: boolean | null) {
+  if (visible) hiddenColumns.value.delete(key)
+  else hiddenColumns.value.add(key)
 }
+
+const headers = computed(() =>
+  ALL_COLUMNS.filter(c => !(c as any).optional || !hiddenColumns.value.has(c.key)),
+)
 
 // Publication status label mapping
 function getPublicationStatusLabel(status: PublicationStatus): string {
@@ -227,18 +275,6 @@ async function deleteProject() {
   }
 }
 
-// Status color mapping
-function getStatusColor(status: string): string {
-  const colors: Record<string, string> = {
-    ongoing: 'info',
-    completed: 'success',
-    pending: 'warning',
-    cancelled: 'error',
-    delayed: 'orange',
-  }
-  return colors[status?.toLowerCase()] || 'grey'
-}
-
 // Format currency
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-PH', {
@@ -258,8 +294,11 @@ const sortKey        = ref<'projectName'|'startDate'|'endDate'|'physicalAccompli
 const sortDir        = ref<'asc'|'desc'>('asc')
 const viewMode       = ref<'table'|'list'|'card'>('table')
 
-// LLL-C1: Advanced filters (collapsible) — project code + original/revised date ranges
+// LLL-E: 3-tier filters. Primary (search/status/campus) always visible; a simplified
+// advanced panel (project code + start-date range); and a full-search dialog holding the
+// complete original/revised date-range field set for power users.
 const showAdvancedFilters = ref(false)
+const showFullSearch      = ref(false)
 const filterProjectCode   = ref('')
 const filterOrigStartFrom = ref('')
 const filterOrigStartTo   = ref('')
@@ -304,6 +343,45 @@ const hasActiveFilters = computed(() =>
      filterRevStartFrom.value || filterRevStartTo.value ||
      filterRevEndFrom.value || filterRevEndTo.value)
 )
+
+const activeFilterChips = computed(() => {
+  const chips: Array<{ label: string; key: string }> = []
+  if (filterStatus.value)        chips.push({ label: `Status: ${filterStatus.value}`, key: 'status' })
+  if (filterCampus.value)        chips.push({ label: `Campus: ${filterCampus.value}`, key: 'campus' })
+  if (filterDateFrom.value)      chips.push({ label: `Start ≥ ${filterDateFrom.value}`, key: 'dateFrom' })
+  if (filterDateTo.value)        chips.push({ label: `Start ≤ ${filterDateTo.value}`, key: 'dateTo' })
+  if (search.value)              chips.push({ label: `Search: "${search.value}"`, key: 'search' })
+  if (filterProjectCode.value)   chips.push({ label: `Code: ${filterProjectCode.value}`, key: 'projectCode' })
+  if (filterOrigStartFrom.value) chips.push({ label: `Orig Start ≥ ${filterOrigStartFrom.value}`, key: 'origStartFrom' })
+  if (filterOrigStartTo.value)   chips.push({ label: `Orig Start ≤ ${filterOrigStartTo.value}`, key: 'origStartTo' })
+  if (filterOrigEndFrom.value)   chips.push({ label: `Orig End ≥ ${filterOrigEndFrom.value}`, key: 'origEndFrom' })
+  if (filterOrigEndTo.value)     chips.push({ label: `Orig End ≤ ${filterOrigEndTo.value}`, key: 'origEndTo' })
+  if (filterRevStartFrom.value)  chips.push({ label: `Rev Start ≥ ${filterRevStartFrom.value}`, key: 'revStartFrom' })
+  if (filterRevStartTo.value)    chips.push({ label: `Rev Start ≤ ${filterRevStartTo.value}`, key: 'revStartTo' })
+  if (filterRevEndFrom.value)    chips.push({ label: `Rev End ≥ ${filterRevEndFrom.value}`, key: 'revEndFrom' })
+  if (filterRevEndTo.value)      chips.push({ label: `Rev End ≤ ${filterRevEndTo.value}`, key: 'revEndTo' })
+  return chips
+})
+
+function removeFilterChip(key: string) {
+  const actions: Record<string, () => void> = {
+    status:       () => { filterStatus.value = '' },
+    campus:       () => { filterCampus.value = '' },
+    dateFrom:     () => { filterDateFrom.value = '' },
+    dateTo:       () => { filterDateTo.value = '' },
+    search:       () => { search.value = '' },
+    projectCode:  () => { filterProjectCode.value = '' },
+    origStartFrom:() => { filterOrigStartFrom.value = '' },
+    origStartTo:  () => { filterOrigStartTo.value = '' },
+    origEndFrom:  () => { filterOrigEndFrom.value = '' },
+    origEndTo:    () => { filterOrigEndTo.value = '' },
+    revStartFrom: () => { filterRevStartFrom.value = '' },
+    revStartTo:   () => { filterRevStartTo.value = '' },
+    revEndFrom:   () => { filterRevEndFrom.value = '' },
+    revEndTo:     () => { filterRevEndTo.value = '' },
+  }
+  actions[key]?.()
+}
 
 // MG / MF: Updated status taxonomy.
 const statusFilterOptions = [
@@ -370,18 +448,23 @@ function syncStatsFromAnalytics() {
   stats.value.pendingReview = projects.value.filter(p => p.publicationStatus === 'PENDING_REVIEW').length
 }
 
-// DDD-C: dashboard enrichment. LLL-D3: delayed count is now a DB aggregate
-// (ONGOING AND physical_progress < target_physical_progress) from the backend,
-// with a client-side fallback (50% threshold) only when analytics is unavailable.
-const DELAY_THRESHOLD = 50 // % physical progress; fallback threshold when backend analytics absent
-const delayedCount = computed(() => {
-  if (analyticsSummary.value && analyticsSummary.value.delayed_count != null) {
-    return Number(analyticsSummary.value.delayed_count) || 0
-  }
-  return projects.value.filter(
-    (p) => (p.status?.toUpperCase() === 'ONGOING') && (Number(p.physicalAccomplishment) || 0) < DELAY_THRESHOLD,
-  ).length
+// LLL-A: Published count — prefer DB aggregate, fall back to client-side publication status.
+const publishedCount = computed(() => {
+  const pub = (analyticsSummary.value?.by_publication_status || []) as Array<{ publication_status: string; count: number }>
+  const found = pub.find(p => p.publication_status === 'PUBLISHED')
+  if (found) return Number(found.count) || 0
+  return projects.value.filter(p => p.publicationStatus === 'PUBLISHED').length
 })
+
+// MMM-I: data-driven KPI cards with contextual tooltips (R-113)
+const kpiCards = computed(() => [
+  { key: 'total',     label: 'Total Projects',  value: stats.value.total,         icon: 'mdi-office-building', color: 'blue-lighten-1',  tooltip: 'Total infrastructure projects in the portfolio, across all publication statuses.' },
+  { key: 'published', label: 'Published',        value: publishedCount.value,      icon: 'mdi-check-decagram',  color: 'green-lighten-1', tooltip: 'Projects approved and visible on the public portal.' },
+  { key: 'ongoing',   label: 'Ongoing',          value: stats.value.ongoing,       icon: 'mdi-progress-clock',  color: 'info',    tooltip: 'Active construction projects currently in progress.' },
+  { key: 'completed', label: 'Completed',        value: stats.value.completed,     icon: 'mdi-check-circle',    color: 'teal',    tooltip: 'Projects where construction has been fully completed.' },
+  { key: 'pending',   label: 'Pending Review',   value: stats.value.pendingReview, icon: 'mdi-clipboard-clock', color: 'warning', tooltip: 'Projects submitted for publication approval, awaiting an admin decision.' },
+])
+
 // Role-gated recent activity (DDD-D5: admin endpoint — hidden for Staff/Viewer).
 const canViewActivity = computed(() => isAdmin.value || isSuperAdmin.value)
 const recentActivity = ref<Array<{ id: string; userName: string; action: string; entityType: string; createdAt: string }>>([])
@@ -404,6 +487,13 @@ async function fetchRecentActivity() {
     recentActivity.value = []
   }
 }
+
+// LLL-D: Recent Activity is an admin-only collapsible (default collapsed); logs are
+// fetched lazily on first expand to avoid an unnecessary request on initial page load.
+const activityExpanded = ref<number[]>([])
+watch(activityExpanded, (v) => {
+  if (v.length && !recentActivity.value.length) fetchRecentActivity()
+})
 
 // Filtered + sorted projects (search + status + campus + date + sort)
 const filteredProjects = computed(() => {
@@ -515,22 +605,6 @@ const budgetGauge = computed(() => {
   }
 })
 
-const ATTN_LIMIT = 5
-const attentionItems = computed(() =>
-  projects.value.filter((p) => {
-    const s = p.status?.toUpperCase()
-    const ps = p.publicationStatus
-    return (s === 'ONGOING' && (Number(p.physicalAccomplishment) || 0) < DELAY_THRESHOLD)
-      || ps === 'PENDING_REVIEW' || ps === 'REJECTED'
-  }).slice(0, ATTN_LIMIT),
-)
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
-}
-
 const upcomingCompletions = computed(() => {
   const now = new Date()
   const cutoff = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
@@ -546,23 +620,6 @@ const upcomingCompletions = computed(() => {
     return da - db
   }).slice(0, 5)
 })
-
-const slowMovingProjects = computed(() =>
-  projects.value.filter(p =>
-    (p.status || '').toUpperCase() === 'ONGOING' && (Number(p.physicalAccomplishment) || 0) < 25,
-  ).sort((a, b) => (Number(a.physicalAccomplishment) || 0) - (Number(b.physicalAccomplishment) || 0))
-    .slice(0, 5),
-)
-
-const statusPips = computed(() =>
-  (analyticsSummary.value?.by_status || []).map((s: any) => ({
-    status: s.status as string,
-    count: s.count as number,
-    color: (s.status === 'COMPLETED' || s.status === 'COMPLETE') ? 'success'
-      : s.status === 'ONGOING' ? 'info'
-      : s.status === 'CANCELLED' ? 'error' : 'grey',
-  })),
-)
 
 const statusChartOptions = computed(() => ({
   chart: {
@@ -681,8 +738,8 @@ const campusProgressChart = computed(() => {
     options: {
       chart: { type: 'bar' as const, toolbar: { show: false } },
       plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
-      xaxis: { max: 100, labels: { formatter: (v: string) => `${v}%` } },
-      yaxis: { categories: sorted.map(d => d.campus || 'Unknown') },
+      xaxis: { categories: sorted.map(d => d.campus || 'Unknown') },
+      yaxis: { max: 100, labels: { formatter: (v: any) => `${v}%` } },
       colors: ['#7c3aed'],
       dataLabels: { enabled: true, formatter: (v: any) => `${Number(v).toFixed(1)}%` },
     },
@@ -711,10 +768,6 @@ const budgetByCampusChart = computed(() => {
 // III-D: Contract value by status donut
 const contractByStatusChart = computed(() => {
   const data = (analyticsSummary.value?.by_status || []) as Array<{ status: string; total_contract: number }>
-  const STATUS_COLORS: Record<string, string> = {
-    ONGOING: '#3b82f6', COMPLETE: '#059669', COMPLETED: '#059669',
-    ON_HOLD: '#f59e0b', CANCELLED: '#ef4444', PROPOSAL: '#6b7280',
-  }
   const fmt = (v: number) => {
     if (v >= 1_000_000_000) return `₱${(v / 1_000_000_000).toFixed(1)}B`
     if (v >= 1_000_000) return `₱${(v / 1_000_000).toFixed(1)}M`
@@ -725,7 +778,7 @@ const contractByStatusChart = computed(() => {
     options: {
       chart: { type: 'donut' as const, toolbar: { show: false } },
       labels: data.map(d => d.status),
-      colors: data.map(d => STATUS_COLORS[d.status] || '#9ca3af'),
+      colors: data.map(d => STATUS_HEX[d.status] || '#9ca3af'),
       legend: { position: 'bottom' as const },
       tooltip: { y: { formatter: fmt } },
     },
@@ -749,14 +802,14 @@ const contractorChart = computed(() => {
     options: {
       chart: { type: 'bar' as const, toolbar: { show: false } },
       plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
-      yaxis: { categories: data.map(d => truncate(d.contractor_name || '')) },
+      xaxis: { categories: data.map(d => truncate(d.contractor_name || '')) },
       colors: ['#0ea5e9'],
       dataLabels: { enabled: false },
     },
   }
 })
 
-onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
+onMounted(() => { fetchProjects(); fetchAnalytics() })
 </script>
 
 <template>
@@ -787,140 +840,74 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
     <!-- Projects Tab -->
     <v-window-item value="projects">
 
-    <!-- GGG-B: Quick Actions strip -->
-    <v-row dense class="mb-3">
-      <v-col cols="12" class="d-flex flex-wrap ga-2">
-        <v-btn v-if="canAdd('coi')" color="primary" prepend-icon="mdi-plus" size="small" @click="createProject">New Project</v-btn>
-        <v-btn color="warning" variant="tonal" prepend-icon="mdi-clipboard-check-outline" size="small" @click="filterStatus = 'PENDING_REVIEW'; activeTab = 'projects'">
-          Review Projects
-          <v-badge v-if="stats.pendingReview > 0" :content="stats.pendingReview" color="error" floating inline />
-        </v-btn>
-        <v-btn color="info" variant="tonal" prepend-icon="mdi-chart-bar" size="small" @click="activeTab = 'analytics'">Portfolio Analytics</v-btn>
-        <v-btn color="grey-darken-1" variant="tonal" prepend-icon="mdi-earth" size="small" :to="'/coi/public'">Public View</v-btn>
+    <!-- GGG-B / MMM-G: Action strip — primary action left, navigation actions right.
+         "Review Projects" removed (redundant with Pending Review KPI + Status filter). -->
+    <div class="d-flex flex-wrap align-center ga-2 mb-3">
+      <v-spacer />
+      <v-btn color="info" variant="tonal" prepend-icon="mdi-chart-bar" size="small" @click="activeTab = 'analytics'">Portfolio Analytics</v-btn>
+      <v-btn color="grey-darken-1" variant="tonal" prepend-icon="mdi-earth" size="small" :to="'/coi/public'">Public View</v-btn>
+    </div>
+
+    <!-- LLL-F / NNN-J: Portfolio Summary section banner -->
+    <div class="mb-3">
+      <div class="d-flex align-center ga-2 mb-1">
+        <v-icon size="16" color="grey-darken-2">mdi-chart-box</v-icon>
+        <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Portfolio Summary</span>
+        <v-divider class="flex-grow-1 ml-1" />
+      </div>
+      <div class="text-caption text-grey-darken-1">Real-time overview of infrastructure project metrics across all campuses.</div>
+    </div>
+
+    <!-- LLL-A / MMM-I / OOO-F: KPI Stats Panel — responsive grid, contextual tooltips -->
+    <v-row dense class="mb-4">
+      <v-col
+        v-for="kpi in kpiCards"
+        :key="kpi.key"
+        cols="6"
+        sm="4"
+        lg="auto"
+        class="flex-lg-grow-1"
+      >
+        <v-tooltip
+          :text="kpi.tooltip"
+          location="bottom"
+          max-width="240"
+          open-on-focus
+        >
+          <template #activator="{ props: tipProps }">
+            <v-card
+              v-bind="tipProps"
+              :color="kpi.color"
+              variant="tonal"
+              class="pa-3 d-flex align-center ga-3 h-100 kpi-card"
+              tabindex="0"
+              role="img"
+              :aria-label="`${kpi.label}: ${kpi.value}. ${kpi.tooltip}`"
+            >
+              <v-icon :icon="kpi.icon" size="20" />
+              <div>
+                <p class="text-caption text-grey-darken-1">{{ kpi.label }}</p>
+                <p class="text-h6 font-weight-bold">{{ kpi.value }}</p>
+              </div>
+            </v-card>
+          </template>
+        </v-tooltip>
       </v-col>
     </v-row>
 
-    <!-- KPI Stats Panel — 8 cards × md="3" (4 per row on md+) -->
-    <v-row class="mb-3" dense>
-      <v-col cols="6" sm="4" md="3">
-        <v-card color="success" variant="tonal" class="pa-3 d-flex align-center ga-3">
-          <v-icon icon="mdi-check-circle" size="32" />
-          <div>
-            <p class="text-body-2 font-weight-medium">Completed</p>
-            <p class="text-h4 font-weight-bold">{{ stats.completed }}</p>
-          </div>
-        </v-card>
-      </v-col>
-      <v-col cols="6" sm="4" md="3">
-        <v-card color="info" variant="tonal" class="pa-3 d-flex align-center ga-3">
-          <v-icon icon="mdi-progress-clock" size="32" />
-          <div>
-            <p class="text-body-2 font-weight-medium">Ongoing</p>
-            <p class="text-h4 font-weight-bold">{{ stats.ongoing }}</p>
-          </div>
-        </v-card>
-      </v-col>
-      <v-col cols="6" sm="4" md="3">
-        <v-card color="error" variant="tonal" class="pa-3 d-flex align-center ga-3">
-          <v-icon icon="mdi-alert-decagram" size="32" />
-          <div>
-            <p class="text-body-2 font-weight-medium">Delayed</p>
-            <p class="text-h4 font-weight-bold">{{ delayedCount }}</p>
-          </div>
-        </v-card>
-      </v-col>
-      <v-col cols="6" sm="4" md="3">
-        <v-card color="warning" variant="tonal" class="pa-3 d-flex align-center ga-3">
-          <v-icon icon="mdi-clipboard-clock" size="32" />
-          <div>
-            <p class="text-body-2 font-weight-medium">Pending Review</p>
-            <p class="text-h4 font-weight-bold">{{ stats.pendingReview }}</p>
-          </div>
-        </v-card>
-      </v-col>
-      <v-col cols="6" sm="4" md="3">
-        <v-card color="teal" variant="tonal" class="pa-3 d-flex align-center ga-3">
-          <v-icon icon="mdi-cash-multiple" size="32" />
-          <div>
-            <p class="text-body-2 font-weight-medium">Total Budget</p>
-            <p class="text-h6 font-weight-bold">{{ formatCurrencyShort(stats.totalContractValue) }}</p>
-          </div>
-        </v-card>
-      </v-col>
-      <v-col cols="6" sm="4" md="3">
-        <v-card color="deep-purple" variant="tonal" class="pa-3 d-flex align-center ga-3">
-          <v-icon icon="mdi-trending-up" size="32" />
-          <div>
-            <p class="text-body-2 font-weight-medium">Avg Progress</p>
-            <p class="text-h5 font-weight-bold">{{ stats.avgProgress.toFixed(1) }}%</p>
-          </div>
-        </v-card>
-      </v-col>
-      <v-col cols="6" sm="4" md="3">
-        <v-card color="amber" variant="tonal" class="pa-3 d-flex align-center ga-3">
-          <v-icon icon="mdi-pause-circle" size="32" />
-          <div>
-            <p class="text-body-2 font-weight-medium">On Hold</p>
-            <p class="text-h4 font-weight-bold">{{ stats.onHold }}</p>
-          </div>
-        </v-card>
-      </v-col>
-      <v-col cols="6" sm="4" md="3">
-        <v-card color="teal-darken-1" variant="tonal" class="pa-3 d-flex align-center ga-3">
-          <v-icon icon="mdi-cash-check" size="32" />
-          <div>
-            <p class="text-body-2 font-weight-medium">Cost Utilized</p>
-            <p class="text-h6 font-weight-bold">{{ formatCurrencyShort(stats.costUtilized) }}</p>
-          </div>
-        </v-card>
-      </v-col>
-    </v-row>
+    <!-- PPP-B5: Executive Overview section label -->
+    <div v-if="analyticsReady" class="d-flex align-center ga-2 mb-2 mt-1">
+      <v-icon size="16" color="grey-darken-2">mdi-view-dashboard-outline</v-icon>
+      <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Executive Overview</span>
+      <v-divider class="flex-grow-1 ml-1" />
+    </div>
 
-    <!-- EEE-A: Tier 1 Analytics block (replaces DDD-C publication row; activity relocated below table) -->
+    <!-- LLL-G/H: Executive overview — Cost Utilization + Campus bars + Upcoming Completions
+         (hero strip, Needs Attention, and Slow-Moving negative panels removed → analytics tab) -->
     <template v-if="analyticsReady">
-      <!-- Hero strip -->
-      <v-card class="mb-3 pa-4" variant="outlined">
-        <v-row align="center" dense>
-          <v-col cols="12" md="4">
-            <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase">Portfolio Budget</div>
-            <div class="text-h4 font-weight-bold">{{ formatCurrencyShort(stats.totalContractValue) }}</div>
-            <div class="text-caption text-grey">{{ stats.total }} projects · avg {{ stats.avgProgress.toFixed(1) }}% physical progress</div>
-          </v-col>
-          <v-col cols="12" md="5">
-            <div class="text-caption text-grey mb-1">Overall Portfolio Progress</div>
-            <v-progress-linear :model-value="stats.avgProgress" height="12" rounded color="primary" />
-            <div class="d-flex flex-wrap ga-1 mt-2">
-              <v-chip
-                v-for="pip in statusPips"
-                :key="pip.status"
-                :color="pip.color"
-                size="x-small"
-                variant="tonal"
-                style="cursor:pointer"
-                @click="drillToStatus(pip.status)"
-              >
-                {{ pip.status }}: {{ pip.count }}
-              </v-chip>
-            </div>
-            <div class="text-caption text-grey mt-1">
-              <v-icon size="11" class="mr-1">mdi-cursor-default-click</v-icon>Click a status to filter
-            </div>
-          </v-col>
-          <v-col cols="12" md="3" class="d-flex justify-md-end">
-            <v-chip v-if="attentionItems.length" color="error" variant="tonal" size="small" prepend-icon="mdi-alert">
-              {{ attentionItems.length }} project{{ attentionItems.length > 1 ? 's' : '' }} need attention
-            </v-chip>
-            <v-chip v-else color="success" variant="tonal" size="small" prepend-icon="mdi-check-circle">
-              All projects on track
-            </v-chip>
-          </v-col>
-        </v-row>
-      </v-card>
-
-      <!-- Budget gauge + Campus bars + Needs-attention list -->
       <v-row dense class="mb-3">
         <v-col cols="12" md="4">
-          <v-card variant="outlined" class="h-100 pa-3">
+          <v-card elevation="1" rounded="lg" class="h-100 pa-3">
             <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">Cost Utilization</div>
             <div class="mb-2">
               <div class="d-flex justify-space-between text-caption mb-1">
@@ -938,7 +925,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
         </v-col>
 
         <v-col cols="12" md="4">
-          <v-card variant="outlined" class="h-100 pa-3">
+          <v-card elevation="1" rounded="lg" class="h-100 pa-3">
             <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">Projects by Campus</div>
             <div
               v-for="campus in campusBars"
@@ -965,32 +952,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
         </v-col>
 
         <v-col cols="12" md="4">
-          <v-card variant="outlined" class="h-100 pa-3">
-            <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">
-              <v-icon icon="mdi-alert" size="small" color="error" class="mr-1" />Needs Attention
-            </div>
-            <div v-if="!attentionItems.length" class="text-caption text-grey py-2">No projects need attention.</div>
-            <v-list v-else density="compact" class="pa-0">
-              <v-list-item
-                v-for="p in attentionItems" :key="p.id"
-                class="px-0 cursor-pointer"
-                @click="router.push(`/coi/detail-${p.id}`)"
-              >
-                <v-list-item-title class="text-caption font-weight-medium text-truncate">{{ p.projectName }}</v-list-item-title>
-                <v-list-item-subtitle class="d-flex ga-1 flex-wrap mt-0">
-                  <v-chip v-if="p.publicationStatus === 'REJECTED'" size="x-small" color="error" variant="tonal">Rejected</v-chip>
-                  <v-chip v-else-if="p.publicationStatus === 'PENDING_REVIEW'" size="x-small" color="warning" variant="tonal">Pending</v-chip>
-                  <v-chip v-else size="x-small" color="orange" variant="tonal">Delayed</v-chip>
-                </v-list-item-subtitle>
-              </v-list-item>
-            </v-list>
-          </v-card>
-        </v-col>
-      </v-row>
-      <!-- GGG-C: Executive Monitoring — Upcoming Completions + Slow-Moving Projects -->
-      <v-row dense class="mb-3">
-        <v-col cols="12" md="6">
-          <v-card variant="outlined" class="h-100 pa-3">
+          <v-card elevation="1" rounded="lg" class="h-100 pa-3">
             <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">
               <v-icon icon="mdi-calendar-clock" size="small" color="info" class="mr-1" />Completing in 30 Days
             </div>
@@ -1010,37 +972,35 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
             </v-list>
           </v-card>
         </v-col>
-        <v-col cols="12" md="6">
-          <v-card variant="outlined" class="h-100 pa-3">
-            <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">
-              <v-icon icon="mdi-turtle" size="small" color="warning" class="mr-1" />Slow-Moving Projects
-              <span class="font-weight-regular text-lowercase"> (ongoing, &lt;25%)</span>
-            </div>
-            <div v-if="!slowMovingProjects.length" class="text-caption text-grey py-2">No slow-moving projects.</div>
-            <v-list v-else density="compact" class="pa-0">
-              <v-list-item
-                v-for="p in slowMovingProjects"
-                :key="p.id"
-                class="px-0 cursor-pointer"
-                @click="router.push(`/coi/detail-${p.id}`)"
-              >
-                <v-list-item-title class="text-caption font-weight-medium text-truncate">{{ p.projectName }}</v-list-item-title>
-                <v-list-item-subtitle class="d-flex align-center ga-2 mt-0">
-                  <v-progress-linear :model-value="Number(p.physicalAccomplishment) || 0" color="warning" height="4" rounded style="max-width:80px" />
-                  <span class="text-caption text-warning">{{ (Number(p.physicalAccomplishment) || 0).toFixed(0) }}%</span>
-                </v-list-item-subtitle>
-              </v-list-item>
-            </v-list>
-          </v-card>
-        </v-col>
       </v-row>
     </template>
     <v-row v-else-if="analyticsLoading" dense class="mb-3">
-      <v-col cols="12"><v-skeleton-loader type="card" /></v-col>
+      <v-col v-for="n in 3" :key="n" cols="12" md="4"><v-skeleton-loader type="card" height="140" /></v-col>
     </v-row>
 
+    <!-- PPP-B4: Filters section label (breathing room after Executive Overview) -->
+    <div class="d-flex align-center ga-2 mb-2 mt-5">
+      <v-icon size="16" color="grey-darken-2">mdi-filter-variant</v-icon>
+      <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Filters</span>
+      <v-divider class="flex-grow-1 ml-1" />
+    </div>
+
+    <!-- MMM-H: Filter instructional banner (dismissible, localStorage-persisted) -->
+    <v-alert
+      v-if="!filterBannerDismissed"
+      type="info"
+      variant="tonal"
+      density="compact"
+      icon="mdi-filter-variant"
+      closable
+      class="mb-3"
+      @click:close="dismissFilterBanner"
+    >
+      Filter projects by status, campus, funding source, and timeline to refine portfolio analysis.
+    </v-alert>
+
     <!-- Filter Bar (III-B/C: extended with view modes, date filters, sort) -->
-    <v-card variant="outlined" rounded="lg" class="mb-3 pa-3">
+    <v-card elevation="1" rounded="lg" class="mb-3 pa-3">
       <!-- LLL-B: Primary filter bar — single compact row -->
       <v-row dense align="center">
         <v-col cols="12" sm="5" md="4">
@@ -1076,6 +1036,34 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
           />
         </v-col>
         <v-col cols="12" sm="12" md="4" class="d-flex align-center justify-end flex-wrap ga-1">
+          <!-- LLL-C: Column Manager (table view only) -->
+          <v-menu v-if="viewMode === 'table'" :close-on-content-click="false">
+            <template #activator="{ props: mp }">
+              <v-btn
+                v-bind="mp"
+                icon="mdi-table-column-plus-after"
+                size="small"
+                variant="text"
+                color="grey-darken-1"
+                title="Manage columns"
+              />
+            </template>
+            <v-list density="compact" min-width="220">
+              <v-list-subheader>Toggle Columns</v-list-subheader>
+              <v-list-item v-for="col in optionalColumns" :key="col.key">
+                <template #prepend>
+                  <v-checkbox
+                    :model-value="!hiddenColumns.has(col.key)"
+                    density="compact"
+                    hide-details
+                    color="primary"
+                    @update:model-value="v => toggleColumn(col.key, v)"
+                  />
+                </template>
+                <v-list-item-title class="text-body-2">{{ col.title }}</v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-menu>
           <v-btn
             :color="showAdvancedFilters ? 'primary' : 'grey-darken-1'"
             :variant="showAdvancedFilters ? 'tonal' : 'text'"
@@ -1111,36 +1099,41 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
             :title="sortDir === 'asc' ? 'Ascending' : 'Descending'"
             @click="sortDir = sortDir === 'asc' ? 'desc' : 'asc'"
           />
-          <v-btn-toggle
-            v-model="viewMode"
-            density="compact"
-            variant="outlined"
-            divided
-            mandatory
-            color="primary"
-          >
-            <v-btn value="list" size="small" :icon="true" title="List view"><v-icon size="18">mdi-format-list-bulleted</v-icon></v-btn>
-            <v-btn value="card" size="small" :icon="true" title="Card view"><v-icon size="18">mdi-view-grid-outline</v-icon></v-btn>
-            <v-btn value="table" size="small" :icon="true" title="Table view"><v-icon size="18">mdi-table</v-icon></v-btn>
-          </v-btn-toggle>
         </v-col>
       </v-row>
 
-      <!-- Project count line -->
-      <div class="text-body-2 text-grey-darken-1 mt-1">
+      <!-- Project count + active filter chips -->
+      <div class="text-body-2 text-grey-darken-1 mt-1 mb-1">
         {{ filteredProjects.length }} project{{ filteredProjects.length !== 1 ? 's' : '' }}
-        <span v-if="hasActiveFilters" class="text-medium-emphasis">(filtered)</span>
+      </div>
+      <div v-if="activeFilterChips.length" class="d-flex flex-wrap align-center ga-2 mt-1">
+        <span class="text-caption text-grey-darken-1 font-weight-medium">Active filters:</span>
+        <v-chip
+          v-for="chip in activeFilterChips"
+          :key="chip.key"
+          size="small"
+          closable
+          color="primary"
+          variant="tonal"
+          @click:close="removeFilterChip(chip.key)"
+        >{{ chip.label }}</v-chip>
+        <v-btn size="x-small" variant="text" color="error" @click="clearFilters">Clear all</v-btn>
       </div>
 
-      <!-- LLL-B/C: Advanced filters — collapsible panel -->
+      <!-- LLL-E: Simplified advanced panel — 3 fields + full-search trigger -->
       <v-expand-transition>
         <div v-if="showAdvancedFilters">
           <v-divider class="my-3" />
-          <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">
-            <v-icon icon="mdi-filter-cog-outline" size="small" class="mr-1" />Advanced Filters
+          <div class="d-flex align-center justify-space-between mb-2 flex-wrap ga-2">
+            <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase">
+              <v-icon icon="mdi-filter-cog-outline" size="small" class="mr-1" />Advanced Filters
+            </div>
+            <v-btn size="small" variant="text" color="primary" prepend-icon="mdi-tune-variant" @click="showFullSearch = true">
+              Full Search
+            </v-btn>
           </div>
           <v-row dense>
-            <v-col cols="12" sm="6" md="3">
+            <v-col cols="12" sm="6" md="4">
               <v-text-field
                 v-model="filterProjectCode"
                 label="Project Code / ID"
@@ -1151,40 +1144,40 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
                 prepend-inner-icon="mdi-identifier"
               />
             </v-col>
-            <v-col cols="6" sm="3" md="2">
-              <v-text-field v-model="filterOrigStartFrom" type="date" label="Orig. Start From" variant="outlined" density="compact" hide-details clearable />
-            </v-col>
-            <v-col cols="6" sm="3" md="2">
-              <v-text-field v-model="filterOrigStartTo" type="date" label="Orig. Start To" variant="outlined" density="compact" hide-details clearable />
-            </v-col>
-            <v-col cols="6" sm="3" md="2">
-              <v-text-field v-model="filterOrigEndFrom" type="date" label="Orig. End From" variant="outlined" density="compact" hide-details clearable />
-            </v-col>
-            <v-col cols="6" sm="3" md="2">
-              <v-text-field v-model="filterOrigEndTo" type="date" label="Orig. End To" variant="outlined" density="compact" hide-details clearable />
-            </v-col>
-            <v-col cols="6" sm="3" md="2">
-              <v-text-field v-model="filterRevStartFrom" type="date" label="Rev. Start From" variant="outlined" density="compact" hide-details clearable />
-            </v-col>
-            <v-col cols="6" sm="3" md="2">
-              <v-text-field v-model="filterRevStartTo" type="date" label="Rev. Start To" variant="outlined" density="compact" hide-details clearable />
-            </v-col>
-            <v-col cols="6" sm="3" md="2">
-              <v-text-field v-model="filterRevEndFrom" type="date" label="Rev. End From" variant="outlined" density="compact" hide-details clearable />
-            </v-col>
-            <v-col cols="6" sm="3" md="2">
-              <v-text-field v-model="filterRevEndTo" type="date" label="Rev. End To" variant="outlined" density="compact" hide-details clearable />
-            </v-col>
-            <v-col cols="6" sm="3" md="2">
+            <v-col cols="6" sm="3" md="4">
               <v-text-field v-model="filterDateFrom" type="date" label="Start From" variant="outlined" density="compact" hide-details clearable />
             </v-col>
-            <v-col cols="6" sm="3" md="2">
+            <v-col cols="6" sm="3" md="4">
               <v-text-field v-model="filterDateTo" type="date" label="Start To" variant="outlined" density="compact" hide-details clearable />
             </v-col>
           </v-row>
         </div>
       </v-expand-transition>
     </v-card>
+
+    <!-- LLL-F / NNN-J: Project List section banner + view switcher -->
+    <div class="mb-2">
+      <div class="d-flex align-center ga-2 mb-2 flex-wrap">
+        <v-icon size="16" color="grey-darken-2">mdi-format-list-bulleted</v-icon>
+        <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Project List</span>
+        <v-divider class="flex-grow-1 ml-1 mr-2" style="min-width:20px" />
+        <v-btn-toggle
+          v-model="viewMode"
+          variant="outlined"
+          divided
+          mandatory
+          color="primary"
+          class="flex-shrink-0"
+        >
+          <v-btn value="list" size="small" prepend-icon="mdi-format-list-bulleted" class="px-3">List</v-btn>
+          <v-btn value="card" size="small" prepend-icon="mdi-view-grid-outline" class="px-3">Card</v-btn>
+          <v-btn value="table" size="small" prepend-icon="mdi-table" class="px-3">Table</v-btn>
+        </v-btn-toggle>
+      </div>
+      <div class="text-caption text-grey-darken-1">
+        {{ filteredProjects.length }} project{{ filteredProjects.length !== 1 ? 's' : '' }} — use filters to narrow results.
+      </div>
+    </div>
 
     <!-- ── LIST VIEW ── -->
     <div v-if="viewMode === 'list'" class="d-flex flex-column ga-2 mb-4">
@@ -1284,13 +1277,20 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
     </div>
 
     <!-- ── TABLE VIEW (existing) ── -->
-    <v-card v-else>
+    <v-card v-else class="pa-0" elevation="1" rounded="lg">
+      <!-- LLL-C: horizontal scroll wrapper for optional/many columns -->
+      <div style="overflow-x:auto">
       <v-data-table
         :key="projects.length"
         :headers="headers"
         :items="filteredProjects"
         :loading="loading"
         :search="search"
+        v-model:items-per-page="itemsPerPage"
+        v-model:sort-by="sortBy"
+        :items-per-page-options="[{ value: 10, title: '10' }, { value: 25, title: '25' }, { value: 50, title: '50' }, { value: -1, title: 'All' }]"
+        fixed-header
+        height="600"
         item-value="id"
         hover
         class="elevation-0"
@@ -1451,41 +1451,99 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
           </v-menu>
         </template>
 
+        <!-- LLL-B/C: optional + new default columns -->
+        <template #item.projectCode="{ item }">
+          <span class="text-body-2">{{ item.projectCode || '—' }}</span>
+        </template>
+        <template #item.fundSource="{ item }">
+          <span class="text-body-2">{{ item.fundSource || '—' }}</span>
+        </template>
+        <template #item.originalCompletionDate="{ item }">
+          <span class="text-body-2">{{ formatDate(item.originalCompletionDate) }}</span>
+        </template>
+        <template #item.originalStartDate="{ item }">
+          <span class="text-body-2">{{ formatDate(item.originalStartDate) }}</span>
+        </template>
+        <template #item.revisedCompletionDate="{ item }">
+          <span class="text-body-2">{{ formatDate(item.revisedCompletionDate) }}</span>
+        </template>
+        <template #item.contractor="{ item }">
+          <span class="text-body-2">{{ item.contractor || '—' }}</span>
+        </template>
+        <template #item.revisedStartDate="{ item }">
+          <span class="text-body-2">{{ formatDate(item.revisedStartDate) }}</span>
+        </template>
+        <template #item.projectDuration="{ item }">
+          <span class="text-body-2">{{ item.projectDuration || '—' }}</span>
+        </template>
+        <template #item.createdAt="{ item }">
+          <v-tooltip :text="formatDate(item.createdAt)" location="top">
+            <template #activator="{ props: tp }">
+              <span v-bind="tp" class="text-body-2">{{ formatRelativeDate(item.createdAt) }}</span>
+            </template>
+          </v-tooltip>
+        </template>
+        <template #item.updatedAt="{ item }">
+          <v-tooltip :text="formatDate(item.updatedAt)" location="top">
+            <template #activator="{ props: tp }">
+              <span v-bind="tp" class="text-body-2">{{ formatRelativeDate(item.updatedAt) }}</span>
+            </template>
+          </v-tooltip>
+        </template>
+
         <!-- Loading State -->
         <template #loading>
           <v-skeleton-loader type="table-row@5" />
         </template>
 
       </v-data-table>
+      </div>
     </v-card>
 
-    <!-- EEE-B: Recent Activity relocated below the project table (admin-gated) -->
-    <v-card v-if="canViewActivity" variant="outlined" class="mt-4">
-      <v-card-title class="text-body-2 d-flex align-center ga-2 py-2">
-        <v-icon icon="mdi-history" size="small" color="grey" />Recent Activity
-      </v-card-title>
-      <v-divider />
-      <v-card-text class="py-1" style="max-height:220px;overflow-y:auto">
-        <div v-if="!recentActivity.length" class="text-caption text-grey py-2">No recent activity.</div>
-        <v-list v-else density="compact" class="pa-0">
-          <v-list-item v-for="ev in recentActivity" :key="ev.id" class="px-0">
-            <v-list-item-title class="text-caption">
-              <span class="font-weight-medium">{{ ev.userName }}</span> {{ activityLabel(ev.action) }}
-            </v-list-item-title>
-            <v-list-item-subtitle class="text-caption text-grey">{{ formatActivityDate(ev.createdAt) }}</v-list-item-subtitle>
-          </v-list-item>
-        </v-list>
-      </v-card-text>
-    </v-card>
+    <!-- PPP-B5: Recent Activities section label -->
+    <div v-if="canViewActivity" class="d-flex align-center ga-2 mb-2 mt-4">
+      <v-icon size="16" color="grey-darken-2">mdi-history</v-icon>
+      <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Recent Activities</span>
+      <v-divider class="flex-grow-1 ml-1" />
+    </div>
+
+    <!-- LLL-D: Recent Activity — admin-only collapsible (default collapsed, lazy-fetched) -->
+    <v-expansion-panels v-if="canViewActivity" v-model="activityExpanded" variant="accordion" class="mt-2">
+      <v-expansion-panel>
+        <v-expansion-panel-title>
+          <v-icon size="16" class="mr-2">mdi-history</v-icon>
+          <span class="text-subtitle-2 font-weight-bold">System Activity</span>
+          <v-chip v-if="recentActivity.length" size="x-small" class="ml-2" variant="tonal">{{ recentActivity.length }}</v-chip>
+        </v-expansion-panel-title>
+        <v-expansion-panel-text>
+          <div v-if="!recentActivity.length" class="text-caption text-grey py-2">No recent activity.</div>
+          <v-list v-else density="compact" class="pa-0" style="max-height:220px;overflow-y:auto">
+            <v-list-item v-for="ev in recentActivity" :key="ev.id" class="px-0">
+              <v-list-item-title class="text-caption">
+                <span class="font-weight-medium">{{ ev.userName }}</span> {{ activityLabel(ev.action) }}
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption text-grey">{{ formatActivityDate(ev.createdAt) }}</v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
+        </v-expansion-panel-text>
+      </v-expansion-panel>
+    </v-expansion-panels>
 
     </v-window-item>
     <!-- End Projects Tab -->
 
     <!-- Analytics Tab (Phase JF) -->
     <v-window-item value="analytics">
-      <div v-if="analyticsLoading" class="text-center py-12">
-        <v-progress-circular indeterminate color="primary" size="48" />
-        <p class="mt-4 text-grey">Loading analytics...</p>
+      <div v-if="analyticsLoading">
+        <v-row dense class="mb-4">
+          <v-col v-for="n in 4" :key="n" cols="6" md="3"><v-skeleton-loader type="card" height="100" /></v-col>
+        </v-row>
+        <v-row dense>
+          <v-col cols="12" md="5"><v-skeleton-loader type="card" height="300" /></v-col>
+          <v-col cols="12" md="7"><v-skeleton-loader type="card" height="300" /></v-col>
+          <v-col cols="12" md="6"><v-skeleton-loader type="card" height="260" /></v-col>
+          <v-col cols="12" md="6"><v-skeleton-loader type="card" height="260" /></v-col>
+        </v-row>
       </div>
       <div v-else-if="analyticsError" class="text-center py-12">
         <v-icon icon="mdi-alert-circle-outline" size="64" color="error" class="mb-2" />
@@ -1545,7 +1603,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
                 :options="statusChartOptions"
                 :series="statusChartSeries"
               />
-              <div v-else class="text-center py-8 text-grey">No project data</div>
+              <CiChartEmpty v-else icon="mdi-chart-donut" title="No status data" description="Status distribution appears once projects are recorded." />
             </v-card>
           </v-col>
           <v-col cols="12" md="7">
@@ -1558,7 +1616,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
                 :options="campusChartOptions"
                 :series="campusChartSeries"
               />
-              <div v-else class="text-center py-8 text-grey">No campus data</div>
+              <CiChartEmpty v-else icon="mdi-map-marker-multiple" title="No campus data" description="Per-campus project counts appear once projects are recorded." />
             </v-card>
           </v-col>
         </v-row>
@@ -1580,7 +1638,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
                 :options="progressDistChart.options"
                 :series="progressDistChart.series"
               />
-              <div v-else class="text-center py-8 text-grey">No project data</div>
+              <CiChartEmpty v-else icon="mdi-chart-bar" title="No progress data" description="Physical progress distribution appears once projects are recorded." />
             </v-card>
           </v-col>
         </v-row>
@@ -1603,7 +1661,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
                 :options="campusProgressChart.options"
                 :series="campusProgressChart.series"
               />
-              <div v-else class="text-center py-4 text-grey">No campus data</div>
+              <CiChartEmpty v-else icon="mdi-map-marker-multiple" title="No campus data" description="Average progress by campus appears once projects are recorded." />
             </v-card>
           </v-col>
           <v-col cols="12" md="6">
@@ -1617,7 +1675,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
                 :options="budgetByCampusChart.options"
                 :series="budgetByCampusChart.series"
               />
-              <div v-else class="text-center py-4 text-grey">No financial data</div>
+              <CiChartEmpty v-else icon="mdi-cash-multiple" title="No financial data" description="Budget concentration appears once contract values are recorded." />
             </v-card>
           </v-col>
         </v-row>
@@ -1635,7 +1693,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
                 :options="contractByStatusChart.options"
                 :series="contractByStatusChart.series"
               />
-              <div v-else class="text-center py-4 text-grey">No data</div>
+              <CiChartEmpty v-else icon="mdi-chart-donut" title="No contract data" description="Contract value by status appears once projects are recorded." />
             </v-card>
           </v-col>
           <v-col cols="12" md="6">
@@ -1675,7 +1733,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
                 :options="contractorChart.options"
                 :series="contractorChart.series"
               />
-              <div v-else class="text-center py-4 text-grey">No contractor data</div>
+              <CiChartEmpty v-else icon="mdi-account-hard-hat" title="No contractor data" description="Projects by contractor appears once contractors are assigned." />
             </v-card>
           </v-col>
           <v-col cols="12" md="5">
@@ -1689,7 +1747,7 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
                 :options="fundingSourceChart.options"
                 :series="fundingSourceChart.series"
               />
-              <div v-else class="text-center py-4 text-grey">No funding source data</div>
+              <CiChartEmpty v-else icon="mdi-cash-multiple" title="No funding source data" description="Funding source distribution appears once sources are assigned." />
             </v-card>
           </v-col>
         </v-row>
@@ -1716,6 +1774,42 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
           <v-spacer />
           <v-btn variant="text" @click="deleteDialog = false" :disabled="deleting">Cancel</v-btn>
           <v-btn color="error" variant="flat" @click="deleteProject" :loading="deleting">Delete</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- LLL-E: Full Search dialog — complete original/revised date-range field set -->
+    <v-dialog v-model="showFullSearch" max-width="720">
+      <v-card>
+        <v-card-title class="d-flex align-center ga-2">
+          <v-icon icon="mdi-tune-variant" />Advanced Search
+        </v-card-title>
+        <v-card-text>
+          <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">Project Identifier</div>
+          <v-row dense class="mb-2">
+            <v-col cols="12">
+              <v-text-field v-model="filterProjectCode" label="Project Code / ID" variant="outlined" density="compact" hide-details clearable prepend-inner-icon="mdi-identifier" />
+            </v-col>
+          </v-row>
+          <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">Original Schedule</div>
+          <v-row dense class="mb-2">
+            <v-col cols="6" sm="3"><v-text-field v-model="filterOrigStartFrom" type="date" label="Orig. Start From" variant="outlined" density="compact" hide-details clearable /></v-col>
+            <v-col cols="6" sm="3"><v-text-field v-model="filterOrigStartTo" type="date" label="Orig. Start To" variant="outlined" density="compact" hide-details clearable /></v-col>
+            <v-col cols="6" sm="3"><v-text-field v-model="filterOrigEndFrom" type="date" label="Orig. End From" variant="outlined" density="compact" hide-details clearable /></v-col>
+            <v-col cols="6" sm="3"><v-text-field v-model="filterOrigEndTo" type="date" label="Orig. End To" variant="outlined" density="compact" hide-details clearable /></v-col>
+          </v-row>
+          <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">Revised Schedule</div>
+          <v-row dense>
+            <v-col cols="6" sm="3"><v-text-field v-model="filterRevStartFrom" type="date" label="Rev. Start From" variant="outlined" density="compact" hide-details clearable /></v-col>
+            <v-col cols="6" sm="3"><v-text-field v-model="filterRevStartTo" type="date" label="Rev. Start To" variant="outlined" density="compact" hide-details clearable /></v-col>
+            <v-col cols="6" sm="3"><v-text-field v-model="filterRevEndFrom" type="date" label="Rev. End From" variant="outlined" density="compact" hide-details clearable /></v-col>
+            <v-col cols="6" sm="3"><v-text-field v-model="filterRevEndTo" type="date" label="Rev. End To" variant="outlined" density="compact" hide-details clearable /></v-col>
+          </v-row>
+        </v-card-text>
+        <v-card-actions>
+          <v-btn variant="text" color="grey-darken-1" prepend-icon="mdi-filter-off" @click="clearFilters">Clear All</v-btn>
+          <v-spacer />
+          <v-btn color="primary" variant="flat" @click="showFullSearch = false">Done</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -1750,4 +1844,16 @@ onMounted(() => { fetchProjects(); fetchRecentActivity(); fetchAnalytics() })
 
 <style scoped>
 .cursor-pointer { cursor: pointer; }
+
+/* NNN-J: section divider labels */
+.coi-section-label { letter-spacing: 0.06em; }
+
+/* MMM-I: subtle hover lift for KPI cards (cue that they carry tooltips) */
+.kpi-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
 </style>
