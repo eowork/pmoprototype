@@ -505,6 +505,35 @@ function formatNumber(val: number | null | undefined): string {
   return Number(val).toFixed(2)
 }
 
+// Phase VVV-B: Returns the primary cell display + optional fraction line for a
+// read-only indicator table cell. For PERCENTAGE indicators, renders "106.72%"
+// with a "286/268" fraction line below when numerator/denominator are stored.
+function getPctCellDisplay(
+  record: any,
+  fieldPrefix: string,
+  q: string,
+  unitType: string,
+): { primary: string; fraction: string | null } {
+  const qKey = q.toLowerCase()
+  const val = record?.[`${fieldPrefix}_${qKey}`]
+  if (val === null || val === undefined) return { primary: '—', fraction: null }
+  const num = Number(val)
+  if (isNaN(num)) return { primary: '—', fraction: null }
+  if (unitType !== 'PERCENTAGE') {
+    const suffix = getUnitConfig(unitType).suffix
+    return { primary: num.toLocaleString(undefined, { maximumFractionDigits: 2 }) + suffix, fraction: null }
+  }
+  const primary = `${num.toFixed(2)}%`
+  const numerator = record?.[`numerator_${qKey}`]
+  const denominator = record?.[`denominator_${qKey}`]
+  const n = numerator != null ? Number(numerator) : null
+  const d = denominator != null ? Number(denominator) : null
+  const fraction = (n !== null && d !== null && !isNaN(n) && !isNaN(d) && d > 0)
+    ? `${n}/${d}`
+    : null
+  return { primary, fraction }
+}
+
 // Format percentage (used in indicator table rows and entry dialog)
 function formatPercent(val: number | null | undefined): string {
   if (val === null || val === undefined) return '—'
@@ -1011,14 +1040,16 @@ async function saveQuarterlyData() {
       pillar_indicator_id: f.pillar_indicator_id,
       fiscal_year: f.fiscal_year,
       reported_quarter: selectedQuarter.value,
-      target_q1: isPctType ? (tP1?.computed ?? f.target_q1) : f.target_q1,
-      target_q2: isPctType ? (tP2?.computed ?? f.target_q2) : f.target_q2,
-      target_q3: isPctType ? (tP3?.computed ?? f.target_q3) : f.target_q3,
-      target_q4: isPctType ? (tP4?.computed ?? f.target_q4) : f.target_q4,
-      accomplishment_q1: isPctType ? (aP1?.computed ?? f.accomplishment_q1) : f.accomplishment_q1,
-      accomplishment_q2: isPctType ? (aP2?.computed ?? f.accomplishment_q2) : f.accomplishment_q2,
-      accomplishment_q3: isPctType ? (aP3?.computed ?? f.accomplishment_q3) : f.accomplishment_q3,
-      accomplishment_q4: isPctType ? (aP4?.computed ?? f.accomplishment_q4) : f.accomplishment_q4,
+      // Phase VVV-A: PERCENTAGE fields use `?? null` (not `?? f.*`) so a cleared
+      // field sends null to the API instead of restoring the stale stored value
+      target_q1: isPctType ? (tP1?.computed ?? null) : f.target_q1,
+      target_q2: isPctType ? (tP2?.computed ?? null) : f.target_q2,
+      target_q3: isPctType ? (tP3?.computed ?? null) : f.target_q3,
+      target_q4: isPctType ? (tP4?.computed ?? null) : f.target_q4,
+      accomplishment_q1: isPctType ? (aP1?.computed ?? null) : f.accomplishment_q1,
+      accomplishment_q2: isPctType ? (aP2?.computed ?? null) : f.accomplishment_q2,
+      accomplishment_q3: isPctType ? (aP3?.computed ?? null) : f.accomplishment_q3,
+      accomplishment_q4: isPctType ? (aP4?.computed ?? null) : f.accomplishment_q4,
       remarks: f.remarks,
       // Phase HE: APR/UPR narrative fields (Directive 386)
       catch_up_plan: f.catch_up_plan?.trim() || null,
@@ -1784,8 +1815,20 @@ onMounted(async () => {
                 <template v-if="getIndicatorData(indicator.id)">
                   <!-- Phase DW-D: Always render all 12 quarter cells with highlight -->
                   <template v-for="q in QUARTERS" :key="q + '-data'">
-                    <td class="text-center qsub-cell" :class="qCellClass(q)">{{ formatNumber(getIndicatorData(indicator.id)?.[`target_${q.toLowerCase()}`]) }}{{ getUnitConfig(indicator.unit_type).suffix }}</td>
-                    <td class="text-center qsub-cell text-success border-right-q" :class="qCellClass(q)">{{ formatNumber(getIndicatorData(indicator.id)?.[`accomplishment_${q.toLowerCase()}`]) }}{{ getUnitConfig(indicator.unit_type).suffix }}</td>
+                    <td class="text-center qsub-cell" :class="qCellClass(q)">
+                      <div>{{ getPctCellDisplay(getIndicatorData(indicator.id), 'target', q, indicator.unit_type).primary }}</div>
+                      <div
+                        v-if="getPctCellDisplay(getIndicatorData(indicator.id), 'target', q, indicator.unit_type).fraction"
+                        class="text-caption text-grey"
+                      >{{ getPctCellDisplay(getIndicatorData(indicator.id), 'target', q, indicator.unit_type).fraction }}</div>
+                    </td>
+                    <td class="text-center qsub-cell text-success border-right-q" :class="qCellClass(q)">
+                      <div>{{ getPctCellDisplay(getIndicatorData(indicator.id), 'accomplishment', q, indicator.unit_type).primary }}</div>
+                      <div
+                        v-if="getPctCellDisplay(getIndicatorData(indicator.id), 'accomplishment', q, indicator.unit_type).fraction"
+                        class="text-caption text-grey"
+                      >{{ getPctCellDisplay(getIndicatorData(indicator.id), 'accomplishment', q, indicator.unit_type).fraction }}</div>
+                    </td>
                   </template>
                   <!-- Phase GZ: Total Target + Total Actual (Directive 361) -->
                   <td class="text-center">
@@ -1978,8 +2021,20 @@ onMounted(async () => {
                 <template v-if="getIndicatorData(indicator.id)">
                   <!-- Phase DW-D: Always render all 8 quarter cells with highlight -->
                   <template v-for="q in QUARTERS" :key="q + '-data'">
-                    <td class="text-center qsub-cell" :class="qCellClass(q)">{{ formatNumber(getIndicatorData(indicator.id)?.[`target_${q.toLowerCase()}`]) }}{{ getUnitConfig(indicator.unit_type).suffix }}</td>
-                    <td class="text-center qsub-cell text-success border-right-q" :class="qCellClass(q)">{{ formatNumber(getIndicatorData(indicator.id)?.[`accomplishment_${q.toLowerCase()}`]) }}{{ getUnitConfig(indicator.unit_type).suffix }}</td>
+                    <td class="text-center qsub-cell" :class="qCellClass(q)">
+                      <div>{{ getPctCellDisplay(getIndicatorData(indicator.id), 'target', q, indicator.unit_type).primary }}</div>
+                      <div
+                        v-if="getPctCellDisplay(getIndicatorData(indicator.id), 'target', q, indicator.unit_type).fraction"
+                        class="text-caption text-grey"
+                      >{{ getPctCellDisplay(getIndicatorData(indicator.id), 'target', q, indicator.unit_type).fraction }}</div>
+                    </td>
+                    <td class="text-center qsub-cell text-success border-right-q" :class="qCellClass(q)">
+                      <div>{{ getPctCellDisplay(getIndicatorData(indicator.id), 'accomplishment', q, indicator.unit_type).primary }}</div>
+                      <div
+                        v-if="getPctCellDisplay(getIndicatorData(indicator.id), 'accomplishment', q, indicator.unit_type).fraction"
+                        class="text-caption text-grey"
+                      >{{ getPctCellDisplay(getIndicatorData(indicator.id), 'accomplishment', q, indicator.unit_type).fraction }}</div>
+                    </td>
                   </template>
                   <!-- Phase GZ: Total Target + Total Actual (Directive 361) -->
                   <td class="text-center">
