@@ -7,7 +7,7 @@ const props = defineProps<Props>()
 const api = useApi()
 
 const coiTotal = ref<number | null>(null)
-const coiDelayed = ref<number | null>(null)
+const coiPublished = ref<number | null>(null)
 const coiPendingReviews = ref<number | null>(null)
 const quarterlyCompliance = ref<number | null>(null)
 
@@ -19,13 +19,14 @@ async function loadCoiSummary() {
   try {
     const res = await api.get<any>('/api/construction-projects/analytics/summary')
     coiTotal.value = res.total ?? 0
-    coiDelayed.value = res.delayed_count ?? 0
     const pubStatus = (res.by_publication_status || []) as Array<{ publication_status: string; count: number }>
+    const published = pubStatus.find(p => p.publication_status === 'PUBLISHED')
+    coiPublished.value = published ? Number(published.count) : 0
     const pending = pubStatus.find(p => p.publication_status === 'PENDING_REVIEW')
     coiPendingReviews.value = pending ? Number(pending.count) : 0
   } catch {
     coiTotal.value = 0
-    coiDelayed.value = 0
+    coiPublished.value = 0
     coiPendingReviews.value = 0
   } finally {
     loadingCoi.value = false
@@ -72,15 +73,17 @@ const tiles = computed(() => [
     loading: loadingCoi.value,
     color: 'primary',
     suffix: '',
+    tooltip: 'Total number of infrastructure projects in the portfolio, across all statuses. Source: construction-projects analytics.',
   },
   {
-    key: 'delayed',
-    label: 'Delayed Projects',
-    icon: 'mdi-alert-decagram',
-    value: coiDelayed.value,
+    key: 'published',
+    label: 'Published Projects',
+    icon: 'mdi-check-decagram',
+    value: coiPublished.value,
     loading: loadingCoi.value,
-    color: 'error',
+    color: 'success',
     suffix: '',
+    tooltip: 'Projects approved and visible on the public portal (publication status = PUBLISHED).',
   },
   {
     key: 'pending',
@@ -90,6 +93,7 @@ const tiles = computed(() => [
     loading: loadingCoi.value,
     color: 'warning',
     suffix: '',
+    tooltip: 'Projects submitted for publication approval, awaiting an admin decision (publication status = PENDING_REVIEW).',
   },
   {
     key: 'compliance',
@@ -99,6 +103,7 @@ const tiles = computed(() => [
     loading: loadingCompliance.value,
     color: 'success',
     suffix: quarterlyCompliance.value != null ? '%' : '',
+    tooltip: 'Average indicator accomplishment rate across all University Operations pillars for the selected fiscal year.',
   },
 ])
 </script>
@@ -112,25 +117,50 @@ const tiles = computed(() => [
       sm="6"
       lg="3"
     >
-      <v-card :color="tile.color" variant="tonal" class="pa-4">
-        <div class="d-flex align-center">
-          <v-avatar :color="tile.color" size="44" variant="tonal" class="mr-3">
-            <v-icon :icon="tile.icon" />
-          </v-avatar>
-          <div>
-            <p class="text-caption font-weight-medium mb-1">{{ tile.label }}</p>
-            <p class="text-h5 font-weight-bold">
-              <v-progress-circular
-                v-if="tile.loading"
-                :size="20"
-                :width="2"
-                indeterminate
-              />
-              <span v-else>{{ tile.value }}{{ tile.suffix }}</span>
-            </p>
-          </div>
-        </div>
-      </v-card>
+      <!-- NNN-D: contextual tooltip (formula + source) on each KPI tile — OOO-I: keyboard accessible -->
+      <v-tooltip :text="tile.tooltip" location="bottom" max-width="260" open-on-focus>
+        <template #activator="{ props: tipProps }">
+          <v-card
+            v-bind="tipProps"
+            :color="tile.color"
+            variant="tonal"
+            class="pa-4 kpi-tile"
+            tabindex="0"
+            role="img"
+            :aria-label="`${tile.label}: ${tile.value}${tile.suffix}. ${tile.tooltip}`"
+          >
+            <div class="d-flex align-center">
+              <v-avatar :color="tile.color" size="36" variant="tonal" class="mr-3">
+                <v-icon :icon="tile.icon" />
+              </v-avatar>
+              <div>
+                <p class="text-caption font-weight-medium mb-1">{{ tile.label }}</p>
+                <p class="text-subtitle-1 font-weight-bold">
+                  <v-progress-circular
+                    v-if="tile.loading"
+                    :size="20"
+                    :width="2"
+                    indeterminate
+                  />
+                  <span v-else>{{ tile.value }}{{ tile.suffix }}</span>
+                </p>
+              </div>
+            </div>
+          </v-card>
+        </template>
+      </v-tooltip>
     </v-col>
   </v-row>
 </template>
+
+<style scoped>
+/* NNN-D: cue that tiles carry explanatory tooltips */
+.kpi-tile {
+  cursor: help;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.kpi-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+</style>

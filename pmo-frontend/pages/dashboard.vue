@@ -10,7 +10,7 @@ definePageMeta({
 const authStore = useAuthStore()
 const router = useRouter()
 const api = useApi()
-const { isContractor } = usePermissions()
+const { isContractor, isAdmin } = usePermissions()
 
 const fiscalYearStore = useFiscalYearStore()
 const { selectedFiscalYear, fiscalYearOptions } = storeToRefs(fiscalYearStore)
@@ -26,15 +26,6 @@ function dismissBanner() {
   bannerDismissed.value = true
   if (import.meta.client) localStorage.setItem('dashboard_banner_dismissed', 'true')
 }
-
-// Simple stats for module cards (Repair, UO, GAD)
-const stats = ref({
-  repairProjects: 0,
-  universityOperations: 0,
-  gadReports: 0,
-})
-
-const loading = ref(true)
 
 // UO summary analytics state (Phase HP)
 const uoPhysicalSummary = ref<any>(null)
@@ -52,6 +43,24 @@ const PILLAR_LABELS: Record<string, { short: string; icon: string; color: string
   RESEARCH:           { short: 'Research',     icon: 'mdi-flask',           color: 'teal' },
   TECHNICAL_ADVISORY: { short: 'Extension',    icon: 'mdi-handshake',       color: 'orange' },
 }
+
+// KKK-C: Compact dual-stat pillar data — zips physical + financial pillar summaries by type
+const compactPillarData = computed(() => {
+  const physical = (uoPhysicalSummary.value?.pillars || []) as Array<{ pillar_type: string; accomplishment_rate_pct: number | null }>
+  const financial = (uoFinancialSummary.value?.pillars || []) as Array<{ pillar_type: string; avg_utilization_rate: number }>
+  const types = [...new Set([...physical.map(p => p.pillar_type), ...financial.map(p => p.pillar_type)])]
+  return types.map(type => {
+    const phys = physical.find(p => p.pillar_type === type)
+    const fin = financial.find(p => p.pillar_type === type)
+    return {
+      name: PILLAR_LABELS[type]?.short || type,
+      icon: PILLAR_LABELS[type]?.icon || 'mdi-circle',
+      color: PILLAR_LABELS[type]?.color || 'grey',
+      physicalPct: phys?.accomplishment_rate_pct != null ? Number(phys.accomplishment_rate_pct).toFixed(1) : 'N/A',
+      financialPct: fin?.avg_utilization_rate != null ? Number(fin.avg_utilization_rate).toFixed(1) : 'N/A',
+    }
+  })
+})
 
 async function loadUoSummary() {
   if (!selectedFiscalYear.value) return
@@ -87,6 +96,9 @@ async function loadUoTrend() {
     uoTrendLoading.value = false
   }
 }
+
+// MMM-B: trend panel expand state — gates chart mount so ApexCharts sizes correctly
+const trendsExpanded = ref<number[]>([])
 
 // JJJ-B: UO Q1-Q4 financial utilization trend
 const uoFinancialTrend = ref<any>(null)
@@ -171,41 +183,8 @@ watch(selectedFiscalYear, async () => {
 }, { immediate: true })
 
 onMounted(async () => {
-  try {
-    if (isContractor.value) {
-      // QC: Contractors only fetch COI analytics — no access to other modules
-      await loadCoiAnalytics()
-    } else {
-      // Phase HV: /api/gad-reports does not exist (Directive 218)
-      const [repairs, uniOps] = await Promise.allSettled([
-        api.get<{ data: unknown[] }>('/api/repair-projects'),
-        api.get<{ data: unknown[] }>('/api/university-operations'),
-      ])
-      stats.value = {
-        repairProjects: repairs.status === 'fulfilled' ? repairs.value.data?.length || 0 : 0,
-        universityOperations: uniOps.status === 'fulfilled' ? uniOps.value.data?.length || 0 : 0,
-        gadReports: 0,
-      }
-      await loadCoiAnalytics()
-    }
-  } catch {
-    // Silently handle errors
-  } finally {
-    loading.value = false
-  }
-
-  // Ensure fiscal year options loaded for UO summary
+  await loadCoiAnalytics()
   if (!isContractor.value) await fiscalYearStore.fetchFiscalYears()
-})
-
-// Module cards — Infrastructure removed (now shown via dedicated mini-summary card)
-const statCards = computed(() => {
-  if (isContractor.value) return []
-  return [
-    { title: 'Repair Projects', icon: 'mdi-tools', color: 'warning', key: 'repairProjects', to: '/repairs' },
-    { title: 'University Operations', icon: 'mdi-school', color: 'info', key: 'universityOperations', to: '/university-operations' },
-    { title: 'GAD Reports', icon: 'mdi-gender-male-female', color: 'secondary', key: 'gadReports', to: '/gad' },
-  ]
 })
 
 function formatCurrencyShort(amount: number): string {
@@ -219,7 +198,7 @@ function formatCurrencyShort(amount: number): string {
   <div>
     <!-- Welcome Header -->
     <div class="mb-4">
-      <h1 class="text-h4 font-weight-bold text-grey-darken-3 mb-1">
+      <h1 class="text-h5 font-weight-bold text-grey-darken-3 mb-1">
         Welcome, {{ authStore.userFullName }}
       </h1>
       <p class="text-subtitle-1 text-grey-darken-1">
@@ -237,17 +216,24 @@ function formatCurrencyShort(amount: number): string {
       class="mb-4"
       @click:close="dismissBanner"
     >
-      <strong>Executive Dashboard</strong> — Real-time overview of all CSU CORE modules.
-      Click any card or chart to navigate deeper.
+      <strong>Executive Dashboard</strong> — Executive view — key metrics and portfolio summary for decision support. Use module tabs for detailed reporting.
     </v-alert>
 
     <!-- KPI Row (AdminKpiRow — Infrastructure total, Delayed, Pending Reviews, UO Compliance) -->
     <AdminKpiRow v-if="!isContractor" :selected-fiscal-year="selectedFiscalYear" />
 
+    <!-- NNN-C: Section label -->
+    <div class="d-flex align-center ga-2 mb-3 mt-2">
+      <v-icon size="16" color="grey-darken-2">mdi-office-building</v-icon>
+      <span class="text-caption text-grey-darken-2 font-weight-bold text-uppercase section-label">Infrastructure Portfolio</span>
+      <v-divider class="flex-grow-1 ml-2" />
+    </div>
+
     <!-- HHH-B: Infrastructure Portfolio Mini-Summary -->
     <v-card
       class="mb-6 pa-4"
-      variant="outlined"
+      rounded="lg"
+      elevation="1"
       style="cursor:pointer"
       @click="router.push('/coi')"
     >
@@ -269,21 +255,23 @@ function formatCurrencyShort(amount: number): string {
         <v-row dense class="mb-3">
           <v-col cols="6" sm="3">
             <div class="text-caption text-grey-darken-1 font-weight-medium">Total Projects</div>
-            <div class="text-h5 font-weight-bold text-primary">{{ coiSummary.total ?? 0 }}</div>
+            <div class="text-h6 font-weight-bold text-primary">{{ coiSummary.total ?? 0 }}</div>
           </v-col>
           <v-col cols="6" sm="3">
             <div class="text-caption text-grey-darken-1 font-weight-medium">Ongoing</div>
-            <div class="text-h5 font-weight-bold text-info">
+            <div class="text-h6 font-weight-bold text-info">
               {{ (coiSummary.by_status || []).find((s: any) => s.status === 'ONGOING')?.count ?? 0 }}
             </div>
           </v-col>
           <v-col cols="6" sm="3">
-            <div class="text-caption text-grey-darken-1 font-weight-medium">Delayed</div>
-            <div class="text-h5 font-weight-bold text-error">{{ coiSummary.delayed_count ?? 0 }}</div>
+            <div class="text-caption text-grey-darken-1 font-weight-medium">Completed</div>
+            <div class="text-h6 font-weight-bold text-success">
+              {{ (coiSummary.by_status || []).find((s: any) => s.status === 'COMPLETE' || s.status === 'COMPLETED')?.count ?? 0 }}
+            </div>
           </v-col>
           <v-col cols="6" sm="3">
             <div class="text-caption text-grey-darken-1 font-weight-medium">Avg Progress</div>
-            <div class="text-h5 font-weight-bold text-deep-purple">{{ (coiSummary.avg_progress || 0).toFixed(1) }}%</div>
+            <div class="text-h6 font-weight-bold text-deep-purple">{{ (coiSummary.avg_progress || 0).toFixed(1) }}%</div>
           </v-col>
         </v-row>
 
@@ -300,8 +288,15 @@ function formatCurrencyShort(amount: number): string {
       <div v-else class="text-caption text-grey py-2">Infrastructure data unavailable.</div>
     </v-card>
 
+    <!-- NNN-C: Section label -->
+    <div v-if="!isContractor" class="d-flex align-center ga-2 mb-3 mt-2">
+      <v-icon size="16" color="grey-darken-2">mdi-school</v-icon>
+      <span class="text-caption text-grey-darken-2 font-weight-bold text-uppercase section-label">University Operations</span>
+      <v-divider class="flex-grow-1 ml-2" />
+    </div>
+
     <!-- UO Summary Section (always shown for non-contractors) -->
-    <v-card class="mb-6 pa-4" v-if="!isContractor">
+    <v-card class="mb-6 pa-4" rounded="lg" elevation="1" v-if="!isContractor">
       <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-2">
         <div>
           <h2 class="text-h6 font-weight-bold">University Operations Summary</h2>
@@ -334,62 +329,37 @@ function formatCurrencyShort(amount: number): string {
       </div>
 
       <template v-else>
-        <!-- Physical Accomplishment Pillar Cards -->
-        <div v-if="uoPhysicalSummary?.pillars?.length" class="mb-4">
-          <p class="text-caption text-grey-darken-1 text-uppercase font-weight-bold mb-2">
-            UO Physical Performance (BAR No. 1)
-          </p>
-          <v-row dense>
-            <v-col
-              v-for="pillar in uoPhysicalSummary.pillars"
-              :key="pillar.pillar_type"
-              cols="12"
-              sm="6"
-              lg="3"
-            >
-              <v-card variant="tonal" :color="PILLAR_LABELS[pillar.pillar_type]?.color || 'grey'" class="pa-3">
-                <div class="d-flex align-center mb-1">
-                  <v-icon :icon="PILLAR_LABELS[pillar.pillar_type]?.icon || 'mdi-circle'" size="small" class="mr-2" />
-                  <span class="text-caption font-weight-medium">{{ PILLAR_LABELS[pillar.pillar_type]?.short || pillar.pillar_type }}</span>
+        <!-- KKK-C: Compact dual-stat pillar cards (physical % + financial % per pillar) -->
+        <v-row v-if="compactPillarData.length" dense>
+          <v-col
+            v-for="pillar in compactPillarData"
+            :key="pillar.name"
+            cols="12"
+            sm="6"
+            lg="3"
+          >
+            <v-card variant="tonal" :color="pillar.color" rounded="lg" class="pa-3">
+              <div class="d-flex align-center mb-2">
+                <v-icon :icon="pillar.icon" size="18" class="mr-2" />
+                <span class="text-caption font-weight-bold text-uppercase">{{ pillar.name }}</span>
+              </div>
+              <div class="d-flex justify-space-between align-center">
+                <div>
+                  <div class="text-caption text-grey-darken-1">Physical</div>
+                  <div class="text-subtitle-2 font-weight-bold">{{ pillar.physicalPct }}%</div>
                 </div>
-                <div class="text-h6 font-weight-bold">
-                  {{ pillar.accomplishment_rate_pct != null ? pillar.accomplishment_rate_pct.toFixed(1) + '%' : 'N/A' }}
+                <v-divider vertical class="mx-2" />
+                <div>
+                  <div class="text-caption text-grey-darken-1">Financial</div>
+                  <div class="text-subtitle-2 font-weight-bold">{{ pillar.financialPct }}%</div>
                 </div>
-                <div class="text-caption text-grey-darken-1">Achievement Rate</div>
-              </v-card>
-            </v-col>
-          </v-row>
-        </div>
-
-        <!-- Financial Accomplishment Pillar Cards -->
-        <div v-if="uoFinancialSummary?.pillars?.length">
-          <p class="text-caption text-grey-darken-1 text-uppercase font-weight-bold mb-2">
-            UO Financial Performance (BAR No. 2)
-          </p>
-          <v-row dense>
-            <v-col
-              v-for="pillar in uoFinancialSummary.pillars"
-              :key="pillar.pillar_type"
-              cols="12"
-              sm="6"
-              lg="3"
-            >
-              <v-card variant="tonal" :color="PILLAR_LABELS[pillar.pillar_type]?.color || 'grey'" class="pa-3">
-                <div class="d-flex align-center mb-1">
-                  <v-icon :icon="PILLAR_LABELS[pillar.pillar_type]?.icon || 'mdi-circle'" size="small" class="mr-2" />
-                  <span class="text-caption font-weight-medium">{{ PILLAR_LABELS[pillar.pillar_type]?.short || pillar.pillar_type }}</span>
-                </div>
-                <div class="text-h6 font-weight-bold">
-                  {{ Number(pillar.avg_utilization_rate).toFixed(1) }}%
-                </div>
-                <div class="text-caption text-grey-darken-1">Utilization Rate</div>
-              </v-card>
-            </v-col>
-          </v-row>
-        </div>
+              </div>
+            </v-card>
+          </v-col>
+        </v-row>
 
         <v-alert
-          v-if="!uoPhysicalSummary?.pillars?.length && !uoFinancialSummary?.pillars?.length"
+          v-else
           type="info"
           variant="tonal"
           density="compact"
@@ -398,125 +368,126 @@ function formatCurrencyShort(amount: number): string {
           No University Operations data available for the selected fiscal year.
         </v-alert>
 
-        <!-- JJJ-A: Q1-Q4 Accomplishment Trend -->
-        <template v-if="uoTrend?.quarters?.length">
-          <v-divider class="my-3" />
-          <div class="text-caption text-grey-darken-1 text-uppercase font-weight-bold mb-1">Q1–Q4 Accomplishment Trend</div>
-          <p class="text-caption text-grey mb-2">University-wide indicator accomplishment rate per quarter</p>
-          <VueApexCharts type="area" height="180"
-            :options="uoTrendChart.options" :series="uoTrendChart.series" />
-        </template>
+        <!-- KKK-C / MMM-B: Trend charts in collapsible panel (default collapsed).
+             Charts are mounted only when the panel is open (v-if on trendsExpanded)
+             so ApexCharts measures correct dimensions — collapsed panels render
+             zero-height charts otherwise. -->
+        <v-expansion-panels
+          v-if="uoTrend?.quarters?.length || uoFinancialTrend?.quarters?.length"
+          v-model="trendsExpanded"
+          multiple
+          class="mt-3"
+          variant="accordion"
+        >
+          <v-expansion-panel>
+            <v-expansion-panel-title>
+              <v-icon size="16" class="mr-2">mdi-chart-areaspline</v-icon>
+              <span class="text-subtitle-2 font-weight-bold">Quarterly Trend Charts</span>
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <div v-if="trendsExpanded.includes(0)">
+                <!-- JJJ-A: Q1-Q4 Accomplishment Trend -->
+                <template v-if="uoTrend?.quarters?.length">
+                  <div class="text-caption text-grey-darken-1 text-uppercase font-weight-bold mb-1">Q1–Q4 Accomplishment Trend</div>
+                  <p class="text-caption text-grey mb-2">University-wide indicator accomplishment rate per quarter</p>
+                  <VueApexCharts type="area" height="180"
+                    :options="uoTrendChart.options" :series="uoTrendChart.series" />
+                </template>
 
-        <!-- JJJ-B: Q1-Q4 Financial Utilization Trend -->
-        <template v-if="uoFinancialTrend?.quarters?.length">
-          <v-divider class="my-3" />
-          <div class="text-caption text-grey-darken-1 text-uppercase font-weight-bold mb-1">Q1–Q4 Financial Utilization</div>
-          <p class="text-caption text-grey mb-2">Fund utilization rate per quarter — how efficiently appropriations are being obligated</p>
-          <VueApexCharts type="area" height="160"
-            :options="uoFinancialTrendChart.options" :series="uoFinancialTrendChart.series" />
-        </template>
+                <!-- JJJ-B: Q1-Q4 Financial Utilization Trend -->
+                <template v-if="uoFinancialTrend?.quarters?.length">
+                  <v-divider class="my-3" />
+                  <div class="text-caption text-grey-darken-1 text-uppercase font-weight-bold mb-1">Q1–Q4 Financial Utilization</div>
+                  <p class="text-caption text-grey mb-2">Fund utilization rate per quarter — how efficiently appropriations are being obligated</p>
+                  <VueApexCharts type="area" height="160"
+                    :options="uoFinancialTrendChart.options" :series="uoFinancialTrendChart.series" />
+                </template>
+              </div>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
       </template>
     </v-card>
 
-    <!-- Quick Actions -->
-    <v-card class="mb-6 pa-4">
-      <h2 class="text-h6 font-weight-bold mb-1">Quick Actions</h2>
-      <p class="text-caption text-grey-darken-1 mb-4">Frequently used workflows across CSU CORE modules</p>
-      <v-row>
-        <v-col cols="12" md="6">
-          <v-btn
-            to="/coi"
-            color="primary"
-            variant="outlined"
-            block
-            size="large"
-            prepend-icon="mdi-office-building"
-          >
-            View Infrastructure Projects
-          </v-btn>
-        </v-col>
-        <v-col v-if="!isContractor" cols="12" md="6">
-          <v-btn
-            to="/repairs"
-            color="warning"
-            variant="outlined"
-            block
-            size="large"
-            prepend-icon="mdi-tools"
-          >
-            View Repair Projects
-          </v-btn>
-        </v-col>
-        <v-col v-if="!isContractor" cols="12" md="6">
-          <v-btn
-            to="/university-operations/physical"
-            color="info"
-            variant="outlined"
-            block
-            size="large"
-            prepend-icon="mdi-chart-timeline-variant"
-          >
-            Physical Accomplishments
-          </v-btn>
-        </v-col>
-        <v-col v-if="!isContractor" cols="12" md="6">
-          <v-btn
-            to="/university-operations/financial"
-            color="success"
-            variant="outlined"
-            block
-            size="large"
-            prepend-icon="mdi-currency-php"
-          >
-            Financial Accomplishments
-          </v-btn>
-        </v-col>
-      </v-row>
-    </v-card>
-
-    <!-- JJJ-D: Other Modules section heading -->
-    <div class="mb-3 mt-2" v-if="statCards.length">
-      <h2 class="text-subtitle-1 font-weight-bold">Other Modules</h2>
-      <p class="text-caption text-grey-darken-1">Navigate to other university management modules</p>
+    <!-- NNN-C: Section label -->
+    <div class="d-flex align-center ga-2 mb-3 mt-2">
+      <v-icon size="16" color="grey-darken-2">mdi-lightning-bolt</v-icon>
+      <span class="text-caption text-grey-darken-2 font-weight-bold text-uppercase section-label">Operational Insights</span>
+      <v-divider class="flex-grow-1 ml-2" />
     </div>
 
-    <!-- Other Module Cards (Repair, UO, GAD) — Infrastructure shown above via mini-summary -->
-    <v-row v-if="statCards.length">
-      <v-col
-        v-for="card in statCards"
-        :key="card.key"
-        cols="12"
-        sm="6"
-        lg="4"
-      >
-        <v-card
-          :to="card.to"
-          class="pa-4"
-          :color="card.color"
-          variant="tonal"
-          hover
+    <!-- KKK-D/E: Quick Actions — compact navigation list (replaces large block buttons + Other Modules cards) -->
+    <v-card class="mb-6 pa-4" rounded="lg" elevation="1">
+      <h2 class="text-h6 font-weight-bold mb-1">Quick Actions</h2>
+      <p class="text-caption text-grey-darken-1 mb-2">Navigate to CSU CORE modules and workflows</p>
+      <v-list density="compact" nav>
+        <v-list-item
+          prepend-icon="mdi-office-building"
+          title="Infrastructure Projects"
+          subtitle="View and manage COI portfolio"
+          to="/coi"
+          rounded="lg"
         >
-          <div class="d-flex align-center">
-            <v-avatar :color="card.color" size="48" class="mr-4">
-              <v-icon :icon="card.icon" color="white" />
-            </v-avatar>
-            <div>
-              <p class="text-caption text-grey-darken-1 mb-1">
-                {{ card.title }}
-              </p>
-              <p class="text-h5 font-weight-bold">
-                <v-progress-circular
-                  v-if="loading"
-                  :size="20"
-                  :width="2"
-                  indeterminate
-                />
-                <span v-else>{{ stats[card.key as keyof typeof stats] }}</span>
-              </p>
-            </div>
-          </div>
-        </v-card>
-      </v-col>
-    </v-row>
+          <template #append><v-icon size="16">mdi-chevron-right</v-icon></template>
+        </v-list-item>
+        <v-list-item
+          v-if="!isContractor"
+          prepend-icon="mdi-chart-timeline-variant"
+          title="Physical Accomplishments"
+          subtitle="BAR No. 1 performance tracking"
+          to="/university-operations/physical"
+          rounded="lg"
+        >
+          <template #append><v-icon size="16">mdi-chevron-right</v-icon></template>
+        </v-list-item>
+        <v-list-item
+          v-if="!isContractor"
+          prepend-icon="mdi-currency-php"
+          title="Financial Accomplishments"
+          subtitle="BAR No. 2 financial utilization"
+          to="/university-operations/financial"
+          rounded="lg"
+        >
+          <template #append><v-icon size="16">mdi-chevron-right</v-icon></template>
+        </v-list-item>
+        <v-list-item
+          v-if="!isContractor"
+          prepend-icon="mdi-tools"
+          title="Repair Projects"
+          subtitle="Maintenance and repair tracking"
+          to="/repairs"
+          rounded="lg"
+        >
+          <template #append><v-icon size="16">mdi-chevron-right</v-icon></template>
+        </v-list-item>
+        <v-list-item
+          v-if="!isContractor"
+          prepend-icon="mdi-school"
+          title="University Operations"
+          subtitle="Quarterly reporting and analytics"
+          to="/university-operations"
+          rounded="lg"
+        >
+          <template #append><v-icon size="16">mdi-chevron-right</v-icon></template>
+        </v-list-item>
+        <v-list-item
+          v-if="isAdmin"
+          prepend-icon="mdi-account-group"
+          title="User Management"
+          subtitle="Manage system accounts and roles"
+          to="/users"
+          rounded="lg"
+        >
+          <template #append><v-icon size="16">mdi-chevron-right</v-icon></template>
+        </v-list-item>
+      </v-list>
+    </v-card>
   </div>
 </template>
+
+<style scoped>
+/* NNN-C: section divider labels */
+.section-label {
+  letter-spacing: 0.06em;
+}
+</style>

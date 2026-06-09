@@ -58,6 +58,7 @@ export interface BackendProject {
   revised_start_date?: string
   original_completion_date?: string
   revised_completion_date?: string
+  project_duration?: string
   publication_status?: PublicationStatus
   created_by?: string
   created_by_name?: string
@@ -102,6 +103,13 @@ export interface BackendUser {
   rank_level?: number
   campus?: string  // Phase Y: Office-scoped visibility
   role?: { name: string }
+  // NNN-F/H: surfaced from /api/auth/me for avatar + profile page
+  avatar_url?: string
+  phone?: string
+  display_name?: string
+  last_login_at?: string
+  last_password_change_at?: string
+  is_sso?: boolean
 }
 
 // Frontend UI-expected shapes
@@ -122,6 +130,7 @@ export interface UIProject {
   revisedStartDate: string
   originalCompletionDate: string
   revisedCompletionDate: string
+  projectDuration: string
   publicationStatus: PublicationStatus
   createdBy: string
   createdAt: string
@@ -159,6 +168,13 @@ export interface UIUser {
   rankLevel: number
   campus: string  // Phase Y: Office-scoped visibility
   roleName: string
+  // NNN-F/H: avatar + profile fields
+  avatarUrl: string
+  phone: string
+  displayName: string
+  lastLoginAt: string
+  lastPasswordChangeAt: string
+  isSso: boolean
 }
 
 /**
@@ -182,6 +198,7 @@ export function adaptProject(backend: BackendProject): UIProject {
     revisedStartDate: backend.revised_start_date || '',
     originalCompletionDate: backend.original_completion_date || '',
     revisedCompletionDate: backend.revised_completion_date || '',
+    projectDuration: backend.project_duration || '',
     publicationStatus: backend.publication_status || 'PUBLISHED',
     createdBy: backend.created_by || '',
     createdAt: backend.created_at,
@@ -231,6 +248,13 @@ export function adaptUser(backend: BackendUser): UIUser {
     rankLevel: backend.rank_level ?? 100,
     campus: backend.campus || '',  // Phase Y: Office-scoped visibility
     roleName: backend.role?.name || '',
+    // NNN-F/H: avatar + profile fields
+    avatarUrl: backend.avatar_url || '',
+    phone: backend.phone || '',
+    displayName: backend.display_name || '',
+    lastLoginAt: backend.last_login_at || '',
+    lastPasswordChangeAt: backend.last_password_change_at || '',
+    isSso: backend.is_sso ?? false,
   }
 }
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { adaptRepairDetail, type UIRepairDetail, type BackendRepairProjectDetail, type PublicationStatus } from '~/utils/adapters'
+import { getPublicationStatusColor } from '~/utils/status-colors'
 
 definePageMeta({
   middleware: 'auth',
@@ -150,15 +151,6 @@ const canEditCurrentProject = computed(() => {
 })
 
 // Publication status helpers
-function getPublicationStatusColor(status: PublicationStatus): string {
-  const colors: Record<PublicationStatus, string> = {
-    DRAFT: 'grey',
-    PENDING_REVIEW: 'orange',
-    PUBLISHED: 'success',
-    REJECTED: 'error',
-  }
-  return colors[status] || 'grey'
-}
 
 function getPublicationStatusLabel(status: PublicationStatus): string {
   const labels: Record<PublicationStatus, string> = {

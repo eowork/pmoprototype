@@ -1,5 +1,7 @@
 ﻿<script setup lang="ts">
 import { adaptProjectDetail, adaptGalleryItem, type UIProjectDetail, type BackendProjectDetail, type BackendGalleryItem, type UIGalleryItem, type PublicationStatus } from '~/utils/adapters'
+import { getStatusColor, getPublicationStatusColor } from '~/utils/status-colors'
+import { formatDate } from '~/utils/date-utils'
 import { KEY_DOC_TYPECODES } from '~/utils/coiFormState'
 import { labelForSdg, labelForRdp, labelForSea, labelForLikha } from '~/utils/coiHierarchies'
 import { useCoiProgressReports, type ProgressReport } from '~/composables/useCoiProgressReports'
@@ -93,20 +95,6 @@ if (!projectId) {
   router.push('/coi')
 }
 
-// MG / MF: Status color mapping covers canonical and legacy values.
-function getStatusColor(status: string): string {
-  const colors: Record<string, string> = {
-    PROPOSAL: 'info',
-    PLANNING: 'info',     // legacy
-    ONGOING: 'primary',
-    COMPLETE: 'success',
-    COMPLETED: 'success', // legacy
-    ON_HOLD: 'warning',
-    CANCELLED: 'error',
-  }
-  return colors[status] || 'grey'
-}
-
 // Format currency
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-PH', {
@@ -115,16 +103,6 @@ function formatCurrency(amount: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount)
-}
-
-// Format date
-function formatDate(dateStr: string): string {
-  if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleDateString('en-PH', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
 }
 
 // Fetch project using direct ID (not computed)
@@ -206,15 +184,6 @@ const canPublishOrReject = computed(() => {
 // Show Edit button: Must be owner/assigned or Admin
 // Editing PENDING_REVIEW reverts to DRAFT automatically (Phase W)
 // Publication status helpers
-function getPublicationStatusColor(status: PublicationStatus): string {
-  const colors: Record<PublicationStatus, string> = {
-    DRAFT: 'grey',
-    PENDING_REVIEW: 'orange',
-    PUBLISHED: 'success',
-    REJECTED: 'error',
-  }
-  return colors[status] || 'grey'
-}
 
 function getPublicationStatusLabel(status: PublicationStatus): string {
   const labels: Record<PublicationStatus, string> = {
@@ -1008,7 +977,7 @@ onMounted(() => {
                   </div>
 
                   <!-- Timeline overview -->
-                  <div class="text-overline text-weight-bold mb-1">Timeline</div>
+                  <div class="text-overline font-weight-bold mb-1">Timeline</div>
                   <div class="d-flex flex-column ga-1 mb-3">
                     <div class="d-flex justify-space-between text-body-2"><span class="text-grey-darken-1">Start</span><span class="font-weight-medium">{{ project.startDate ? formatDate(project.startDate) : '—' }}</span></div>
                     <div class="d-flex justify-space-between text-body-2"><span class="text-grey-darken-1">Target Completion</span><span class="font-weight-medium">{{ project.targetCompletionDate ? formatDate(project.targetCompletionDate) : '—' }}</span></div>
@@ -1018,7 +987,7 @@ onMounted(() => {
                   <!-- PPP-D: Original & Revised Dates — always visible, not hidden in panels -->
                   <template v-if="project.originalStartDate || project.originalCompletionDate || project.revisedStartDate || project.revisedCompletionDate">
                     <v-divider class="mb-2" />
-                    <div class="text-overline text-weight-bold mb-1">Contract / Revision Schedule</div>
+                    <div class="text-overline font-weight-bold mb-1">Contract / Revision Schedule</div>
                     <div class="d-flex flex-column ga-1 mb-3">
                       <div v-if="project.originalStartDate" class="d-flex justify-space-between text-body-2">
                         <span class="text-grey-darken-1">Original Start</span>
@@ -1434,7 +1403,7 @@ onMounted(() => {
 
                     <!-- SDG -->
                     <div class="mb-3">
-                      <p class="text-caption text-black text-weight-bold mb-2">UN Sustainable Development Goals</p>
+                      <p class="text-caption text-black font-weight-bold mb-2">UN Sustainable Development Goals</p>
                       <div v-if="project.sdgGoals?.length" class="d-flex flex-wrap ga-2 align-center">
                         <v-chip
                           v-for="(item, i) in (showMoreAlignment.sdg ? project.sdgGoals : project.sdgGoals.slice(0, ALIGN_MAX_CHIPS))"
@@ -1449,7 +1418,7 @@ onMounted(() => {
 
                     <!-- RDP -->
                     <div class="mb-3">
-                      <p class="text-caption text-black text-weight-bold mb-2">RDP 2023–2028 Alignment</p>
+                      <p class="text-caption text-black font-weight-bold mb-2">RDP 2023–2028 Alignment</p>
                       <div v-if="project.rdpAlignment?.length" class="d-flex flex-wrap ga-2 align-center">
                         <v-chip v-for="(item, i) in (showMoreAlignment.rdp ? project.rdpAlignment : project.rdpAlignment.slice(0, ALIGN_MAX_CHIPS))" :key="i" color="primary" variant="tonal" size="small">{{ labelForRdp(item) }}</v-chip>
                         <v-btn v-if="project.rdpAlignment.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="primary" class="pa-0" @click="showMoreAlignment.rdp = !showMoreAlignment.rdp">
@@ -1461,7 +1430,7 @@ onMounted(() => {
 
                     <!-- SEA -->
                     <div class="mb-3">
-                      <p class="text-caption text-black text-weight-bold mb-2">Socio-Economic Agenda</p>
+                      <p class="text-caption text-black font-weight-bold mb-2">Socio-Economic Agenda</p>
                       <div v-if="project.socioeconomicAgenda?.length" class="d-flex flex-wrap ga-2 align-center">
                         <v-chip v-for="(item, i) in (showMoreAlignment.sea ? project.socioeconomicAgenda : project.socioeconomicAgenda.slice(0, ALIGN_MAX_CHIPS))" :key="i" color="success" variant="tonal" size="small">{{ labelForSea(item) }}</v-chip>
                         <v-btn v-if="project.socioeconomicAgenda.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="success" class="pa-0" @click="showMoreAlignment.sea = !showMoreAlignment.sea">
@@ -1473,7 +1442,7 @@ onMounted(() => {
 
                     <!-- LIKHA -->
                     <div class="mb-1">
-                      <p class="text-caption text-black text-weight-bold mb-2">CSU LIKHA Strategic Goals</p>
+                      <p class="text-caption text-black font-weight-bold mb-2">CSU LIKHA Strategic Goals</p>
                       <div v-if="project.csuLikhaGoals?.length" class="d-flex flex-wrap ga-2 align-center">
                         <v-chip v-for="(item, i) in (showMoreAlignment.likha ? project.csuLikhaGoals : project.csuLikhaGoals.slice(0, ALIGN_MAX_CHIPS))" :key="i" color="info" variant="tonal" size="small">{{ labelForLikha(item) }}</v-chip>
                         <v-btn v-if="project.csuLikhaGoals.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="info" class="pa-0" @click="showMoreAlignment.likha = !showMoreAlignment.likha">
