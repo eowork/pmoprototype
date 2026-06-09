@@ -1,30 +1,90 @@
 # PMO Dashboard — Project State
-> **Last Updated:** 2026-06-08 | **Branch:** `pmo-coi` | **Governance:** ACE v2.4
+> **Last Updated:** 2026-06-09 | **Branch:** `pmo-coi` | **Governance:** ACE v2.4
 
 ---
 
 ## Current Phase
 
-**Phase KKK + LLL** — Phase 1 (Research R-088–R-103) and Phase 2 (Plan) complete. PENDING Phase 3 authorization.
+**Phase PPP** — ✅ Phase 3 complete (2026-06-09). vue-tsc: 0 new errors (16 pre-existing, all unrelated). Committed + pushed to `pmo-coi`.
+- **Priority 1 (UO):** ✅ PPP-A1 "Pillar"→"Program" terminology; PPP-A2 quarterly trend fix (now plots `accomplishment_rate_pct`, 0–120% axis + 100% reference line); PPP-A3 section labels + skeleton loaders
+- **Priority 2 (COI):** ✅ PPP-B1 view switcher overflow fix; PPP-B2 remove duplicate New Project; PPP-B3 table card styling; PPP-B4 filter spacing; PPP-B5 missing section labels
+- **Research:** R-126–R-135 (research.md) | **Plan:** Phase PPP (plan.md)
 
-**KKK scope (CSU CORE Dashboard executive refactor):**
-- KKK-A: AdminKpiRow — replace "Delayed" with "Published Projects"; compact text-subtitle-1, avatar 36
-- KKK-B: Infrastructure card stat 3 — replace "Delayed" with "Completed"; text-h6 stats
-- KKK-C: UO Summary — 4 compact dual-stat pillar cards; trend charts in collapsible panel (default collapsed)
-- KKK-D: Quick Actions — compact v-list navigation (remove large block buttons)
-- KKK-E: Other Modules — remove GAD Reports, stat cards, full-list API calls; navigation-only
+---
+
+## Previous Phase
+
+**Phase OOO** — ✅ Phase 3 complete (UI/UX Refinement Sprint). vue-tsc 0 new errors; **the 2 pre-existing COI ApexOptions TS2322 are now FIXED** (OOO-C). No migrations. No backend changes. Frontend only.
+
+**OOO delivered (UI/UX Refinement Sprint — `coi/index.vue`, `coi/detail-[id].vue`, UO pages, shared utils):**
+- OOO-A: **Shared status-color utility** — new `utils/status-colors.ts` (`getStatusColor`, `getPublicationStatusColor`, `STATUS_HEX`); replaced 7 duplicate inline definitions across coi/index, coi/detail, repairs/detail, UO physical, UO financial
+- OOO-B: Strategic Alignment labels fixed — `text-weight-bold` (non-existent Vuetify class) → `font-weight-bold` (4 alignment labels + 2 timeline headers in detail-[id].vue now render bold)
+- OOO-C: **ApexCharts axis fix** — `campusProgressChart` + `contractorChart` horizontal bars moved `categories` from `yaxis` → `xaxis`; resolves both standing TS2322 errors and renders axis labels correctly
+- OOO-D: **Active filter chips** — `activeFilterChips` computed + `removeFilterChip()`; removable chip row replaces the old `(filtered)` text; per-chip close + Clear all
+- OOO-E: View switcher relocated from filter bar → Project List section header (right-aligned, associated with table not filtering)
+- OOO-F: **Responsive KPI grid** — `v-row`/`v-col` (xs 2 / sm 3 / lg 5 per row); Total → `blue-lighten-1`, Published → `green-lighten-1` (lighter, cleaner)
+- OOO-G: **Table usability** — `fixed-header` + `height="560"`, sticky Project Name column (`fixed: true`), page-size selector (10/25/50/All), sort + page-size persisted to localStorage
+- OOO-H: Analytics + KPI skeleton loaders replace spinners (reduced layout shift)
+- OOO-I: **Accessible tooltips** — `open-on-focus` + `tabindex="0"` + `role="img"` + `aria-label` on COI KPI cards and AdminKpiRow tiles (keyboard reachable)
+- OOO-J: **Chart empty states** — new `components/coi/CiChartEmpty.vue` (icon + title + description); applied to all 8 analytics charts
+- OOO-K: **Relative dates** — new `utils/date-utils.ts` (`formatDate`, `formatRelativeDate`); COI table Created/Updated columns show "3d ago" with absolute date in tooltip
+- OOO-L: UO visual consistency — top-level analytics + pillar/campus section cards → `elevation="1" rounded="lg"` (UO index ×3, financial ×2)
+
+---
+
+## Previous Phase
+
+**Phase NNN** — ✅ Phase 3 complete. vue-tsc + tsc 0 new errors. No migrations. **Backend restart required** (new auth endpoints + MMM-A analytics fix).
+
+**NNN delivered (Visual Intelligence Platform):**
+- NNN-A: **VERIFY_STEP** — sidebar logo restored to 44×44 (MMM-D overshoot corrected per Section C1); horizontal gap kept at `me-1` (~50% reduction); `py-2` height preserved
+- NNN-B: `<v-main class="bg-grey-lighten-5">` — subtle grey dashboard background so white cards float
+- NNN-C: dashboard.vue section labels (Infrastructure Portfolio / University Operations / Operational Insights) + Infrastructure & UO & Quick Actions cards → `elevation="1" rounded="lg"`; **fixed MMM-B regression** (`v-expansion-panels` needs `multiple` for the `number[]` model — trend charts now actually mount on expand)
+- NNN-D: AdminKpiRow — `v-tooltip` (formula + source) on all 4 tiles + cursor:help + hover-lift
+- NNN-E: sidebar Administration split → **Operations & Monitoring** (`v-list-subheader`, Admin+SA: Pending Reviews, Activity Logs) + **System Administration** (SA: User Management); removed collapsible `v-list-group` + orphaned `administrationOpen`
+- NNN-F: avatar surfaced — `BackendUser`/`UIUser`/`adaptUser` gain `avatarUrl`+profile fields; `authStore.userAvatarUrl` + `patchUser()`; app-bar avatar renders image when present
+- NNN-G: **backend** `POST /api/auth/change-password` — JWT-gated, bcrypt verify, SSO-guard, throttled 3/10min, sets `lastPasswordChangeAt`
+- NNN-H: **backend** `PATCH /api/auth/me` — updates displayName+phone; `getProfile()` enriched (phone, display_name, last_login_at, last_password_change_at, is_sso)
+- NNN-I: **new** `pages/profile.vue` — Account Overview (read-only identity + editable displayName/phone) + Security (change password w/ strength meter, SSO-aware)
+- NNN-J: COI executive + filter cards → `elevation="1" rounded="lg"`; Portfolio Summary + Project List section labels upgraded to icon+divider style
+
+---
+
+## Archived Previous Phase
+
+**Phase MMM** — ✅ Phase 3 complete. vue-tsc + tsc 0 new errors. No migrations. Backend + frontend.
+
+**MMM delivered (Dashboard Platform Modernization):**
+- MMM-A: **Analytics 500 root-cause fix** — `getAnalyticsSummary()` `funding_source_name` (non-existent column) → `LEFT JOIN funding_sources fs`; `contractor_name` → `contractor`. `Promise.all` no longer rejects → AdminKpiRow + dashboard mini-summary + COI KPIs now return real data
+- MMM-B: UO trend charts mount-on-expand (`trendsExpanded` ref + `v-if`) so ApexCharts sizes correctly out of collapsed panel
+- MMM-C: Sidebar nav reordered — Dashboard → University Operations → Infrastructure → Repair → GAD
+- MMM-D: Sidebar header compacted ~50% (`py-2`→`py-1`, logo 44→40, `me-2`→`me-1`, removed stray `text-align-right`)
+- MMM-E: User menu — My Profile / Account Settings / Change Password items (non-contractor) + error-colored Logout
+- MMM-F: `/coi/activity-logs` frontend route guard added to `permission.ts` (Admin/SuperAdmin only — backend already gated)
+- MMM-G: COI "Review Projects" button removed; action strip restructured (primary left, nav right via `v-spacer`)
+- MMM-H: COI filter instructional banner (dismissible, `coi_filter_banner_dismissed` localStorage)
+- MMM-I: 3 new optional columns (Revised Start, Duration, Updated) — **list endpoint + adapter extended** to return `project_duration`, `updated_at`, joined `funding_sources`/`contractors`; KPI cards → data-driven `kpiCards` loop with `v-tooltip` + hover-lift styling
+
+**Previous:** Phase KKK + LLL — ✅ Phase 3 complete (committed; not yet pushed). Vue-tsc 0 new errors.
+
+**KKK delivered (CSU CORE Dashboard executive refactor — `pages/dashboard.vue` + `components/AdminKpiRow.vue`):**
+- KKK-A: AdminKpiRow "Delayed Projects" → "Published Projects" (success, mdi-check-decagram, from `by_publication_status[PUBLISHED]`); tile values text-h5 → text-subtitle-1; avatar 44 → 36
+- KKK-B: Infrastructure mini-summary stat 3 "Delayed" → "Completed" (success, from `by_status[COMPLETE/COMPLETED]`); all 4 stats text-h5 → text-h6
+- KKK-C: UO Summary — 8 pillar cards → 4 compact dual-stat cards (`compactPillarData` zips physical+financial by pillar); trend charts moved to collapsible `v-expansion-panels` (default collapsed)
+- KKK-D: Quick Actions — large block buttons → compact `v-list` nav (icon + title + subtitle + chevron)
+- KKK-E: Other Modules stat cards removed entirely (GAD/Repair/UO); removed `stats`/`loading`/`statCards` + full-list API calls; Repair + UO now nav items in Quick Actions
 - KKK-F: Welcome heading text-h4 → text-h5
-- KKK-G: Context banner text update
+- KKK-G: Context banner text updated to executive framing
 
-**LLL scope (COI Dashboard executive refactor):**
-- LLL-A: KPI cards 8→5 compact; text-h4→text-h6; icon 32→20; remove Delayed + On Hold; add Pending Review
-- LLL-B: Project table default columns add Fund Source, Project Code, Orig. End Date
-- LLL-C: Column Manager — v-menu checkboxes; localStorage persist; horizontal scroll
-- LLL-D: Recent Activity → admin-only collapsible (default collapsed); lazy fetch
-- LLL-E: Filter bar — primary 3 fields; advanced collapse 3 fields; full-search dialog for power users
-- LLL-F: Section banners (Portfolio Summary, Project List with dynamic count)
-- LLL-G: Remove Needs Attention + Slow-Moving panels from Overview tab
-- LLL-H: Remove hero analytics strip (duplicate data)
+**LLL delivered (COI Dashboard executive refactor — `pages/coi/index.vue`):**
+- LLL-A: KPI 8 → 5 compact cards (Total, Published, Ongoing, Completed, Pending Review); removed Delayed + On Hold negative cards; text-h4 → text-h6; icon 32 → 20; added `publishedCount` computed
+- LLL-B: Table default columns added Project Code, Fund Source, Orig. End
+- LLL-C: Column Manager — `ALL_COLUMNS` + `hiddenColumns` Set + `v-menu` checkboxes; localStorage `coi_hidden_columns`; default-hidden supplementary optionals; horizontal scroll wrapper; item slots for new columns
+- LLL-D: Recent Activity → admin-only `v-expansion-panels` (default collapsed); lazy-fetch on first expand (removed from `onMounted`)
+- LLL-E: Filter bar 3-tier — primary (search/status/campus) + simplified advanced (project code + start range) + Full Search dialog (all 9 original date-range fields)
+- LLL-F: Section banners — "Portfolio Summary" above KPIs, "Project List" + dynamic count above table
+- LLL-G: Removed "Needs Attention" + "Slow-Moving Projects" negative panels (and `attentionItems`/`slowMovingProjects`/`statusPips` computeds)
+- LLL-H: Removed hero analytics strip (duplicated KPI/analytics data)
 
 ---
 
@@ -95,10 +155,10 @@
 
 ## Current Priorities
 
-1. **Phase 3 authorization** — Issue `RUN_ACE` to begin Phase KKK + LLL implementation (CORE + COI executive refactor)
-2. **Run pending DB migrations** — 7 migrations (sdg_goals, custom_supporting_sections, war fields, mpr fields, notes_banking, concerns_list, billing fields): `npx mikro-orm migration:up`
-3. **Backend restart** — activates `/templates/SD_ECO_*.docx` static serving + new `by_funding_source`/`by_contractor` analytics fields
-4. **Operator smoke test** — COI dashboard analytics tab (verify Contractor chart + Funding Source donut populate); CORE dashboard UO Summary (verify Q1–Q4 charts render after fiscal year select)
+1. **Backend restart (required)** — activates NNN-G/H auth endpoints (`/auth/change-password`, `PATCH /auth/me`) + MMM-A analytics SQL fix: `Ctrl+C` → `npm run start:dev`
+2. **Operator smoke test (NNN)** — see plan.md NNN verification checklist (grey background + floating cards, section labels, sidebar two-group admin, avatar render, change-password, profile page)
+3. **Commit + push** Phases KKK + LLL + MMM + NNN to `pmo-coi`
+4. **Run pending DB migrations** — 7 migrations: `npx mikro-orm migration:up`
 
 ---
 

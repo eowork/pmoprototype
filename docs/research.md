@@ -1,7 +1,134 @@
 # PMO Dashboard — Research Repository
 > Research findings only. Not plans, not decisions, not history.
 > **Last Updated:** 2026-06-08 | **Governance:** ACE v2.4
-> **New entries:** R-088–R-103 (KKK/LLL executive dashboard refactor — 2026-06-08)
+> **New entries:** R-126–R-135 (Phase PPP — UO terminology, quarterly trend, COI layout — 2026-06-08)
+
+---
+
+### R-126: "Pillar" Terminology — Visible UI Scope
+
+**Topic:** Replace "Pillar" with "Program" in University Operations UI
+
+**Finding:** The term "Pillar" appears in user-visible text in two files:
+- `university-operations/index.vue`: 15+ occurrences — dropdown option "All Pillars", section headers "Pillar Completion Overview" / "Pillar Performance Ranking", chart card titles containing "by Pillar", table header `<th>Pillar</th>`, and all expansion-panel guide text references to "Pillar Filter"
+- `university-operations/financial/index.vue`: 1 occurrence — "Select the correct Pillar tab" in the instructional guide (line ~1163)
+- `university-operations/physical/index.vue`: 0 visible occurrences — displays `currentPillar.fullName` which already resolves to "Higher Education Program" etc.
+
+**Constraint:** Backend `pillar_type` DB column, `PILLARS` const, API params (`?pillar_type=HIGHER_EDUCATION`), and function names (`activePillar`, `fetchAllPillarOperations`) are IMMUTABLE per CLAUDE.md taxonomy constraint. Only user-facing display text changes.
+
+---
+
+### R-127: Quarterly Trend Chart — Root Cause of >100% / >200% Values
+
+**Topic:** Why quarterly trend values exceed realistic percentage bounds
+
+**Finding:** `getQuarterlyTrend()` returns 3 fields per quarter:
+- `target_rate` = COUNT of indicators where `target_qN > 0` — a raw integer (e.g., 30 indicators). NOT a percentage.
+- `actual_rate` = SUM(accomplishment_qN / target_qN) for those indicators — a raw decimal sum (e.g., 24.7). NOT a percentage.
+- `accomplishment_rate_pct` = `(actual_rate / target_rate) × 100` — this IS a proper 0–120% figure.
+
+The frontend `quarterlyTrendSeries` (computed) uses `q.target_rate` and `q.actual_rate` directly as chart values — plotted as if they were percentages. With 30 indicators, `target_rate = 30`, far exceeding any axis. The `accomplishment_rate_pct` field is computed by the backend but ignored by the frontend.
+
+**Fix:** Replace both chart series with a single series using `q.accomplishment_rate_pct` (proper percentage). Update chart config to set Y-axis `min:0, max:120`, add `%` formatter, add 100% annotation reference line to match the YoY/cross-module chart style.
+
+---
+
+### R-128: COI View Switcher — Container Overflow Root Cause
+
+**Topic:** View switcher cramped with horizontal scrollbar
+
+**Finding:** The view switcher in `coi/index.vue` (lines 1147–1162) is inside `d-flex align-center ga-2 mb-1` with a `v-divider class="flex-grow-1"`. The `v-btn-toggle` uses `density="compact"` + `size="small"` + `:icon="true"` on each `v-btn`. This combination produces 28px-tall buttons (~32px wide each, 3 buttons = ~100px). The overflow issue occurs when the parent container doesn't have `overflow: hidden` or `min-width`, causing the `v-divider flex-grow-1` to collapse and the toggle to overflow on narrow viewports.
+
+**Fix:** Remove `density="compact"` from `v-btn-toggle`. Use `size="small"` without `:icon="true"`. Add `class="flex-shrink-0"` to the toggle. Optionally add text labels (List/Card/Table) with prepend-icon for better discoverability.
+
+---
+
+### R-129: Duplicate "New Project" Button
+
+**Topic:** Two simultaneous "New Project" buttons in COI dashboard
+
+**Finding:**
+- Line 827: `<v-btn v-if="canAdd('coi')" color="primary" ...>New Project</v-btn>` — page-level header, always visible on both Projects and Analytics tabs.
+- Line 846: `<v-btn v-if="canAdd('coi')" color="primary" size="small" ...>New Project</v-btn>` — inside `<v-window-item value="projects">`, action strip below the tab bar. Both are visible simultaneously when on the Projects tab.
+- Line 1301: Third "New Project" button inside the table empty-state `no-data` slot — CORRECT usage (guiding empty state), should be retained.
+
+**Fix:** Remove line 846 button. Keep header (canonical) and empty-state (contextual) buttons only.
+
+---
+
+### R-130: Table View Whitespace — Container Structure
+
+**Topic:** Excessive unused whitespace in project list table view
+
+**Finding:** Table view `(<v-card v-else>` at line 1267) wraps `v-data-table class="elevation-0"`. The outer `v-card` has no explicit `pa-0` or `elevation` class, so Vuetify applies default card padding/elevation on top of the elevation-0 inner table. This creates visual inconsistency (double-layer card) and adds padding that looks like whitespace.
+
+The fixed `height="560"` creates a tall box even when only 3–5 projects are present (fixed-header scroll area is 560px regardless of row count).
+
+**Fix:** Add `class="pa-0"` + `elevation="1"` + `rounded="lg"` to the outer `v-card` to align with the design system and remove the double-card padding artifact.
+
+---
+
+### R-131: COI Section Labels — Missing Sections
+
+**Topic:** Not all COI dashboard sections have icon+divider labels
+
+**Finding:** Existing section labels in `coi/index.vue`:
+- "Portfolio Summary" (line 853-860) — has icon+divider+coi-section-label ✅
+- "Project List" (line 1147-1149) — has icon+divider+coi-section-label ✅
+
+**Missing labels:**
+- "Executive Overview" — before the 3 analytics cards (Cost Utilization, Campus, Completing Soon) at line ~901
+- "Recent Activities" — before the expansion panel at line ~1490
+- Filter bar has no section label (low-priority, self-explanatory)
+
+---
+
+### R-132: UO Section Labels — Missing from Analytics Dashboard
+
+**Topic:** University Operations analytics dashboard lacks section hierarchy labels
+
+**Finding:** `university-operations/index.vue` analytics dashboard uses `<div class="text-subtitle-1 font-weight-medium mb-3 d-flex align-center">` for sub-section headers (lines ~1889, ~2232). These are not visually consistent with the `coi-section-label` style (icon + uppercase + divider). The analytics card uses a single `v-card-title` with `Analytics Dashboard - FY XXX` but no internal section separation.
+
+**Fix:** Add `coi-section-label`-style dividers at key boundaries within the analytics dashboard for Physical, Financial, and Cross tabs.
+
+---
+
+### R-133: Financial Guide Text — Pillar Reference
+
+**Topic:** financial/index.vue instructional guide text uses "Pillar"
+
+**File:** `pmo-frontend/pages/university-operations/financial/index.vue`
+**Line:** ~1163 in expansion panel guide: `<strong>Step 1 — Select the correct Pillar tab</strong>`
+
+**Fix:** Change "Pillar tab" → "Program tab"
+
+---
+
+### R-134: UO Analytics Card — Loading State (UO index)
+
+**Topic:** Analytics card loading uses spinner, not skeleton loader
+
+**Finding:** `university-operations/index.vue` line ~1515-1518 shows `v-progress-circular` inside `v-card-text v-if="analyticsLoading"`. This causes height collapse and layout shift, inconsistent with the OOO-H skeleton loader pattern applied to COI.
+
+**Recommendation:** Replace with `v-skeleton-loader` pattern matching OOO-H style (handled as part of A3 section labels for visual consistency, not a standalone task).
+
+---
+
+### R-135: B4 Section Spacing — Filter Bar / Executive Separation
+
+**Topic:** Insufficient visual breathing room between Executive Overview and Filter Bar
+
+**Finding:** In `coi/index.vue`:
+- KPI grid ends at line ~897 (`mb-4`)
+- Executive overview (3 cards) at lines ~901–970 (`mb-3`)
+- Filter banner (optional, dismissible) at lines ~976–987 (`mb-3`)
+- Filter bar card starts at line ~989 with `class="mb-3 pa-3"`
+
+No dedicated spacing between Executive Overview and the filter bar. These two sections serve different purposes (read → act) and should have visible separation.
+
+**Fix:** Add `mt-6` to the filter bar card and add an explicit "Filters" section label (or just the spacing + a separator) before it.
+
+
 
 ---
 
@@ -2771,4 +2898,396 @@ Per brief: Remove Delayed Projects, High Risk Warnings, Negative Status Projecti
 - KPI value size text-h4 — reduce to text-h6 (2-level reduction)
 - Negative panels — analytics tab only
 - Filter bar — primary 3 fields + advanced 3 fields + full-search dialog
+
+---
+
+## MMM Platform Modernization Research (Phase 1 — 2026-06-08)
+
+### R-104: Analytics API 500 — Root Cause: Non-Existent SQL Columns
+
+**Topic:** `GET /api/construction-projects/analytics/summary` → HTTP 500
+
+**Root cause confirmed:** `getAnalyticsSummary()` (service.ts:519) runs `Promise.all([...6 queries...])`. Two queries reference columns that do not exist on `construction_projects`:
+
+1. `funding_source_name` — entity uses `fundingSourceId` (UUID FK to `funding_sources.id`). The `funding_sources` table stores the display name in column `name`. Fix requires `LEFT JOIN funding_sources fs ON cp.funding_source_id = fs.id` and selecting `fs.name as funding_source_name`.
+
+2. `contractor_name` — entity uses `contractor` (varchar, nullable). Column name in DB is `contractor`. Fix: rename reference in query to `contractor`.
+
+**Cascading impact:** `Promise.all` rejects on first failure — all 6 queries fail together. Every caller of this endpoint returns 500. This includes:
+- `AdminKpiRow.vue` → catch fires → coiTotal/coiPublished/coiPendingReviews all set to 0
+- `dashboard.vue` `loadCoiAnalytics()` → catch fires → Infrastructure Portfolio mini-summary shows null/zero
+- `coi/index.vue` `fetchAnalytics()` → analytics summary returns null → all KPI counters fall back to client-derived project list counts (partial degradation)
+
+**Not a DTO issue.** The fix is entirely in `getAnalyticsSummary()` raw SQL.
+
+---
+
+### R-105: KPI Zero Values — Cascading from R-104
+
+**Topic:** AdminKpiRow shows zeros for Published Projects, Pending Reviews, Infrastructure Projects
+
+**Finding:** Not a DTO mapping bug. Direct cascade from R-104. The `catch` block in `loadCoiSummary()` sets `coiTotal = 0`, `coiPublished = 0`, `coiPendingReviews = 0`. Fix R-104 → KPI values populate from real data automatically.
+
+**Verification path:** After fix, `by_publication_status` returns array with `{ publication_status: 'PUBLISHED', count: N }` — the existing mapping code in AdminKpiRow.vue is correct and requires no change.
+
+---
+
+### R-106: UO Trend Charts — Two Rendering Issues
+
+**Topic:** Quarterly trend charts not visibly rendering
+
+**Issue 1 — Collapsed panel / no redraw:** ApexCharts renders inside `v-expansion-panels` which is collapsed by default. When a parent container is `display:none` or `visibility:hidden` during initial render, ApexCharts cannot measure its bounding box and renders with zero dimensions. When the panel opens, the chart may not resize unless forced.
+
+**Fix:** Add `@afterEnter` on `v-expansion-panel-text` to call `window.dispatchEvent(new Event('resize'))` — triggers ApexCharts auto-resize. Or use `:key` bound to expanded state to remount the chart on open.
+
+**Issue 2 — All-zero data appears invisible:** If any quarter returns `accomplishment_rate_pct = 0` or `null`, the area chart renders a flat line at y=0 on a white background — effectively invisible. Need to verify if the UO trend endpoints return real non-zero data for the selected fiscal year.
+
+**Endpoint shape confirmed:** `GET /analytics/quarterly-trend?fiscal_year=N` returns `{ quarters: [{ quarter: 'Q1', accomplishment_rate_pct: number }] }` — matches frontend mapping at `uoTrendChart` computed.
+
+---
+
+### R-107: Sidebar Layout Analysis (Sections D1 + F)
+
+**Topic:** Sidebar header spacing + navigation order
+
+**D1 finding — Header spacing:**
+- Current: `<div class="d-flex align-center px-2 py-2">` + logo `height="44"`
+- Total header height ≈ 44px logo + 16px vertical padding = ~60px
+- The vertical padding `py-2` (8px top + 8px bottom) accounts for the bulk of perceived whitespace
+- Fix: change `py-2` → `py-1` reduces header to ~52px (16px reduction ≈ 25% reduction)
+- Logo size can also reduce from 44→40 to tighten further if needed
+
+**F finding — Navigation order:**
+- Current `mainModules` array order: Dashboard → Infrastructure Projects → Repair Projects → University Operations → GAD Parity
+- Required order: Dashboard → University Operations → Infrastructure Projects → Repair Projects → GAD Parity
+- Fix: swap positions of "Infrastructure Projects" (index 1) and "University Operations" (index 3) in the array literal
+- No logic change — pure array reorder
+
+---
+
+### R-108: User Menu Gaps (Section D2)
+
+**Topic:** Missing menu items in app bar user dropdown
+
+**Current state:** User menu contains only: user email (list-item), role chip (subtitle), divider, Logout
+**Missing:** Profile Page, Account Settings, Change Password
+
+**Frontend implementation scope:**
+- Profile page (`/profile`) — does not yet exist; add menu item linking to it (page creation deferred to its own phase)
+- Account Settings — no settings page exists; add placeholder item (disabled or TBD)
+- Change Password — requires backend `/auth/change-password` endpoint; add menu item (implementation deferred)
+- Google OAuth profile picture — not in scope (no OAuth in current stack); not implementing
+
+**Approach:** Add the 3 menu items to `default.vue` user menu. Profile + Account Settings → navigate to `/profile` (to be built). Change Password → navigate to `/profile?tab=security`. Items conditionally shown only when not contractor.
+
+---
+
+### R-109: Activity Logs RBAC Audit (Section E)
+
+**Topic:** Role-based access control for Activity Logs
+
+**Backend (protected):** `ActivityLogController` has `@UseGuards(RolesGuard)` at class level + `@Roles('SuperAdmin', 'Admin', 'Auditor')` on `GET /activity-logs`. Staff and Contractor roles receive 403 — backend is already hardened.
+
+**Frontend sidebar (protected):** Administration section wrapped in `v-if="canAccessAdmin"` — COI Activity Logs item only visible to Admin/SuperAdmin. ✅
+
+**Frontend page gap:** `pages/coi/activity-logs.vue` uses `middleware: ['auth', 'permission']`. The `permission.ts` middleware has NO guard clause for `/coi/activity-logs` path. Any authenticated non-contractor user who knows the URL can navigate directly to the page. The API will return 403 but the page still renders (empty state or error).
+
+**Fix:** Add explicit path guard in `permission.ts` for `/coi/activity-logs` → redirect non-admin non-superAdmin users to `/dashboard`.
+
+---
+
+### R-110: COI Quick Action Strip Analysis (Section B1)
+
+**Topic:** GGG-B Quick Actions strip in COI index
+
+**Current strip (coi/index.vue line 801):** New Project (canAdd), Review Projects (PENDING_REVIEW filter), Portfolio Analytics (tab switch), Public View (link)
+
+**"Review Projects" button analysis:** Redundant with:
+- LLL-A KPI card "Pending Review" already shows count
+- Primary filter bar Status field allows filtering to PENDING_REVIEW directly
+- Button adds visual noise, especially for non-admin users who cannot approve anyway
+
+**Recommended removal:** Remove "Review Projects" button only. Retain: New Project, Portfolio Analytics, Public View. Restructure strip as cleaner inline row with consistent spacing. Non-admin users should not see "Review Projects" trigger — it creates confusion since they cannot act on it.
+
+---
+
+### R-111: COI Filter Bar Instructional Banner (Section B2)
+
+**Topic:** Adding contextual guidance above the filter bar
+
+**Finding:** The post-LLL filter bar (3-tier: primary + advanced + full-search dialog) has no instructional context. Users unfamiliar with the advanced collapse or full-search dialog may miss those capabilities.
+
+**Implementation:** `v-alert` with `type="info"` `variant="tonal"` `density="compact"` + `closable` above the filter row. Text: "Filter projects by status, campus, funding source, and timeline to refine portfolio analysis." Dismiss state persisted via `localStorage('coi_filter_banner_dismissed')`.
+
+---
+
+### R-112: Column Manager — Additional Optional Columns (Section B3)
+
+**Topic:** Extending optional columns in COI table
+
+**Current optionals:** Project Code, Orig. End, Original Start, Revised End, Contractor, Created (6 optional)
+
+**Brief additions — feasibility analysis:**
+| Column | Status | Source field |
+|---|---|---|
+| Revised Start Date | ✅ Add | `revisedStartDate` (in adapter) |
+| Duration | ✅ Add | `projectDuration` or `originalContractDuration` (in adapter) |
+| Updated Date | ✅ Add | `updatedAt` (in adapter) |
+| Financial Status | ⚠️ Derived | Use `financialProgress` as `financialAccomplishment` with % display |
+| Physical Status label | ⚠️ Derived | Use existing Progress column — already shows % |
+| Last Progress Report | ❌ Defer | Requires N+1 join on `construction_progress_reports` — not in current list endpoint |
+
+**Recommendation:** Add `revisedStartDate`, `projectDuration`, `updatedAt`. Skip Last Progress Report (N+1). Financial/Physical Status as label-based derived columns using existing progress fields — can be added as computed display columns without additional API calls.
+
+---
+
+### R-113: Tooltip Strategy (Section B4)
+
+**Topic:** `v-tooltip` implementation across KPI cards, filters, actions
+
+**Vuetify 3 approach:** `v-tooltip` wraps the target and uses `#activator` slot. For data tables use `v-tooltip` on column headers. For action buttons use inline `v-tooltip` wrapping the `v-btn`.
+
+**KPI card tooltips (LLL-A cards):**
+- Total Projects: "Total number of infrastructure projects in the portfolio, including all publication statuses."
+- Published: "Projects approved and visible on the public portal."
+- Ongoing: "Active construction projects currently in progress."
+- Completed: "Projects where construction has been fully completed."
+- Pending Review: "Projects submitted for publication approval awaiting admin decision."
+
+**Filter tooltips:** `v-tooltip` on the search icon, status select, campus select explaining what each filters.
+
+**Action button tooltips:** Edit, Delete, Submit, Approve, Reject — contextual per action.
+
+**Chart tooltips:** ApexCharts native tooltip config already in place — no additional work.
+
+---
+
+## NNN Visual Intelligence Platform Research (Phase 1 — 2026-06-08)
+
+### R-114: VERIFY_STEP MMM-D — Sidebar Header Spacing Overcorrection
+
+**Topic:** Section C1 says "DO NOT reduce drawer height. DO NOT compress branding vertically. ONLY reduce horizontal spacing between logo and title (~50%)."
+
+**MMM-D delivered:** `py-2`→`py-1` (vertical padding reduced), logo 44→40, `me-2`→`me-1`. The `py-1` change violated the Section C1 constraint. The linter reverted `py-1`→`py-2` (confirmed by system-reminder: line 176 shows `py-2`). Logo size reduction to 40x40 also violates branding proportions — brief says "Maintain branding proportions."
+
+**Correct scope (NNN-A):** Restore logo to `width="44" height="44"`. Keep `me-1` (achieves ~50% horizontal gap reduction: 8px → 4px). Keep `py-2`. This is the only change required per the brief.
+
+---
+
+### R-115: UO Trend Charts — MMM-B Type Model Bug
+
+**Topic:** Vuetify 3 `v-expansion-panels` model type mismatch introduced by MMM-B
+
+**Root cause:** In Vuetify 3, `v-expansion-panels` without the `multiple` prop uses a **single value** model (number | undefined), not an array. MMM-B bound the model to `ref<number[]>([])` — an array — without adding `multiple`. When the panel opens, Vuetify sets the model to `0` (a number), but the ref type is `number[]`. The `trendsExpanded.includes(0)` then calls `Array.prototype.includes` on a number (after Vue auto-unwraps to `0`), which throws or silently returns false.
+
+**Result:** The charts never mount even after opening the panel. The collapsible is visually functional (opens/closes) but `v-if="trendsExpanded.includes(0)"` never evaluates true.
+
+**Fix options:**
+- Option A: Add `multiple` to `v-expansion-panels` and keep `ref<number[]>([])` + `includes(0)` check.
+- Option B: Change to `ref<number | undefined>(undefined)` and `v-if="trendsExpanded !== undefined"`.
+
+Option B is simpler (single panel, no multiple needed). Option A is cleaner if more panels are added later. Recommend Option A (more robust, consistent with Vuetify 3 multiple-panel pattern).
+
+---
+
+### R-116: Dashboard Visual Hierarchy — Gray Background Pattern
+
+**Topic:** Implementing gray dashboard background with elevated white containers
+
+**Current state:** `default.vue` renders `v-main > v-container fluid class="pa-4"` — white background throughout. All dashboard cards use `variant="outlined"` giving a flat, undifferentiated appearance.
+
+**Standard pattern (Material Design 3 / Vuetify 3):** Background: `surface-variant` or `grey-lighten-4` (#F5F5F5). Cards: `elevation="1"` with `rounded="lg"` (removes `variant="outlined"`). This creates visual layering — background recedes, containers "float."
+
+**Vuetify implementation:**
+```css
+/* global in default.vue <style> or app.vue */
+.v-main { background-color: rgb(var(--v-theme-background)) !important; }
+```
+Override theme background:
+```typescript
+// vuetify plugin — theme.themes.light.colors.background = '#F5F5F5'
+```
+Or simplest: add CSS class to `v-main`:
+```html
+<v-main class="bg-grey-lighten-4">
+```
+
+**Card convention change:** `variant="outlined"` → `elevation="1" rounded="lg"` on dashboard cards. Do not change on form inputs or table variants.
+
+---
+
+### R-117: Dashboard Section Architecture Assessment
+
+**Topic:** Current section structure vs. brief's 6-section model
+
+**Current sections (dashboard.vue):**
+1. Welcome header
+2. Dismissible context banner
+3. AdminKpiRow (4 tiles)
+4. Infrastructure Portfolio mini-summary card
+5. UO Summary card (pillar cards + trend expansion)
+6. Quick Actions card
+
+**Brief model:** Executive Summary → UO Overview → Infrastructure Portfolio → Trends & Analytics → Activity & Notifications → Operational Insights
+
+**Mapping and gap analysis:**
+| Brief Section | Current Equivalent | Gap |
+|---|---|---|
+| Executive Summary | AdminKpiRow + Welcome | Needs section label |
+| UO Overview | UO Summary card | Needs section divider + label |
+| Infrastructure Portfolio | Infrastructure card | Inconsistent elevation vs UO |
+| Trends & Analytics | Inside UO card (collapsed) | Should be own section |
+| Activity & Notifications | Not present | New section needed (future) |
+| Operational Insights | Quick Actions | Needs section label + enhancement |
+
+**Recommendation for NNN:** Add visible section labels + dividers between major groups. Infrastructure card should use same elevation/styling as UO card. Trends panel promoted to sit below both module sections (applies to both UO and COI).
+
+---
+
+### R-118: Infrastructure Portfolio Card — Visual Parity with UO
+
+**Topic:** Infrastructure card uses `variant="outlined"` with click handler; UO card uses no variant (defaults to elevation)
+
+**Current Infrastructure card:** `<v-card class="mb-6 pa-4" variant="outlined" style="cursor:pointer">`
+**Current UO card:** `<v-card class="mb-6 pa-4" v-if="!isContractor">`
+
+**UO card has implicit `elevation="2"` (default card behavior).** Infrastructure card has no elevation (outlined removes elevation). After NNN-B changes background to grey, the difference will be more pronounced: UO card will visibly "float" while Infrastructure card will blend into background.
+
+**Fix:** Remove `variant="outlined"` from Infrastructure card. Add `rounded="lg"` for consistency. Add subtle border to indicate clickability: `border` prop with `color="primary"` on hover, or add `hover` class.
+
+---
+
+### R-119: User Profile — Avatar, Change Password Backend Gap
+
+**Topic:** Sections D1/D2/D3 — Profile page foundation analysis
+
+**User entity (confirmed):** `avatarUrl` (text, nullable), `googleId` (nullable), `lastPasswordChangeAt`, `displayName`, `phone`, `campus`, `firstName`, `lastName`.
+
+**`getProfile()` response:** Already returns `avatar_url`. ✅
+
+**`BackendUser` type (adapters.ts):** Does NOT declare `avatar_url` or `google_id`. These fields come back from `/api/auth/me` but are silently dropped because the type doesn't list them.
+
+**`UIUser` interface:** Does NOT have `avatarUrl`, `googleId`, `phone`, `displayName`.
+
+**`adaptUser()`:** Does NOT map `avatar_url`. Confirmed: initials-only avatar in user menu is expected behavior given this gap.
+
+**Change password endpoint:** Does NOT exist. `request-password-reset` is a PUBLIC admin-mediated flow — wrong tool. Need a new JWT-authenticated `POST /api/auth/change-password` with `{ currentPassword, newPassword, confirmPassword }`. SSO-only guard needed: if `user.googleId && !user.passwordHash`, return 400 "SSO-only account."
+
+**Profile update endpoint:** No `PATCH /api/auth/me` exists. Need one for displayName, phone fields (avatar requires file upload flow).
+
+---
+
+### R-120: Admin Sidebar Separation Analysis (Section F)
+
+**Topic:** Optimal structure for Administration sidebar section
+
+**Current structure (one dropdown, `canAccessAdmin` gate):**
+- Pending Reviews (canAccessAdmin = Admin + SuperAdmin)
+- COI Activity Logs (canAccessAdmin = Admin + SuperAdmin)
+- User Management (canManageUsers = SuperAdmin only in practice)
+
+**Observation:** "Pending Reviews" is an operational workflow (Admin daily use). "COI Activity Logs" is a monitoring/audit function. "User Management" is system administration (SuperAdmin).
+
+**HCI recommendation:** Separate into two distinct groups:
+1. **Operations & Monitoring** (visible to Admin + SuperAdmin) — Pending Reviews + COI Activity Logs
+2. **System Administration** (visible to SuperAdmin only) — User Management
+
+This aligns with role-based cognitive models: Admins use the first group regularly; SuperAdmins use the second rarely but need it when setting up users.
+
+**Implementation:** Two `v-list-group` sections — "Operations" gated by `canAccessAdmin`, "System" gated by `isSuperAdmin`. Or flat items grouped by a `v-list-subheader` divider. Prefer `v-list-subheader` approach for lighter UI — avoids double-nesting dropdowns.
+
+---
+
+### R-121: COI Dashboard Section Density Audit (Section B1)
+
+**Topic:** Visual density and section hierarchy in coi/index.vue
+
+**Findings:**
+- Action strip → KPI cards → Executive overview → Filter banner → Filter bar → Table — all render at the same visual weight with no hierarchy differentiation
+- `v-card variant="outlined"` used for filter bar and executive cards — flat appearance
+- After NNN background change, these cards will need `elevation="1"` to "float"
+- Section labels ("Portfolio Summary", "Project List") use `text-subtitle-1` but no visual separators — blend into surrounding content
+- Quick Actions strip uses plain `div.d-flex` — appears uncontained
+
+**Recommended improvements:**
+- Add 16px top margin (`mt-4`) between major page sections
+- Upgrade section banner labels to more prominent `v-divider` + `v-chip` style headers
+- Filter bar card → elevation="1" after background change
+- Executive overview cards → elevation="1" after background change
+
+---
+
+### R-122: AdminKpiRow Tooltips Gap (Section A4)
+
+**Topic:** AdminKpiRow.vue — missing tooltips on tiles
+
+**Current state:** No `v-tooltip` on any tile in `AdminKpiRow.vue`. COI index tiles have tooltips (added MMM-I). Dashboard tiles are missing them.
+
+**Required tooltips:**
+- Infrastructure Projects: "Total number of infrastructure projects in the portfolio across all statuses."
+- Published Projects: "Projects approved and visible on the public portal."
+- Pending Reviews: "Projects submitted for publication approval awaiting admin decision."
+- UO Compliance Rate: "Average indicator accomplishment rate across all UO pillars for the selected fiscal year."
+
+---
+
+### R-123: Vuetify 3 Dashboard Background Pattern (Implementation Reference)
+
+**Topic:** Implementing page background separation cleanly in Nuxt 3 + Vuetify
+
+**Option A — Theme override:** Set `theme.themes.light.colors.background` in `plugins/vuetify.ts`. Affects all pages — too broad.
+
+**Option B — v-main class:** Add `bg-grey-lighten-5` to `<v-main>` in `default.vue`. This applies to all pages using the default layout — appropriate scope since all logged-in pages benefit from background.
+
+**Vuetify grey-lighten-5 = #FAFAFA** — subtle off-white, avoids stark gray. **grey-lighten-4 = #F5F5F5** — more visible separation. Recommendation: `grey-lighten-5` for subtlety, `grey-lighten-4` if more contrast needed.
+
+**Card styling convention after background change:**
+- Remove `variant="outlined"` from dashboard section cards → gains default `elevation="2"`
+- Add `rounded="lg"` for consistent border radius
+- Keep `variant="outlined"` ONLY for form controls, filter bars, and data-entry containers (Vuetify convention: outlined for interactive input areas)
+
+---
+
+### R-124: Change Password Security Requirements (Section D3)
+
+**Topic:** Authenticated change-password endpoint design
+
+**Requirements:**
+- JWT-gated (`JwtAuthGuard`) — not public
+- Body: `{ currentPassword: string, newPassword: string, confirmPassword: string }`
+- Validations: 
+  - `currentPassword` must match stored `passwordHash` via bcrypt compare
+  - `newPassword !== currentPassword` (prevent re-use)
+  - `newPassword === confirmPassword`
+  - Min 8 chars, complexity requirements (inherit existing validation patterns)
+  - If `user.googleId && !user.passwordHash` → 400 "Account uses Google Sign-In — password change not available"
+- On success: update `passwordHash` + `lastPasswordChangeAt = new Date()`
+- Rate limiting: throttle to 3 attempts per 10 minutes
+- Audit: log `PASSWORD_CHANGE` to activity log
+
+**No admin approval required** — this is a self-serve change by an authenticated user.
+
+---
+
+### R-125: Profile Page Architecture (Section D1)
+
+**Topic:** `/profile` page structure and data requirements
+
+**Backend readiness:**
+- `GET /api/auth/me` → already returns `avatar_url`, `first_name`, `last_name`, `campus`, email, role — needs `phone` + `display_name` added
+- `PATCH /api/auth/me` — does not exist; needed for profile updates
+- `POST /api/auth/change-password` — does not exist; needed for password change
+
+**Frontend page structure (3-tab layout):**
+1. **Overview tab** — display name, email, role chip, campus, phone; read-only except displayName/phone via inline edit
+2. **Security tab** — Change Password form (currentPassword + newPassword + confirmPassword); Last password changed timestamp; sessions info (future)
+3. **Activity tab** — Recent activity from `/api/activity-logs?userId=me&pageSize=10` (deferred — not priority)
+
+**Avatar implementation:**
+- Read: `authStore.user.avatarUrl` (once UIUser is updated)
+- Display: `v-avatar` with `v-img :src="avatarUrl"` when present, else initials
+- Upload: `input type="file" accept="image/*"` → FormData POST to `/api/auth/avatar` → `UploadsService` stores file → updates `users.avatar_url`
+- Avatar upload endpoint needs backend implementation
+
+**Scope for NNN-L:** Overview tab (display info) + Security tab (change password). Activity tab deferred. Avatar upload deferred to next phase (requires new backend endpoint + file handling).
 

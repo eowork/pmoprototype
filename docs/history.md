@@ -130,12 +130,65 @@
 
 ---
 
-## Phase KKK + LLL — Phase 1 + 2 Complete (2026-06-08)
+## Phase KKK + LLL — Executive Dashboard Refactor ✅ Complete (2026-06-08)
 
-Research (R-088–R-103) and Plan written. PENDING Phase 3 authorization.
+Phase 1 (Research R-088–R-103) + Phase 2 (Plan) + Phase 3 (Implementation) complete. vue-tsc 0 new errors (2 pre-existing ApexOptions TS2322 remain). Frontend-only, no migrations.
 
-| Phase | Scope | Key Findings |
+| Phase | Scope | Delivered |
 |---|---|---|
-| KKK | CSU CORE Dashboard executive refactor (7 sub-steps) | Replace "Delayed" KPI with "Published"; compact typography; UO Summary dual-stat cards + collapsible trends; Quick Actions as compact v-list; eliminate GAD/stat cards |
-| LLL | COI Dashboard executive refactor (8 sub-steps) | KPI 8→5 compact cards (remove Delayed); add Fund Source/Project Code/Orig.End to table; Column Manager with localStorage; collapsible Recent Activity (lazy fetch); 3-tier filter; section banners; remove Needs Attention + Slow-Moving from landing |
+| KKK | CSU CORE Dashboard (`dashboard.vue` + `AdminKpiRow.vue`) | AdminKpiRow Delayed→Published (text-subtitle-1, avatar 36); Infrastructure stat Delayed→Completed (text-h6); UO Summary 4 dual-stat cards + collapsible trend panel; Quick Actions compact v-list nav; removed GAD/Repair/UO stat cards + full-list fetches; welcome text-h5; banner text |
+| LLL | COI Dashboard (`coi/index.vue`) | KPI 8→5 compact (removed Delayed + On Hold, added Published/Pending Review, text-h6/icon 20); table +Project Code/Fund Source/Orig.End; Column Manager (v-menu checkboxes, localStorage `coi_hidden_columns`, horizontal scroll); Recent Activity admin-only collapsible + lazy fetch; 3-tier filter (primary + simplified advanced + Full Search dialog); Portfolio Summary + Project List banners; removed Needs Attention/Slow-Moving/hero strip |
+
+**Decisions during implementation:**
+- D-LLL-1: COI status taxonomy is PROPOSAL/ONGOING/COMPLETE/ON_HOLD/CANCELLED — plan's "Under Construction" mapped to domain-accurate "Ongoing"; plan's "Fiscal Year" advanced filter replaced with start-date range (COI has no fiscal_year field — avoids a non-data-backed control).
+- D-LLL-2: Column Manager defaults — brief-required columns (incl. Project Code, Fund Source, Orig. End) visible by default; supplementary optionals (Original Start, Revised End, Contractor, Created) default-hidden via `DEFAULT_HIDDEN`, all toggleable.
+- D-KKK-1: Repair/UO module cards eliminated (not just GAD) — both relocated as Quick Actions nav items (no count fetch), per R-099.
+
+---
+
+## Phase MMM — Dashboard Platform Modernization ✅ Complete (2026-06-08)
+
+Phase 1 (Research R-104–R-113) + Phase 2 (Plan) + Phase 3 (Implementation) complete. vue-tsc + tsc 0 new errors (2 pre-existing ApexOptions TS2322 remain). No migrations. **Backend restart required** for MMM-A.
+
+| Step | Scope | Delivered |
+|---|---|---|
+| MMM-A | Analytics 500 root cause | `getAnalyticsSummary()` referenced non-existent columns `funding_source_name` + `contractor_name` → `Promise.all` rejected → endpoint 500 → AdminKpiRow/dashboard/COI KPIs all zeroed. Fixed: `LEFT JOIN funding_sources fs` for the name; `contractor_name`→`contractor`. |
+| MMM-B | UO trend charts | Charts mount only when expansion panel open (`trendsExpanded` ref + `v-if`) so ApexCharts measures non-zero dimensions instead of rendering 0-height inside a collapsed panel. |
+| MMM-C | Sidebar order | Reordered `mainModules`: Dashboard → University Operations → Infrastructure → Repair → GAD. |
+| MMM-D | Sidebar header | Compacted ~50%: `py-2`→`py-1`, logo 44→40, `me-2`→`me-1`, removed stray `text-align-right` class. |
+| MMM-E | User menu | Added My Profile / Account Settings / Change Password (non-contractor, route to `/profile?tab=…`) + error-colored Logout. |
+| MMM-F | Activity Logs RBAC | `/coi/activity-logs` frontend guard added to `permission.ts` (Admin/SuperAdmin only). Backend already gated via `@Roles`. |
+| MMM-G | COI action strip | Removed redundant "Review Projects" button; restructured strip (primary action left, navigation right via `v-spacer`). |
+| MMM-H | COI filter banner | Dismissible instructional `v-alert` above filter bar, persisted via `coi_filter_banner_dismissed`. |
+| MMM-I | Columns + tooltips | 3 new optional columns (Revised Start, Duration, Updated); KPI cards → data-driven `kpiCards` loop with `v-tooltip` + hover-lift. |
+
+**Decisions during implementation:**
+- D-MMM-1: MMM-I exposed a latent LLL gap — the COI list endpoint never selected `project_duration`/`updated_at` and never joined `funding_sources`/`contractors`, so the Fund Source + Contractor columns added in LLL rendered empty. Extended the list SELECT (`cp.updated_at`, `cp.project_duration`, `fs.name as funding_source_name`, `COALESCE(c.name, cp.contractor) as contractor_name`) + adapter (`projectDuration`) rather than ship empty columns. The `/api/construction-projects` route path is unchanged — IMMUTABLE-route constraint preserved (the constraint governs the route, not the query columns).
+- D-MMM-2: Profile page (`/profile`) referenced by MMM-E menu items does not yet exist — items create the navigation affordance now; page build deferred to a future phase (404 acceptable interim).
+- Out of scope (unchanged): the 2 pre-existing ApexOptions TS2322 errors (`yaxis.categories` on campus/contractor horizontal bar charts at `coi/index.vue`) remain — not in MMM plan; logged as a standing blocker.
+
+---
+
+## Phase NNN — Visual Intelligence Platform Modernization ✅ Complete (2026-06-08)
+
+Phase 1 (Research R-114–R-125) + Phase 2 (Plan) + Phase 3 (Implementation) complete. vue-tsc + tsc 0 new errors (2 pre-existing ApexOptions TS2322 remain). No migrations. **Backend restart required** (NNN-G/H auth endpoints).
+
+| Step | Scope | Delivered |
+|---|---|---|
+| NNN-A | VERIFY_STEP | Sidebar logo restored 40→44 (MMM-D overcorrected branding proportions per Section C1); `me-1` horizontal gap + `py-2` height retained |
+| NNN-B | App background | `<v-main class="bg-grey-lighten-5">` — subtle grey so white cards float |
+| NNN-C | Dashboard sections | Icon+divider section labels (Infrastructure / University Operations / Operational Insights); Infrastructure + UO + Quick Actions cards → `elevation="1" rounded="lg"`; **fixed MMM-B regression** via `multiple` prop on trend `v-expansion-panels` |
+| NNN-D | KPI tooltips | `v-tooltip` (formula + source) on all 4 AdminKpiRow tiles + cursor:help + hover-lift |
+| NNN-E | Sidebar restructure | Administration split → "Operations & Monitoring" (`v-list-subheader`, Admin+SA) + "System Administration" (canManageUsers); removed `v-list-group` + orphaned `administrationOpen` ref/watch/init |
+| NNN-F | Avatar surfacing | `BackendUser`/`UIUser`/`adaptUser` + `authStore.userAvatarUrl`/`patchUser`; app-bar avatar renders `v-img` when `avatarUrl` present, initials fallback |
+| NNN-G | Backend change-password | `POST /api/auth/change-password` — JWT-gated, bcrypt verify, SSO-guard, throttle 3/10min, sets `lastPasswordChangeAt` + audit log |
+| NNN-H | Backend profile update | `PATCH /api/auth/me` — displayName + phone; `getProfile()` enriched (phone, display_name, last_login_at, last_password_change_at, is_sso) |
+| NNN-I | Profile page | New `pages/profile.vue` — identity card + Account Overview (editable displayName/phone via PATCH) + Security (change password, strength meter, SSO-aware); `?tab=security` deep-link from user menu |
+| NNN-J | COI spacing | Executive + filter cards → `elevation="1" rounded="lg"`; Portfolio Summary + Project List labels → icon+divider style |
+
+**Decisions during implementation:**
+- D-NNN-1: MMM-B was a latent regression — `v-expansion-panels` without `multiple` uses a scalar model, so the `ref<number[]>` + `.includes(0)` guard never fired and trend charts never mounted. Fixed by adding `multiple`.
+- D-NNN-2: "System Administration" sidebar group gated by `canManageUsers` (existing User Management gate) rather than raw `isSuperAdmin`, to avoid silently removing access from any Admin granted user-management.
+- D-NNN-3: Avatar **upload** deferred (needs new file-handling endpoint) — Upload Photo button shown disabled with "coming soon" tooltip; avatar **display** from existing `avatarUrl` is live. Profile Activity tab also deferred.
+- Backend restart required for NNN-G/H (and still-pending MMM-A analytics fix) to take effect.
 

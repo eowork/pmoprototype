@@ -1,7 +1,352 @@
 # PMO Dashboard — Active Implementation Plan
 > **Governance:** ACE v2.4 | **Branch:** `pmo-coi`
-> **Last Updated:** 2026-06-03
+> **Last Updated:** 2026-06-08
 > **Rule:** Only active, approved, pending work. Completed items → `history.md`.
+
+---
+
+## PHASE PPP — ⏳ PENDING AUTHORIZATION
+> **Status:** Phase 2 complete — awaiting operator `RUN_ACE` for Phase 3.
+> **Research:** R-126–R-135 (research.md)
+> **Priority order:** A (UO) → B (COI) → C (Design system)
+> **Constraints:** No backend changes. Frontend only. No DTO modifications. `PILLARS` const + `pillar_type` API params stay as-is. Only display text changes for A1.
+
+---
+
+### PPP-A1: "Pillar" → "Program" Terminology — University Operations
+
+**Files:**
+- `pmo-frontend/pages/university-operations/index.vue`
+- `pmo-frontend/pages/university-operations/financial/index.vue`
+
+**Research:** R-126, R-133
+
+**Scope:** Display text only. Backend API params, variable names, DB columns are IMMUTABLE.
+
+**Changes in `university-operations/index.vue`:**
+
+1. `globalPillarOptions` computed (line ~80): `{ title: 'All Pillars', value: 'ALL' }` → `{ title: 'All Programs', value: 'ALL' }`
+
+2. Template section headers + chart card titles (use `replace_all: true` per string):
+   - `"Pillar Completion Overview"` → `"Program Completion Overview"` (appears as section div + guide text)
+   - `"Pillar Performance Ranking"` → `"Program Performance Ranking"` (chart card title)
+   - `"Achievement Rate by Pillar"` → `"Achievement Rate by Program"` (chart card title)
+   - `"Accomplishment Rate by Pillar"` → `"Accomplishment Rate by Program"` (YoY chart title)
+   - `"Utilization Rate by Pillar"` → `"Utilization Rate by Program"` (Financial YoY chart title)
+   - `"Budget Obligations by Campus and Pillar"` → `"Budget Obligations by Campus and Program"`
+   - `"Expense Class Breakdown by Pillar"` → `"Expense Class Breakdown by Program"`
+   - `<th>Pillar</th>` → `<th>Program</th>` (expense table header)
+
+3. Expansion panel guide text (each unique occurrence):
+   - `"Pillar Filter"` → `"Program Filter"`
+   - `"four pillars"` → `"four programs"` (description text)
+   - `"all pillars at once"` → `"all programs at once"`
+   - `"select a specific pillar"` → `"select a specific program"`
+   - `"pillars — both in terms of"` → `"programs — both in terms of"`
+   - `"one per pillar"` (Financial description) → `"one per program"`
+   - `"per pillar"` (YoY Comparison guide) → `"per program"`
+
+**Changes in `university-operations/financial/index.vue`:**
+
+1. Line ~1163: `"Select the correct Pillar tab"` → `"Select the correct Program tab"` (in `<strong>` tag inside instructional guide)
+
+**Acceptance:** `grep -r "Pillar" pmo-frontend/pages/university-operations/` returns only code-level identifiers (variables, comments), zero user-facing label strings.
+
+---
+
+### PPP-A2: Quarterly Trend Chart — Fix Unrealistic Values
+
+**File:** `pmo-frontend/pages/university-operations/index.vue`
+**Research:** R-127
+
+**Root cause:** `quarterlyTrendSeries` uses `q.target_rate` (raw indicator count) and `q.actual_rate` (raw ratio sum) — both are unitless integers/decimals that naturally exceed 100. The backend already computes `q.accomplishment_rate_pct` which IS a proper 0–120% figure.
+
+**Step 1 — Update `quarterlyTrendSeries` (lines ~902–914):**
+
+Replace:
+```typescript
+return [
+  { name: 'Indicators with Target', data: quarters.map((q: any) => q.target_rate || 0) },
+  { name: 'Achievement Score', data: quarters.map((q: any) => q.actual_rate || 0) },
+]
+```
+
+With:
+```typescript
+return [{
+  name: 'Quarterly Accomplishment Rate (%)',
+  data: quarters.map((q: any) => q.accomplishment_rate_pct != null
+    ? parseFloat(q.accomplishment_rate_pct.toFixed(1))
+    : 0),
+}]
+```
+
+**Step 2 — Update `quarterlyTrendOptions` chart config (lines ~862–899):**
+
+```typescript
+const quarterlyTrendOptions = computed(() => ({
+  chart: {
+    type: 'line' as const,
+    height: 280,
+    toolbar: { show: false },
+    zoom: { enabled: false },
+  },
+  stroke: { curve: 'smooth' as const, width: 3 },
+  colors: ['#1976D2'],
+  xaxis: { categories: ['Q1', 'Q2', 'Q3', 'Q4'] },
+  yaxis: {
+    title: { text: 'Accomplishment Rate (%)' },
+    min: 0,
+    max: 120,
+    forceNiceScale: false,
+    labels: { formatter: (val: number) => val.toFixed(0) + '%' },
+  },
+  annotations: {
+    yaxis: [{
+      y: 100,
+      borderColor: '#E53935',
+      strokeDashArray: 4,
+      label: {
+        text: 'Target (100%)',
+        position: 'left',
+        offsetX: 5,
+        offsetY: -5,
+        style: { color: '#E53935', background: '#FFFFFF', fontSize: '12px',
+          padding: { left: 4, right: 4, top: 2, bottom: 2 } },
+      },
+    }],
+  },
+  legend: { show: false },
+  markers: { size: 5 },
+  dataLabels: { enabled: true, formatter: (val: number) => val.toFixed(1) + '%', offsetY: -20,
+    style: { fontSize: '11px', colors: ['#333'] } },
+  tooltip: { y: { formatter: (val: number) => val.toFixed(1) + '%' } },
+}))
+```
+
+**Also update the guide text** in the expansion panel: replace the "Quarterly Trend" guide description from mentioning "Indicators with Target / Achievement Score" to "shows quarterly accomplishment rate (actual/target × 100%)".
+
+**Acceptance:** Y-axis shows 0–120%. Values stay within realistic range. 100% reference line visible. No series exceeds 120% unless truly exceptional.
+
+---
+
+### PPP-A3: Section Labels — University Operations Analytics Dashboard
+
+**File:** `pmo-frontend/pages/university-operations/index.vue`
+**Research:** R-132, R-134
+
+**Goal:** Apply `coi-section-label` pattern (icon + uppercase text + `v-divider flex-grow-1`) to major sections within the analytics card, consistent with COI dashboard.
+
+**Pattern to use:**
+```html
+<div class="d-flex align-center ga-2 mb-3 mt-2">
+  <v-icon size="16" color="grey-darken-2">mdi-ICON</v-icon>
+  <span class="text-caption text-grey-darken-2 font-weight-bold text-uppercase">SECTION TITLE</span>
+  <v-divider class="flex-grow-1 ml-2" />
+</div>
+```
+
+**Add section labels at:**
+1. Before "Pillar Completion Overview" section in **Physical** view (before the `v-row class="mb-4" v-if="pillarSummary?.pillars"` at line ~1886) — icon: `mdi-clipboard-list-outline`, title: `PROGRAM COMPLETION`
+2. Before the Target vs Actual + Ranked + Trend rows in Physical view — icon: `mdi-chart-bar`, title: `PHYSICAL PERFORMANCE`
+3. Before "Budget Utilization Overview" in **Financial** view — icon: `mdi-cash-multiple`, title: `BUDGET UTILIZATION`
+4. Before the Utilization Radial + Expense Class rows in Financial view — icon: `mdi-chart-donut`, title: `FINANCIAL ANALYTICS`
+5. Before the Cross comparison chart in **Cross** view — icon: `mdi-compare`, title: `CROSS-MODULE PERFORMANCE`
+
+**Also:** Replace `v-progress-circular` loading spinner (line ~1515-1518) with `v-skeleton-loader` rows matching OOO-H pattern:
+```html
+<v-card-text v-if="analyticsLoading" class="pa-3">
+  <v-row dense class="mb-3">
+    <v-col v-for="n in 4" :key="n" cols="6" sm="3"><v-skeleton-loader type="card" height="80" /></v-col>
+  </v-row>
+  <v-row dense>
+    <v-col cols="12" md="6"><v-skeleton-loader type="card" height="280" /></v-col>
+    <v-col cols="12" md="6"><v-skeleton-loader type="card" height="280" /></v-col>
+  </v-row>
+</v-card-text>
+```
+
+**Acceptance:** Each major tab has clear section boundaries. Loading state shows skeleton cards instead of spinner.
+
+---
+
+### PPP-B1: View Switcher — Fix Cramped Layout / Overflow
+
+**File:** `pmo-frontend/pages/coi/index.vue` (lines 1145–1167)
+**Research:** R-128
+
+**Problem:** `v-btn-toggle` with `density="compact"` + `size="small"` + `:icon="true"` produces 28px-tall icon-only buttons. Combined with `d-flex` container without `flex-wrap`, overflows on narrow viewports.
+
+**Fix — update lines 1145–1167:**
+
+```html
+<!-- Section label row with view switcher -->
+<div class="d-flex align-center ga-2 mb-2 flex-wrap">
+  <v-icon size="16" color="grey-darken-2">mdi-format-list-bulleted</v-icon>
+  <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Project List</span>
+  <v-divider class="flex-grow-1 ml-1 mr-2" style="min-width:20px" />
+  <v-btn-toggle
+    v-model="viewMode"
+    variant="outlined"
+    divided
+    mandatory
+    color="primary"
+    class="flex-shrink-0"
+  >
+    <v-btn value="list" size="small" prepend-icon="mdi-format-list-bulleted" class="px-3">List</v-btn>
+    <v-btn value="card" size="small" prepend-icon="mdi-view-grid-outline" class="px-3">Card</v-btn>
+    <v-btn value="table" size="small" prepend-icon="mdi-table" class="px-3">Table</v-btn>
+  </v-btn-toggle>
+</div>
+<div class="text-caption text-grey-darken-1 mb-2">
+  {{ filteredProjects.length }} project{{ filteredProjects.length !== 1 ? 's' : '' }} — use filters to narrow results.
+</div>
+```
+
+Key changes:
+- Remove `density="compact"` from `v-btn-toggle`
+- Remove `:icon="true"` from each `v-btn`
+- Add text labels ("List", "Card", "Table") for discoverability
+- Add `class="flex-shrink-0"` on toggle to prevent compression
+- Add `flex-wrap` to parent row so toggle wraps on xs screens
+- Add `style="min-width:20px"` on divider to prevent total collapse
+
+**Acceptance:** No horizontal scrollbar. Buttons comfortably clickable (≥32px tall). Toggle wraps gracefully on mobile.
+
+---
+
+### PPP-B2: Remove Duplicate "New Project" Button
+
+**File:** `pmo-frontend/pages/coi/index.vue` (line 846)
+**Research:** R-129
+
+**Remove this block** (inside `<v-window-item value="projects">` action strip):
+```html
+<v-btn v-if="canAdd('coi')" color="primary" prepend-icon="mdi-plus" size="small" @click="createProject">New Project</v-btn>
+```
+
+**Retain:**
+- Line 827 (page header button — canonical primary action)
+- Line 1299–1303 (empty-state button inside `no-data` slot — contextual guidance)
+
+The action strip still retains "Portfolio Analytics" and "Public View" navigation buttons.
+
+**Acceptance:** Only one "New Project" button visible per page state (header button). Empty state still shows the create button.
+
+---
+
+### PPP-B3: Table Container — Fix Whitespace and Styling
+
+**File:** `pmo-frontend/pages/coi/index.vue` (line 1267)
+**Research:** R-130
+
+**Current:**
+```html
+<v-card v-else>
+  <div style="overflow-x:auto">
+  <v-data-table ... class="elevation-0" height="560">
+```
+
+**Fix:** Add `class="pa-0"` + `elevation="1"` + `rounded="lg"` to outer `v-card`, and increase table height to `600` for more usable space:
+```html
+<v-card v-else class="pa-0" elevation="1" rounded="lg">
+  <div style="overflow-x:auto">
+  <v-data-table ... class="elevation-0" height="600">
+```
+
+**Reasoning:** `elevation-0` inner table + un-styled outer card creates double visual layer with default elevation + no explicit padding set. Setting `pa-0` removes inner padding artifact; `elevation="1" rounded="lg"` aligns with the design system pattern used across all other section cards. Height 560→600 gives ~3 more rows visible before scroll.
+
+**Acceptance:** Table card matches elevation style of filter bar and executive overview cards. No extra padding around table edges. Sticky header still works.
+
+---
+
+### PPP-B4: Section Spacing — Breathing Room Before Filter Bar
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Research:** R-135
+
+**Current:** Executive overview section (`template v-if="analyticsReady"`) ends with `mb-3`, filter bar card starts immediately with `mb-3`. No visual hierarchy between "read" and "filter/act" zones.
+
+**Fix:** Change the filter bar card from `class="mb-3 pa-3"` to `class="mb-3 mt-5 pa-3"` (adds ~24px top margin), creating visible breathing room.
+
+Additionally, add a section label before the filter bar to make its purpose explicit:
+```html
+<!-- Section label: Filters -->
+<div class="d-flex align-center ga-2 mb-2 mt-5">
+  <v-icon size="16" color="grey-darken-2">mdi-filter-variant</v-icon>
+  <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Filters</span>
+  <v-divider class="flex-grow-1 ml-1" />
+</div>
+```
+
+Remove the `mt-5` from the filter card itself (the label div provides spacing).
+
+**Acceptance:** Clear visual separation between executive overview and filter bar.
+
+---
+
+### PPP-B5: COI Missing Section Labels
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Research:** R-131
+
+**Add section label: "Executive Overview"** — before the `template v-if="analyticsReady"` block (line ~899):
+
+```html
+<!-- Executive Overview section label -->
+<div class="d-flex align-center ga-2 mb-2 mt-1">
+  <v-icon size="16" color="grey-darken-2">mdi-view-dashboard-outline</v-icon>
+  <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Executive Overview</span>
+  <v-divider class="flex-grow-1 ml-1" />
+</div>
+```
+
+**Add section label: "Recent Activities"** — before `<v-expansion-panels v-if="canViewActivity"` (line ~1490):
+
+```html
+<!-- Recent Activities section label -->
+<div v-if="canViewActivity" class="d-flex align-center ga-2 mb-2 mt-4">
+  <v-icon size="16" color="grey-darken-2">mdi-history</v-icon>
+  <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Recent Activities</span>
+  <v-divider class="flex-grow-1 ml-1" />
+</div>
+```
+
+**Acceptance:** All major dashboard zones — Portfolio Summary, Executive Overview, Filters, Project List, Recent Activities — have matching section labels with icon+divider style.
+
+---
+
+## Verification Checklist (Phase PPP)
+
+| Check | How to verify |
+|---|---|
+| PPP-A1: No visible "Pillar" text | Navigate UO analytics → all section headers + dropdown + table show "Program" |
+| PPP-A1: API params unchanged | Network tab → `?pillar_type=HIGHER_EDUCATION` still used |
+| PPP-A2: Quarterly trend ≤ 120% | UO Physical Dashboard → Quarterly Trend chart Y-axis 0–120, values realistic |
+| PPP-A2: 100% reference line | Red dashed annotation at 100% visible in trend chart |
+| PPP-A3: Section labels in UO | UO analytics → clear section dividers between major blocks |
+| PPP-A3: Skeleton loaders | Throttle network → skeleton cards instead of spinner in analytics |
+| PPP-B1: View switcher | COI Projects tab → view toggle readable, no overflow, wraps on mobile |
+| PPP-B2: Single New Project | COI header shows one button; action strip shows none; empty state shows one |
+| PPP-B3: Table card | Table has `elevation="1" rounded="lg"`, no double-padding artifact |
+| PPP-B4: Filter spacing | Clear gap between Executive Overview and Filters section |
+| PPP-B5: Section labels | COI Projects tab: Portfolio Summary + Executive Overview + Filters + Project List + Recent Activities all labeled |
+
+---
+
+## Commit Strategy (Phase PPP)
+
+```
+feat(uo): replace "Pillar" with "Program" in all University Operations UI labels
+fix(uo): correct quarterly trend chart to show accomplishment rate percentage
+feat(uo): add section labels and skeleton loaders to analytics dashboard
+fix(coi): resolve view switcher overflow and improve button sizing
+fix(coi): remove duplicate new project button from action strip
+refactor(coi): align table card styling with design system
+feat(coi): add executive overview and recent activities section labels
+```
+
+Push to `pmo-coi` after type-check passes.
 
 ---
 
@@ -4425,7 +4770,7 @@ Add descriptive subtitles and captions to every major dashboard section.
 
 ## Phase KKK — CSU CORE Dashboard Executive Refactor
 
-**Status:** PENDING Phase 3 authorization
+**Status:** ✅ Phase 3 complete (KKK-A→G). vue-tsc 0 new errors. Frontend-only, no migrations.
 **Research:** R-088, R-091, R-092, R-095, R-099, R-100, R-101, R-103
 **Files:** `pmo-frontend/pages/dashboard.vue`, `pmo-frontend/components/AdminKpiRow.vue`
 
@@ -4636,7 +4981,7 @@ Remove the old `size="large" block` button grid and associated 2-column layout w
 
 ## Phase LLL — COI Dashboard Executive Refactor
 
-**Status:** PENDING Phase 3 authorization
+**Status:** ✅ Phase 3 complete (LLL-A→H). vue-tsc 0 new errors. Frontend-only, no migrations.
 **Research:** R-089, R-090, R-093, R-094, R-095, R-096, R-097, R-098, R-102, R-103
 **Files:** `pmo-frontend/pages/coi/index.vue`
 
@@ -4938,4 +5283,478 @@ Before project table (after filter bar):
 - [ ] LLL-G: Needs Attention + Slow-Moving panels removed from Overview tab
 - [ ] LLL-H: Hero analytics strip removed
 - [ ] vue-tsc 0 new errors
+
+---
+
+## Phase MMM — Dashboard Platform Modernization
+
+> **Status:** ✅ Phase 3 COMPLETE (2026-06-08) — vue-tsc + tsc 0 new errors. **Backend restart required** for MMM-A (analytics SQL fix + extended list query).
+> **Research:** R-104–R-113 (research.md)
+> **Scope:** Backend analytics API fix, UO trend charts, sidebar reorder + spacing, user menu, Activity Logs RBAC, COI filter banner, column manager extensions, tooltips
+> **Files touched:** `construction-projects.service.ts`, `utils/adapters.ts`, `pages/dashboard.vue`, `pages/coi/index.vue`, `layouts/default.vue`, `middleware/permission.ts`
+> **Migrations:** None
+> **Reconciliation (D-MMM-1):** MMM-I required the COI list endpoint to actually return `project_duration`, `updated_at`, joined `funding_sources.name` + `contractors.name` — these were absent from the list SELECT (Fund Source/Contractor columns added in LLL were rendering empty). Extended the list query + adapter rather than ship empty columns. Route path unchanged (constraint preserved).
+
+---
+
+### MMM-A: Fix `getAnalyticsSummary()` — SQL Column Errors
+
+**File:** `pmo-backend/src/construction-projects/construction-projects.service.ts`
+**Research:** R-104, R-105
+
+**Root cause:** Two raw SQL queries in `getAnalyticsSummary()` reference non-existent columns. Since `Promise.all([...6 queries...])` rejects on any failure, the entire endpoint returns HTTP 500 — causing AdminKpiRow, dashboard Infrastructure mini-summary, and COI analytics to show zeros/nulls.
+
+**Fix 1 — `funding_source_name`:**
+Replace the failing query:
+```sql
+SELECT funding_source_name, COUNT(*) as count, ...
+FROM construction_projects
+WHERE deleted_at IS NULL AND funding_source_name IS NOT NULL
+GROUP BY funding_source_name ORDER BY count DESC
+```
+With a JOIN:
+```sql
+SELECT fs.name as funding_source_name, COUNT(*) as count,
+       COALESCE(SUM(cp.contract_amount),0) as total_contract
+FROM construction_projects cp
+LEFT JOIN funding_sources fs ON cp.funding_source_id = fs.id
+WHERE cp.deleted_at IS NULL AND fs.name IS NOT NULL
+GROUP BY fs.name ORDER BY count DESC
+```
+
+**Fix 2 — `contractor_name`:**
+Column in `construction_projects` is `contractor` (not `contractor_name`).
+Replace: `SELECT contractor_name, ...` → `SELECT contractor as contractor_name, ...`
+Replace filter: `AND contractor_name IS NOT NULL` → `AND contractor IS NOT NULL`
+Replace group: `GROUP BY contractor_name` → `GROUP BY contractor`
+
+**Expected outcome:** Endpoint returns 200 with `by_funding_source` and `by_contractor` arrays populated. AdminKpiRow shows real counts. Infrastructure Portfolio mini-summary shows real totals.
+
+---
+
+### MMM-B: UO Trend Charts — Resize Fix
+
+**File:** `pmo-frontend/pages/dashboard.vue`
+**Research:** R-106
+
+**Issue:** ApexCharts inside `v-expansion-panels` (default collapsed) does not remeasure chart dimensions when the panel opens — renders with 0-height or clipped chart.
+
+**Fix:** On the `v-expansion-panel-text` container wrapping the trend charts, use Vue's `v-if` tied to `trendsExpanded` state so the chart is only mounted when the panel is open (mount-on-expand, unmount-on-collapse). This forces a fresh render with correct dimensions.
+
+**Implementation:**
+```html
+<v-expansion-panels v-model="trendsExpanded" ...>
+  <v-expansion-panel>
+    <v-expansion-panel-text>
+      <div v-if="trendsExpanded.includes(0)">
+        <!-- JJJ-A chart -->
+        <!-- JJJ-B chart -->
+      </div>
+    </v-expansion-panel-text>
+  </v-expansion-panel>
+</v-expansion-panels>
+```
+Add `const trendsExpanded = ref<number[]>([])` replacing the existing `v-expansion-panels` that was already added in KKK-C.
+
+---
+
+### MMM-C: Sidebar Navigation Reorder
+
+**File:** `pmo-frontend/layouts/default.vue`
+**Research:** R-107 (Section F)
+
+**Required order:** Dashboard → University Operations → Infrastructure Projects → Repair Projects → GAD Parity
+
+**Change:** In `mainModules` computed `allModules` array, reorder to:
+1. Dashboard
+2. University Operations (moved from index 3 → index 1)
+3. Infrastructure Projects (moved from index 1 → index 2)
+4. Repair Projects (stays at index 3)
+5. GAD Parity (stays at index 4)
+
+No logic changes — pure array reorder.
+
+---
+
+### MMM-D: Sidebar Header Compact Spacing
+
+**File:** `pmo-frontend/layouts/default.vue`
+**Research:** R-107 (Section D1)
+
+**Change:** `<div class="d-flex align-center px-2 py-2">` → `<div class="d-flex align-center px-2 py-1">`
+
+Reduces vertical padding by 8px (~25% height reduction). Preserves logo size and responsive behavior.
+
+---
+
+### MMM-E: User Menu Enhancements
+
+**File:** `pmo-frontend/layouts/default.vue`
+**Research:** R-108 (Section D2)
+
+Add 3 menu items to the user dropdown `v-list` between the divider and Logout:
+1. **My Profile** — `prepend-icon="mdi-account-circle"` → navigates to `/profile`
+2. **Account Settings** — `prepend-icon="mdi-cog-outline"` → navigates to `/profile?tab=settings`
+3. **Change Password** — `prepend-icon="mdi-lock-reset"` → navigates to `/profile?tab=security`
+
+Add a second `v-divider` before Logout. Items not shown to contractors (`v-if="!isContractor"`).
+
+Profile page creation is deferred — the menu items will show but route to `/profile` which may not exist yet (404 is acceptable for now; creates the navigation affordance).
+
+---
+
+### MMM-F: Activity Logs RBAC — Frontend Page Guard
+
+**File:** `pmo-frontend/middleware/permission.ts`
+**Research:** R-109 (Section E)
+
+**Gap:** `/coi/activity-logs` has no guard in permission.ts — any authenticated user can navigate directly via URL.
+
+**Fix:** Add explicit route guard before the edit/create route checks:
+```typescript
+// Activity Logs — Admin/SuperAdmin only
+if (to.path.startsWith('/coi/activity-logs')) {
+  if (!isAdmin.value && !isSuperAdmin.value) {
+    console.warn('[Permission] Access denied to /coi/activity-logs - insufficient permissions')
+    return navigateTo('/dashboard')
+  }
+}
+```
+
+Backend is already protected (`@Roles('SuperAdmin', 'Admin', 'Auditor')`). This is a UX-layer guard consistent with the existing pattern.
+
+---
+
+### MMM-G: COI Quick Actions — Remove "Review Projects" Button
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Research:** R-110 (Section B1)
+
+**Change:** Remove the "Review Projects" `v-btn` (line 805-808) from the GGG-B quick actions strip. Retain: New Project, Portfolio Analytics, Public View. The pending review count is already surfaced in the LLL-A KPI card.
+
+Restructure the strip to use `d-flex align-center justify-space-between` layout: actions (New Project) on the left, navigation actions (Portfolio Analytics, Public View) on the right.
+
+---
+
+### MMM-H: COI Filter Bar — Instructional Banner
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Research:** R-111 (Section B2)
+
+Add a dismissible instructional `v-alert` above the filter row (below the "Project List" section banner). Text: "Filter projects by status, campus, funding source, and timeline to refine portfolio analysis."
+
+```html
+<v-alert
+  v-if="!filterBannerDismissed"
+  type="info"
+  variant="tonal"
+  density="compact"
+  closable
+  class="mb-3"
+  @click:close="dismissFilterBanner"
+>
+  Filter projects by status, campus, funding source, and timeline to refine portfolio analysis.
+</v-alert>
+```
+
+Add `filterBannerDismissed = ref(false)` + `dismissFilterBanner()` + `onMounted` localStorage read for `coi_filter_banner_dismissed`.
+
+---
+
+### MMM-I: Column Manager Extensions + KPI Tooltips
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Research:** R-112, R-113
+
+**Column additions (append to `ALL_COLUMNS`):**
+- `{ title: 'Revised Start', key: 'revisedStartDate', sortable: true, optional: true }`
+- `{ title: 'Duration', key: 'projectDuration', sortable: false, optional: true }`
+- `{ title: 'Updated', key: 'updatedAt', sortable: true, optional: true }`
+
+Add to `DEFAULT_HIDDEN`: `'revisedStartDate'`, `'projectDuration'`, `'updatedAt'`
+
+Add item slot templates for `revisedStartDate`, `projectDuration`, `updatedAt` with appropriate formatting.
+
+**KPI card tooltips:** Wrap each of the 5 KPI cards in `v-tooltip` with `location="bottom"` providing contextual tooltip text per R-113.
+
+---
+
+### MMM Verification Checklist
+
+- [ ] MMM-A: `GET /api/construction-projects/analytics/summary` returns 200 (no 500)
+- [ ] MMM-A: AdminKpiRow shows real counts (not zeros)
+- [ ] MMM-A: Infrastructure Portfolio mini-summary shows real values on dashboard
+- [ ] MMM-B: UO trend charts render correctly when expansion panel is opened
+- [ ] MMM-C: Sidebar order: Dashboard → University Operations → Infrastructure → Repair → GAD
+- [ ] MMM-D: Sidebar header is visually more compact than before
+- [ ] MMM-E: User menu shows My Profile, Account Settings, Change Password items
+- [ ] MMM-F: Non-admin navigating to `/coi/activity-logs` is redirected to dashboard
+- [ ] MMM-G: "Review Projects" button removed; 3-button strip remains
+- [ ] MMM-H: Filter instructional banner visible, dismissible, persists dismiss state
+- [ ] MMM-I: Revised Start, Duration, Updated toggleable via Column Manager
+- [ ] MMM-I: KPI cards show tooltips on hover
+- [ ] vue-tsc 0 new errors
+
+---
+
+## Phase NNN — Visual Intelligence Platform Modernization
+
+> **Status:** ✅ Phase 3 COMPLETE (2026-06-08) — vue-tsc + tsc 0 new errors. **Backend restart required** (NNN-G/H auth endpoints).
+> **Reconciliation (D-NNN-1):** Fixed MMM-B regression discovered during NNN-C — `v-expansion-panels` bound to a `number[]` model requires the `multiple` prop; without it Vuetify sets the model to a scalar and `trendsExpanded.includes(0)` never evaluates true, so the trend charts never mounted. Added `multiple`. (D-NNN-2): System Administration group gated by `canManageUsers` (not raw `isSuperAdmin`) to preserve existing User Management access semantics.
+> **Research:** R-114–R-125 (research.md)
+> **Scope:** VERIFY_STEP corrections, gray background, dashboard sections, sidebar restructure, avatar surfacing, change-password full-stack, profile page
+> **Files touched:** `layouts/default.vue`, `pages/dashboard.vue`, `components/AdminKpiRow.vue`, `pages/coi/index.vue`, `middleware/permission.ts`, `utils/adapters.ts`, `stores/auth.ts`, `auth.controller.ts`, `auth.service.ts`, `pages/profile.vue` (new)
+> **Migrations:** None (avatarUrl column already exists on users table)
+
+---
+
+### NNN-A: VERIFY_STEP — Restore Sidebar Logo (MMM-D Overcorrection)
+
+**File:** `pmo-frontend/layouts/default.vue`
+**Research:** R-114
+
+**Section C1 constraint:** "DO NOT reduce drawer height. DO NOT compress branding vertically. ONLY reduce horizontal spacing between logo and title (~50%)."
+
+**MMM-D change that violated the constraint:** Logo size 44→40. The `py-2` revert was handled by linter. The `me-2`→`me-1` change is correct (horizontal gap reduction).
+
+**Fix:** Restore `width="44" height="44"` on the logo `v-img`. Keep `me-1`. Keep `py-2`. Result: header height unchanged, branding proportions unchanged, horizontal gap reduced from 8px to 4px (~50%).
+
+---
+
+### NNN-B: App Dashboard Background
+
+**File:** `pmo-frontend/layouts/default.vue`
+**Research:** R-116, R-123
+
+**Change:** Add `class="bg-grey-lighten-5"` to `<v-main>`. Grey-lighten-5 (#FAFAFA) provides subtle visual separation between background and white elevated cards without harsh contrast.
+
+This is a single-line change to the layout. All pages using the default layout benefit automatically.
+
+---
+
+### NNN-C: Dashboard Section Structure + Card Elevation
+
+**File:** `pmo-frontend/pages/dashboard.vue`
+**Research:** R-117, R-118
+
+**Three changes:**
+
+**C.1 — Section labels:** Add a labeled section divider before each major card block:
+```html
+<div class="d-flex align-center ga-2 mb-3 mt-2">
+  <v-icon size="16" color="grey-darken-2">mdi-office-building</v-icon>
+  <span class="text-caption text-grey-darken-2 font-weight-bold text-uppercase tracking-wide">Infrastructure Portfolio</span>
+  <v-divider class="flex-grow-1 ml-2" />
+</div>
+```
+Apply before: Infrastructure card, UO card, Quick Actions card.
+
+**C.2 — Infrastructure card elevation:** Remove `variant="outlined"` → gains default `elevation="2"`. Add `rounded="lg"` for radius consistency with UO card.
+
+**C.3 — UO card:** Add `rounded="lg"` + `elevation="1"` explicitly (currently implicit default). Add `border` prop for hover feedback.
+
+---
+
+### NNN-D: AdminKpiRow Tooltips
+
+**File:** `pmo-frontend/components/AdminKpiRow.vue`
+**Research:** R-122
+
+Wrap each tile `v-card` in a `v-tooltip` (same pattern as MMM-I COI index):
+- Infrastructure Projects: total portfolio count, all statuses
+- Published Projects: approved + visible on public portal
+- Pending Reviews: awaiting admin approval decision
+- UO Compliance Rate: average accomplishment rate across all pillars, selected FY
+
+Add `cursor: help` style to tile cards to indicate tooltip presence.
+
+---
+
+### NNN-E: Sidebar Section Restructure
+
+**File:** `pmo-frontend/layouts/default.vue`
+**Research:** R-120
+
+Replace the single `Administration` dropdown with two distinct groups using `v-list-subheader` separators:
+
+**Group 1 — Operations & Monitoring** (visible to Admin + SuperAdmin = `canAccessAdmin`):
+- Pending Reviews (`mdi-clipboard-check-outline`)
+- COI Activity Logs (`mdi-history`)
+
+**Group 2 — System Administration** (visible to SuperAdmin only = `isSuperAdmin`):
+- User Management (`mdi-account-group`)
+
+Remove the single collapsible `v-list-group`. Replace with two separate `v-list` sections each headed by a `v-list-subheader`. This gives immediate visual clarity — Admins see their operational items; SuperAdmins see both groups.
+
+---
+
+### NNN-F: Avatar Surfacing in User Menu + Adapter
+
+**Files:** `pmo-frontend/utils/adapters.ts`, `pmo-frontend/stores/auth.ts`, `pmo-frontend/layouts/default.vue`
+**Research:** R-119, R-122
+
+**Three-part change:**
+
+**F.1 — `BackendUser` + `UIUser` types:** Add `avatar_url?: string` to `BackendUser`; add `avatarUrl: string` to `UIUser`.
+
+**F.2 — `adaptUser()`:** Map `avatarUrl: backend.avatar_url || ''`.
+
+**F.3 — `default.vue` user menu:** Replace the initials `v-avatar` with a conditional render:
+```html
+<v-avatar color="secondary" size="32" class="mr-2">
+  <v-img v-if="authStore.user?.avatarUrl" :src="authStore.user.avatarUrl" alt="Profile" />
+  <span v-else class="text-caption font-weight-bold text-primary">
+    {{ authStore.userFullName?.charAt(0) || 'U' }}
+  </span>
+</v-avatar>
+```
+
+**F.4 — Add `userAvatarUrl` computed to auth store:**
+```typescript
+const userAvatarUrl = computed(() => user.value?.avatarUrl || '')
+```
+Expose in return object.
+
+---
+
+### NNN-G: Backend — Change Password Endpoint
+
+**File:** `pmo-backend/src/auth/auth.service.ts`, `pmo-backend/src/auth/auth.controller.ts`
+**Research:** R-124
+
+**auth.service.ts — Add `changePassword(userId, dto)`:**
+```typescript
+async changePassword(userId: string, dto: { currentPassword: string; newPassword: string; confirmPassword: string }): Promise<{ message: string }> {
+  if (dto.newPassword !== dto.confirmPassword)
+    throw new BadRequestException('New passwords do not match');
+  const user = await this.em.findOne(User, { id: userId });
+  if (!user) throw new NotFoundException('User not found');
+  if (user.googleId && !user.passwordHash)
+    throw new BadRequestException('Account uses Google Sign-In — password change not available');
+  const isValid = await bcrypt.compare(dto.currentPassword, user.passwordHash || '');
+  if (!isValid) throw new BadRequestException('Current password is incorrect');
+  if (dto.newPassword === dto.currentPassword)
+    throw new BadRequestException('New password must differ from current password');
+  user.passwordHash = await bcrypt.hash(dto.newPassword, 12);
+  user.lastPasswordChangeAt = new Date();
+  await this.em.flush();
+  this.logger.log(`PASSWORD_CHANGE: user_id=${userId}`);
+  return { message: 'Password changed successfully' };
+}
+```
+
+**auth.controller.ts — Add `POST /auth/change-password`:**
+```typescript
+@UseGuards(JwtAuthGuard)
+@Post('change-password')
+@HttpCode(HttpStatus.OK)
+@Throttle({ default: { limit: 3, ttl: 600000 } }) // 3 per 10 minutes
+async changePassword(@CurrentUser() user: JwtPayload, @Body() body: { currentPassword: string; newPassword: string; confirmPassword: string }) {
+  return this.authService.changePassword(user.sub, body);
+}
+```
+
+---
+
+### NNN-H: Backend — Profile Update Endpoint
+
+**File:** `pmo-backend/src/auth/auth.service.ts`, `pmo-backend/src/auth/auth.controller.ts`
+**Research:** R-125
+
+**auth.service.ts — Add `updateProfile(userId, dto)`:**
+```typescript
+async updateProfile(userId: string, dto: { displayName?: string; phone?: string }): Promise<any> {
+  const user = await this.em.findOne(User, { id: userId });
+  if (!user) throw new NotFoundException('User not found');
+  if (dto.displayName !== undefined) user.displayName = dto.displayName;
+  if (dto.phone !== undefined) user.phone = dto.phone;
+  await this.em.flush();
+  return this.getProfile(userId);
+}
+```
+
+**auth.controller.ts — Add `PATCH /auth/me`:**
+```typescript
+@UseGuards(JwtAuthGuard)
+@Patch('me')
+@HttpCode(HttpStatus.OK)
+async updateProfile(@CurrentUser() user: JwtPayload, @Body() body: { displayName?: string; phone?: string }) {
+  return this.authService.updateProfile(user.sub, body);
+}
+```
+
+Also ensure `getProfile()` return includes `phone` and `display_name` fields, and that `BackendUser` type is updated to include them.
+
+---
+
+### NNN-I: Frontend — Profile Page (`/profile`)
+
+**File:** `pmo-frontend/pages/profile.vue` (new file)
+**Research:** R-125
+
+**Page structure — 2-tab layout:**
+
+**Tab 1: Account Overview**
+- Avatar display (circular, large 80px): `v-img` if `avatarUrl` exists, else large initials
+- Avatar upload placeholder button (shows "Upload coming soon" tooltip)
+- User info display: Full Name, Email (readonly), Campus, Role chip
+- Editable fields: Display Name, Phone (via inline edit + PATCH /auth/me)
+- Last Login timestamp (from `lastLoginAt` if returned by /auth/me)
+- "Save Changes" button
+
+**Tab 2: Security**
+- Change Password form:
+  - Current Password (password input)
+  - New Password (password input with strength indicator)
+  - Confirm New Password
+  - Submit button → `POST /auth/change-password`
+- Last password changed: `lastPasswordChangeAt` display (from /auth/me response)
+- SSO notice: if user has no passwordHash + has googleId → show info alert, disable form
+
+**Page meta:** `middleware: ['auth']`
+
+**`getProfile()` response additions needed:** add `phone`, `display_name`, `last_password_change_at`, `last_login_at`, `google_id` (boolean flag only, not the actual ID) to return object.
+
+---
+
+### NNN-J: COI Dashboard Section Spacing
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Research:** R-121
+
+**Three targeted changes:**
+
+**J.1 — Filter bar card:** Change `variant="outlined"` → `elevation="1" rounded="lg"` (consistent with dashboard after NNN-B background change).
+
+**J.2 — Executive overview cards (Cost Utilization, Campus bars, Upcoming Completions):** Change `variant="outlined"` → `elevation="1" rounded="lg"`.
+
+**J.3 — Section labels enhancement:** Upgrade the "Portfolio Summary" and "Project List" section headers to use the labeled divider pattern from NNN-C:
+```html
+<div class="d-flex align-center ga-2 mb-3">
+  <v-icon size="14" color="grey-darken-2">mdi-chart-box</v-icon>
+  <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase">Portfolio Summary</span>
+  <v-divider class="flex-grow-1 ml-1" />
+</div>
+```
+
+---
+
+### NNN Verification Checklist
+
+- [ ] NNN-A: Sidebar logo restored to 44×44, header height unchanged
+- [ ] NNN-B: Dashboard background is off-white (grey-lighten-5), cards visibly float above background
+- [ ] NNN-C: Section labels visible before Infrastructure, UO, Quick Actions sections
+- [ ] NNN-C: Infrastructure card has elevation, not outlined border
+- [ ] NNN-D: AdminKpiRow tiles show tooltips on hover
+- [ ] NNN-E: Sidebar shows "Operations & Monitoring" (Admin+SA) and "System Administration" (SA only) as separate flat groups
+- [ ] NNN-F: User avatar renders from API when present; falls back to initials
+- [ ] NNN-G: `POST /api/auth/change-password` returns 200 with valid credentials
+- [ ] NNN-G: `POST /api/auth/change-password` returns 400 with wrong current password
+- [ ] NNN-H: `PATCH /api/auth/me` updates displayName and phone
+- [ ] NNN-I: `/profile` page loads (Overview + Security tabs)
+- [ ] NNN-I: Change password form submits and shows success/error toast
+- [ ] NNN-J: COI filter and executive cards have elevation on grey background
+- [ ] NNN-J: COI section labels use enhanced divider style
+- [ ] vue-tsc 0 new errors
+- [ ] tsc (backend) 0 errors
 
