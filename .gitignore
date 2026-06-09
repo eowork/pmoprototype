@@ -19,3 +19,6 @@ database/backups/
 database/staging/
 pmo-backend/uploads/
 prototype/
+
+# Local-only documentation (research, planning, internal notes — not shared via Git)
+docs/
