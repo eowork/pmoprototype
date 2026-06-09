@@ -247,31 +247,36 @@ function formatCurrencyShort(amount: number): string {
         </v-btn>
       </div>
 
-      <div v-if="coiAnalyticsLoading" class="d-flex justify-center pa-4">
-        <v-progress-circular indeterminate color="primary" size="32" />
-      </div>
+      <v-row v-if="coiAnalyticsLoading" dense class="mb-2">
+        <v-col v-for="n in 4" :key="n" cols="6" sm="3"><v-skeleton-loader type="card" height="60" /></v-col>
+      </v-row>
 
       <template v-else-if="coiSummary">
+        <!-- QQQ-A1: tonal stat mini-tiles (denser, color-coded; matches UO pillar cards) -->
         <v-row dense class="mb-3">
           <v-col cols="6" sm="3">
-            <div class="text-caption text-grey-darken-1 font-weight-medium">Total Projects</div>
-            <div class="text-h6 font-weight-bold text-primary">{{ coiSummary.total ?? 0 }}</div>
+            <v-card variant="tonal" color="blue" class="pa-2 text-center rounded-lg">
+              <div class="text-caption text-grey-darken-1">Total</div>
+              <div class="text-h6 font-weight-bold">{{ coiSummary.total ?? 0 }}</div>
+            </v-card>
           </v-col>
           <v-col cols="6" sm="3">
-            <div class="text-caption text-grey-darken-1 font-weight-medium">Ongoing</div>
-            <div class="text-h6 font-weight-bold text-info">
-              {{ (coiSummary.by_status || []).find((s: any) => s.status === 'ONGOING')?.count ?? 0 }}
-            </div>
+            <v-card variant="tonal" color="info" class="pa-2 text-center rounded-lg">
+              <div class="text-caption text-grey-darken-1">Ongoing</div>
+              <div class="text-h6 font-weight-bold">{{ (coiSummary.by_status || []).find((s: any) => s.status === 'ONGOING')?.count ?? 0 }}</div>
+            </v-card>
           </v-col>
           <v-col cols="6" sm="3">
-            <div class="text-caption text-grey-darken-1 font-weight-medium">Completed</div>
-            <div class="text-h6 font-weight-bold text-success">
-              {{ (coiSummary.by_status || []).find((s: any) => s.status === 'COMPLETE' || s.status === 'COMPLETED')?.count ?? 0 }}
-            </div>
+            <v-card variant="tonal" color="success" class="pa-2 text-center rounded-lg">
+              <div class="text-caption text-grey-darken-1">Completed</div>
+              <div class="text-h6 font-weight-bold">{{ (coiSummary.by_status || []).find((s: any) => s.status === 'COMPLETE' || s.status === 'COMPLETED')?.count ?? 0 }}</div>
+            </v-card>
           </v-col>
           <v-col cols="6" sm="3">
-            <div class="text-caption text-grey-darken-1 font-weight-medium">Avg Progress</div>
-            <div class="text-h6 font-weight-bold text-deep-purple">{{ (coiSummary.avg_progress || 0).toFixed(1) }}%</div>
+            <v-card variant="tonal" color="warning" class="pa-2 text-center rounded-lg">
+              <div class="text-caption text-grey-darken-1">On Hold</div>
+              <div class="text-h6 font-weight-bold">{{ (coiSummary.by_status || []).find((s: any) => s.status === 'ON_HOLD')?.count ?? 0 }}</div>
+            </v-card>
           </v-col>
         </v-row>
 
