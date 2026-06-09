@@ -1028,7 +1028,6 @@ onMounted(() => {
 
                   <!-- Implementing agencies -->
                   <template v-if="project.implementingAgency || project.contractor">
-                    <div class="text-overline text-medium-emphasis mb-1">Implementation</div>
                     <div v-if="project.implementingAgency" class="d-flex justify-space-between text-body-2"><span class="text-grey-darken-1">Agency</span><span class="font-weight-medium text-right">{{ project.implementingAgency }}</span></div>
                     <div v-if="project.contractor" class="d-flex justify-space-between text-body-2"><span class="text-grey-darken-1">Contractor</span><span class="font-weight-medium text-right">{{ project.contractor }}</span></div>
                   </template>
