@@ -1533,6 +1533,7 @@ export class UniversityOperationsService {
     // Phase GY/GZ: Include override_variance (annual-only override model — Directive 359)
     // Phase HA: Include override_total_target, override_total_actual (Directive 370)
     // Phase HE: Include catch_up_plan, facilitating_factors, ways_forward (Directive 386)
+    // Phase TTT: Include numerator/denominator fraction fields for PERCENTAGE indicators
     const result = await this.em.getConnection().execute(
       `INSERT INTO operation_indicators
        (operation_id, pillar_indicator_id, particular, fiscal_year, reported_quarter,
@@ -1541,8 +1542,12 @@ export class UniversityOperationsService {
         score_q1, score_q2, score_q3, score_q4,
         remarks, override_rate, override_variance,
         override_total_target, override_total_actual,
-        catch_up_plan, facilitating_factors, ways_forward, mov, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        catch_up_plan, facilitating_factors, ways_forward, mov,
+        numerator_q1, denominator_q1, numerator_q2, denominator_q2,
+        numerator_q3, denominator_q3, numerator_q4, denominator_q4,
+        created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+               ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
       [
         operationId,
@@ -1571,6 +1576,14 @@ export class UniversityOperationsService {
         dto.facilitating_factors ?? null,
         dto.ways_forward ?? null,
         dto.mov ?? null,
+        dto.numerator_q1 ?? null,
+        dto.denominator_q1 ?? null,
+        dto.numerator_q2 ?? null,
+        dto.denominator_q2 ?? null,
+        dto.numerator_q3 ?? null,
+        dto.denominator_q3 ?? null,
+        dto.numerator_q4 ?? null,
+        dto.denominator_q4 ?? null,
         userId,
       ],
     );
@@ -1744,13 +1757,13 @@ export class UniversityOperationsService {
       return this.computeIndicatorMetrics(current[0]);
     }
 
-    const setClause = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
+    const setClause = fields.map((f) => `${f} = ?`).join(', ');
     const values = fields.map((f) => dto[f]);
 
     await this.em.getConnection().execute(
       `UPDATE operation_indicators
-       SET ${setClause}, updated_by = $${fields.length + 1}, updated_at = NOW()
-       WHERE id = $${fields.length + 2}
+       SET ${setClause}, updated_by = ?, updated_at = NOW()
+       WHERE id = ?
        RETURNING *`,
       [...values, userId, indicatorId],
     );
