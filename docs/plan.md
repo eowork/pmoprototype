@@ -1,7 +1,346 @@
 # PMO Dashboard — Active Implementation Plan
 > **Governance:** ACE v2.4 | **Branch:** `pmo-coi`
-> **Last Updated:** 2026-06-08
+> **Last Updated:** 2026-06-09
 > **Rule:** Only active, approved, pending work. Completed items → `history.md`.
+
+---
+
+## PHASE QQQ — ✅ COMPLETE (Phase 3 implemented 2026-06-09)
+> **Status:** Phase 3 complete — vue-tsc 0 new errors. Committed + pushed to `pmo-coi`.
+> **Research:** R-136–R-142 (research.md)
+> **Priority order:** D (COI detail) → B (COI index) → A (Dashboard) → C (Analytics tab)
+> **Constraints:** Frontend only. No backend changes. No DTO modifications. `detail-[id].vue` stays READ-ONLY.
+> **Delivered:** QQQ-D1 removed Implementation label; QQQ-B1 restored PPP-B fixes; QQQ-B2 On Hold KPI; QQQ-B3 dynamic table height; QQQ-A1 dashboard tonal tiles + skeleton; QQQ-C1/C2 publication donut + card elevation.
+> The detailed steps below are retained as the implementation record; they are complete and frozen.
+
+---
+
+### QQQ-D1: Remove "Implementation" Section Label — COI Detail Page
+
+**File:** `pmo-frontend/pages/coi/detail-[id].vue` (line 1031)
+**Research:** R-142
+
+**Remove:**
+```html
+<div class="text-overline text-medium-emphasis mb-1">Implementation</div>
+```
+
+This is inside `<template v-if="project.implementingAgency || project.contractor">`. The "Agency" and "Contractor" field labels below are self-explanatory. The overline label is vague and redundant.
+
+**Acceptance:** No "Implementation" text-overline visible in project overview sidebar.
+
+---
+
+### QQQ-B1: Re-apply View Switcher + PPP-B Fixes to coi/index.vue
+
+**File:** `pmo-frontend/pages/coi/index.vue`
+**Research:** R-137
+
+A `git stash pop` during Phase PPP overwrote on-disk changes. The committed fix (`6a817f8`) exists in git but the disk file has reverted. All PPP-B changes must be re-applied:
+
+**1. Action strip (line ~845):** Restore the `d-flex` div with Portfolio Analytics + Public View buttons (the PPP-B2 removal of duplicate New Project was correct and should remain; the containing div should survive):
+```html
+<div class="d-flex flex-wrap align-center ga-2 mb-3">
+  <v-spacer />
+  <v-btn color="info" variant="tonal" prepend-icon="mdi-chart-bar" size="small" @click="activeTab = 'analytics'">Portfolio Analytics</v-btn>
+  <v-btn color="grey-darken-1" variant="tonal" prepend-icon="mdi-earth" size="small" :to="'/coi/public'">Public View</v-btn>
+</div>
+```
+
+**2. Executive Overview section label (before `template v-if="analyticsReady"`):**
+```html
+<div v-if="analyticsReady" class="d-flex align-center ga-2 mb-2 mt-1">
+  <v-icon size="16" color="grey-darken-2">mdi-view-dashboard-outline</v-icon>
+  <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Executive Overview</span>
+  <v-divider class="flex-grow-1 ml-1" />
+</div>
+```
+
+**3. Filters section label (before filter banner / filter card):**
+```html
+<div class="d-flex align-center ga-2 mb-2 mt-5">
+  <v-icon size="16" color="grey-darken-2">mdi-filter-variant</v-icon>
+  <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Filters</span>
+  <v-divider class="flex-grow-1 ml-1" />
+</div>
+```
+
+**4. View switcher — replace icon-only toggle with labeled buttons:**
+```html
+<div class="d-flex align-center ga-2 mb-2 flex-wrap">
+  <v-icon size="16" color="grey-darken-2">mdi-format-list-bulleted</v-icon>
+  <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Project List</span>
+  <v-divider class="flex-grow-1 ml-1 mr-2" style="min-width:20px" />
+  <v-btn-toggle v-model="viewMode" variant="outlined" divided mandatory color="primary" class="flex-shrink-0">
+    <v-btn value="list" size="small" prepend-icon="mdi-format-list-bulleted" class="px-3">List</v-btn>
+    <v-btn value="card" size="small" prepend-icon="mdi-view-grid-outline" class="px-3">Card</v-btn>
+    <v-btn value="table" size="small" prepend-icon="mdi-table" class="px-3">Table</v-btn>
+  </v-btn-toggle>
+</div>
+```
+(Remove `density="compact"` from toggle; remove `:icon="true"` from buttons)
+
+**5. Table card:** `<v-card v-else class="pa-0" elevation="1" rounded="lg">` and `height="600"` on the data-table.
+
+**6. Recent Activities section label (before `v-expansion-panels v-if="canViewActivity"`):**
+```html
+<div v-if="canViewActivity" class="d-flex align-center ga-2 mb-2 mt-4">
+  <v-icon size="16" color="grey-darken-2">mdi-history</v-icon>
+  <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Recent Activities</span>
+  <v-divider class="flex-grow-1 ml-1" />
+</div>
+```
+Also change `class="mt-4"` → `class="mt-2"` on the expansion panels.
+
+**7. `CiChartEmpty` fallbacks:** Restore the component (not plain text divs) on all analytics charts where `v-else` blocks exist.
+
+**Acceptance:** All PPP-B items verified: section labels present, view switcher with text labels, no overflow, table card elevated, Recent Activities label visible.
+
+---
+
+### QQQ-B2: Replace "Completing in 30 Days" KPI with "On Hold" Executive Card
+
+**File:** `pmo-frontend/pages/coi/index.vue` (line ~943–963)
+**Research:** R-138
+
+**Remove:**
+```html
+<v-col cols="12" md="4">
+  <v-card elevation="1" rounded="lg" class="h-100 pa-3">
+    <div ... >Completing in 30 Days</div>
+    <div v-if="!upcomingCompletions.length" ...>No projects completing in the next 30 days.</div>
+    <v-list v-else ...>{{ p.projectName }} / Due {{ ... }}</v-list>
+  </v-card>
+</v-col>
+```
+
+**Replace with:**
+```html
+<v-col cols="12" md="4">
+  <v-card elevation="1" rounded="lg" class="h-100 pa-3">
+    <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">
+      <v-icon icon="mdi-pause-circle-outline" size="small" color="warning" class="mr-1" />On Hold
+    </div>
+    <div v-if="!onHoldProjects.length" class="text-caption text-grey py-2">No projects currently on hold.</div>
+    <v-list v-else density="compact" class="pa-0">
+      <v-list-item
+        v-for="p in onHoldProjects"
+        :key="p.id"
+        class="px-0 cursor-pointer"
+        @click="router.push(`/coi/detail-${p.id}`)"
+      >
+        <v-list-item-title class="text-caption font-weight-medium text-truncate">{{ p.projectName }}</v-list-item-title>
+        <v-list-item-subtitle class="text-caption text-grey">
+          {{ p.campus }} · {{ (Number(p.physicalAccomplishment) || 0).toFixed(0) }}% complete
+        </v-list-item-subtitle>
+      </v-list-item>
+    </v-list>
+  </v-card>
+</v-col>
+```
+
+**Add computed (near `upcomingCompletions`):**
+```typescript
+const onHoldProjects = computed(() =>
+  projects.value
+    .filter(p => (p.status || '').toUpperCase() === 'ON_HOLD')
+    .slice(0, 5)
+)
+```
+
+The `upcomingCompletions` computed can be removed entirely (or left as-is if referenced elsewhere — verify first).
+
+**Acceptance:** Executive overview shows "On Hold" card. Always shows meaningful data (0 = good, >N = needs attention). "Completing in 30 Days" gone.
+
+---
+
+### QQQ-B3: Dynamic Table Height — Resize Based on Row Count
+
+**File:** `pmo-frontend/pages/coi/index.vue` (line ~1275)
+**Research:** R-139
+
+**Add computed:**
+```typescript
+const tableHeight = computed(() => {
+  const ROW_PX  = 52
+  const HEAD_PX = 56
+  const MIN_ROWS = 5
+  const MAX_PX   = 580
+  const rowCount = Math.max(filteredProjects.value.length, MIN_ROWS)
+  return Math.min(rowCount * ROW_PX + HEAD_PX, MAX_PX)
+})
+```
+
+**Replace** `height="560"` → `:height="tableHeight"` on `v-data-table`.
+
+This ensures at least 5 rows of visible space while dynamically shrinking when fewer results exist (minimum 316px, maximum 580px).
+
+**Also:** ensure `height="600"` change from PPP-B3 is replaced with this dynamic approach (`:height="tableHeight"` supersedes the static value).
+
+**Acceptance:** Table with 3 filtered rows shows ~212px of content instead of ~560px dead space. Table with 25 rows shows full 580px with scrolling.
+
+---
+
+### QQQ-A1: Enhance Infrastructure Portfolio Card — Dashboard
+
+**File:** `pmo-frontend/pages/dashboard.vue` (lines 232–289)
+**Research:** R-136
+
+**Step 1 — Replace loading spinner with skeleton:**
+```html
+<!-- Before -->
+<div v-if="coiAnalyticsLoading" class="d-flex justify-center pa-4">
+  <v-progress-circular indeterminate color="primary" size="32" />
+</div>
+
+<!-- After -->
+<v-row v-if="coiAnalyticsLoading" dense class="mb-2">
+  <v-col v-for="n in 4" :key="n" cols="6" sm="3"><v-skeleton-loader type="card" height="60" /></v-col>
+</v-row>
+```
+
+**Step 2 — Replace plain text stats with mini tonal cards:**
+```html
+<!-- Replace the current v-row dense class="mb-3" content -->
+<v-row dense class="mb-3">
+  <v-col cols="6" sm="3">
+    <v-card variant="tonal" color="blue" class="pa-2 text-center rounded-lg">
+      <div class="text-caption text-grey-darken-1">Total</div>
+      <div class="text-h6 font-weight-bold">{{ coiSummary.total ?? 0 }}</div>
+    </v-card>
+  </v-col>
+  <v-col cols="6" sm="3">
+    <v-card variant="tonal" color="info" class="pa-2 text-center rounded-lg">
+      <div class="text-caption text-grey-darken-1">Ongoing</div>
+      <div class="text-h6 font-weight-bold">{{ (coiSummary.by_status || []).find((s: any) => s.status === 'ONGOING')?.count ?? 0 }}</div>
+    </v-card>
+  </v-col>
+  <v-col cols="6" sm="3">
+    <v-card variant="tonal" color="success" class="pa-2 text-center rounded-lg">
+      <div class="text-caption text-grey-darken-1">Completed</div>
+      <div class="text-h6 font-weight-bold">{{ (coiSummary.by_status || []).find((s: any) => s.status === 'COMPLETE' || s.status === 'COMPLETED')?.count ?? 0 }}</div>
+    </v-card>
+  </v-col>
+  <v-col cols="6" sm="3">
+    <v-card variant="tonal" color="warning" class="pa-2 text-center rounded-lg">
+      <div class="text-caption text-grey-darken-1">On Hold</div>
+      <div class="text-h6 font-weight-bold">{{ (coiSummary.by_status || []).find((s: any) => s.status === 'ON_HOLD')?.count ?? 0 }}</div>
+    </v-card>
+  </v-col>
+</v-row>
+```
+
+**Step 3 — Add Avg Progress text below the cost utilization bar** (already exists as "X% of appropriation utilized"; no change needed). Keep cost utilization bar.
+
+**Acceptance:** Dashboard Infrastructure Portfolio card shows 4 tonal stat mini-cards (Total, Ongoing, Completed, On Hold). Loading shows skeleton instead of spinner.
+
+---
+
+### QQQ-C1/C2: Analytics Tab — Publication Status Donut + Card Elevation
+
+**File:** `pmo-frontend/pages/coi/index.vue` (analytics tab, lines ~1570–1730)
+**Research:** R-140, R-141
+
+**Step 1 — Add computed for Publication Status donut:**
+```typescript
+const publicationStatusChart = computed(() => {
+  const data = (analyticsSummary.value?.by_publication_status || []) as Array<{ publication_status: string; count: number }>
+  const labelMap: Record<string, string> = {
+    DRAFT: 'Draft',
+    PENDING_REVIEW: 'Pending Review',
+    PUBLISHED: 'Published',
+    REJECTED: 'Rejected',
+  }
+  const colorMap: Record<string, string> = {
+    DRAFT: '#9e9e9e',
+    PENDING_REVIEW: '#f59e0b',
+    PUBLISHED: '#059669',
+    REJECTED: '#ef4444',
+  }
+  return {
+    series: data.map(d => d.count),
+    options: {
+      chart: { type: 'donut' as const, toolbar: { show: false } },
+      labels: data.map(d => labelMap[d.publication_status] || d.publication_status),
+      colors: data.map(d => colorMap[d.publication_status] || '#9e9e9e'),
+      legend: { position: 'bottom' as const },
+      dataLabels: { enabled: true },
+    },
+  }
+})
+```
+
+**Step 2 — Replace the chip display card with the donut chart:**
+```html
+<!-- Replace the Publication Status Breakdown card content -->
+<v-col cols="12" md="6">
+  <v-card class="pa-4" elevation="1" rounded="lg">
+    <v-card-title class="text-body-1 font-weight-bold mb-1">Publication Status</v-card-title>
+    <v-card-subtitle class="text-caption pb-2">Review readiness across the portfolio</v-card-subtitle>
+    <VueApexCharts
+      v-if="publicationStatusChart.series.some(v => v > 0)"
+      type="donut"
+      height="220"
+      :options="publicationStatusChart.options"
+      :series="publicationStatusChart.series"
+    />
+    <CiChartEmpty v-else icon="mdi-chart-donut" title="No publication data" description="Status breakdown appears once projects are reviewed." />
+  </v-card>
+</v-col>
+```
+
+**Step 3 — Add `elevation="1" rounded="lg"` to all analytics chart cards** (8 cards currently using only `class="pa-4"`):
+- Status Distribution card (line ~1572)
+- Projects by Campus card (line ~1585)
+- Physical Progress Distribution card (line ~1607)
+- Avg Physical Progress by Campus card (line ~1629)
+- Budget Concentration by Campus card (line ~1643)
+- Contract Value by Status card (line ~1661)
+- Projects by Contractor card (line ~1701)
+- Funding Source Distribution card (line ~1715)
+
+Pattern: `<v-card class="pa-4">` → `<v-card class="pa-4" elevation="1" rounded="lg">`
+
+**Acceptance:** Publication Status shows donut chart at 220px height, matching Contract Value neighbor. All 8 analytics cards have consistent elevation="1" rounded="lg". Grid is visually symmetric.
+
+---
+
+## Commit Strategy (Phase QQQ)
+
+```
+fix(coi): remove vague Implementation section label from project overview
+fix(coi): re-apply view switcher labels, section labels, and table card styling
+feat(coi): replace Completing in 30 Days KPI with On Hold executive metric
+feat(coi): dynamic table height based on filtered row count
+feat(dashboard): upgrade Infrastructure Portfolio card with tonal stat tiles
+feat(analytics): replace Publication Status chips with donut chart; normalize card elevation
+```
+
+Push to `pmo-coi` after all steps verified.
+
+---
+
+## Verification Checklist (Phase QQQ)
+
+| Check | How to verify |
+|---|---|
+| QQQ-D1: Implementation label removed | COI detail page → Overview sidebar → no "Implementation" overline text |
+| QQQ-B1: View switcher | COI → "List" / "Card" / "Table" labels visible, no overflow |
+| QQQ-B1: Section labels | Executive Overview, Filters, Project List, Recent Activities all labeled |
+| QQQ-B1: Table card styled | Table card has elevation and rounded corners |
+| QQQ-B2: On Hold KPI | Executive Overview shows On Hold card with clickable project list |
+| QQQ-B3: Dynamic height | Apply status filter → table shrinks to match row count (no blank space) |
+| QQQ-A1: Dashboard stat tiles | Dashboard Infrastructure Portfolio shows 4 tonal cards |
+| QQQ-A1: Skeleton loader | Slow network → skeleton cards shown instead of spinner |
+| QQQ-C1/C2: Donut chart | Analytics tab → Publication Status shows donut chart |
+| QQQ-C2: Card elevation | All 8 analytics chart cards have consistent elevation + rounded style |
+
+---
+
+## PHASE PPP — ✅ COMPLETE (Phase 3 implemented 2026-06-09; see history.md)
+> **Status:** Phase 3 complete — vue-tsc 0 new errors. Committed + pushed to `pmo-coi`.
+> **Research:** R-126–R-135 (research.md)
+> **Delivered:** PPP-A1 Pillar→Program, PPP-A2 quarterly trend fix, PPP-A3 section labels + skeletons, PPP-B1 view switcher, PPP-B2 remove duplicate button, PPP-B3 table card, PPP-B4 filter spacing, PPP-B5 Executive Overview + Recent Activities labels.
 
 ---
 

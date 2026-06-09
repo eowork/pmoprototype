@@ -1,7 +1,138 @@
 # PMO Dashboard — Research Repository
 > Research findings only. Not plans, not decisions, not history.
-> **Last Updated:** 2026-06-08 | **Governance:** ACE v2.4
-> **New entries:** R-126–R-135 (Phase PPP — UO terminology, quarterly trend, COI layout — 2026-06-08)
+> **Last Updated:** 2026-06-09 | **Governance:** ACE v2.4
+> **New entries:** R-136–R-142 (Phase QQQ — dashboard density, COI layout fixes, analytics grid — 2026-06-09)
+
+---
+
+### R-136: CSU Dashboard — Infrastructure Portfolio Card Density (A1)
+
+**Topic:** Infrastructure Portfolio section on `dashboard.vue` feels underutilized and sparse
+
+**Finding:** The Infrastructure Portfolio card (lines 232–289) has:
+- **Loading:** `v-progress-circular` spinner (not skeleton, causes height collapse)
+- **Stats row:** 4 plain text values (Total, Ongoing, Completed, Avg Progress) — no visual differentiation, no chips, no color coding
+- **Chart:** Single cost utilization `v-progress-linear` — minimal visual weight
+- **Missing:** On Hold count (computed in COI stats but not surfaced on dashboard), Pending Review count, no status breakdown
+
+By contrast, the UO section below it has 4 tonal pillar cards with dual physical/financial percentages and collapsible trend charts, giving it far more visual richness and information density.
+
+The `coiSummary.by_status` array is already available and includes On Hold/Delayed counts. The `financialSummary.total_appropriation` and `total_obligation` are fetched but only shown as a bar.
+
+**Fix:** Replace `v-progress-circular` with skeleton, convert stats to tonal `v-card` mini-tiles (matching UO pillar card style), add an On Hold + Pending Review count, keep the cost utilization bar.
+
+---
+
+### R-137: COI View Switcher — On-Disk Reversion (B1)
+
+**Topic:** View switcher reverted to icon-only / cramped state on disk despite committed fix
+
+**Finding:** The PPP-B1 fix was committed (`6a817f8`) but a git stash pop during the same session overwrote the on-disk file with an earlier state. The current disk file shows:
+- `density="compact"` on `v-btn-toggle` (committed fix removed this)
+- `:icon="true"` on each `v-btn` (committed fix replaced with text labels)
+- Missing `flex-shrink-0` and `style="min-width:20px"` on divider
+- Missing Executive Overview label (PPP-B5)
+- Missing Filters label (PPP-B4)
+- Missing Recent Activities label (PPP-B5)
+- Table card reverted: `v-card v-else` without `class="pa-0" elevation="1" rounded="lg"`
+- Table height reverted: 600 → 560
+- `CiChartEmpty` fallbacks reverted to plain text divs
+- Action strip `v-spacer` block missing
+
+The `git diff HEAD` confirms 180-line deviation. **All PPP-B fixes must be re-applied.**
+
+---
+
+### R-138: COI "Completing in 30 Days" KPI — Replacement Assessment (B2)
+
+**Topic:** Evaluate the best executive KPI to replace the near-always-empty "Completing in 30 Days" card
+
+**Finding:** `upcomingCompletions` (lines 608–622) filters ONGOING projects with end date within 30 days. Infrastructure projects span months/years — this metric is typically empty, providing no executive value.
+
+**Available data (already in `stats`):**
+- `stats.onHold` — projects on hold (already computed but NOT shown in KPI cards; LLL-A removed it)
+- `stats.ongoing` — already shown
+- A breakdown by status is available via `analyticsSummary.by_status`
+
+**Recommendation:** Replace the card with **"Projects On Hold"** — projects suspended or pending resolution. This:
+- Is always meaningful (0 is a positive signal, >0 warrants attention)
+- Uses `projects.value.filter(p => (p.status||'').toUpperCase() === 'ON_HOLD')` which is already computed
+- Shows a list of affected project names (actionable)
+- Aligns with executive monitoring purpose
+
+Secondary option: "Delayed Projects" (status === 'DELAYED') — same pattern.
+
+---
+
+### R-139: COI Table Fixed Height — Dynamic Resize (B3/B4)
+
+**Topic:** Table remains 560px tall regardless of actual row count, creating blank vertical space
+
+**Finding:** `v-data-table` has `height="560"` with `fixed-header` prop. This reserves 560px scroll viewport regardless of content:
+- With 25 rows it works correctly (scroll enabled)
+- With 3–5 filtered results: ~200–260px of content but 560px reserved → ~300px blank white space
+- Per Vuetify docs, `height` on `v-data-table` is the inner scroll height; removing it causes the table to auto-size but loses the sticky header behavior with `fixed-header`
+
+**Fix options:**
+1. Remove `height` prop — table auto-sizes, but `fixed-header` no longer sticks (requires explicit container height)
+2. Use `:height="tableHeight"` computed from `Math.min(filteredProjects.length * 52 + 56, 560)` — dynamic cap
+3. Remove `fixed-header` entirely and let the table grow naturally — simpler, loses sticky header
+
+**Recommendation:** Option 2 — computed `tableHeight` with a minimum of 5 rows (`5 * 52 + 56 = 316px`) and a maximum of 560px. Each row is approximately 52px; header is approximately 56px.
+
+---
+
+### R-140: Analytics Tab — Chart Card Styling Inconsistency (C1/C3)
+
+**Topic:** Chart cards in the analytics tab lack consistent elevation and styling
+
+**Finding:** All analytics chart cards (Status Distribution, Campus, Physical Progress, etc.) use `class="pa-4"` with NO `elevation` or `rounded` props. This creates flat, borderless cards that look visually lighter than the design system standard (`elevation="1" rounded="lg"`).
+
+Row height inconsistency:
+- Row 1: md=5/md=7 split with h=280/h=280 — symmetric ✅
+- Row 2: Full-width bar h=200 — fine ✅
+- Row 3: md=6/md=6 with h=220/h=220 — symmetric ✅
+- Row 4: md=6/md=6 — Contract Value h=220 / Publication Status (chips, no explicit height) — **asymmetric** ❌
+- Row 5: md=7/md=5 with h=260/h=260 — symmetric ✅
+
+**Fix:** Add `elevation="1" rounded="lg"` to all 8 chart cards; set explicit `height="220"` on Publication Status card.
+
+---
+
+### R-141: Publication Status Breakdown — Visualization Assessment (C2)
+
+**Topic:** Publication Status Breakdown chip display is low-value and breaks grid symmetry
+
+**Finding:** The "Publication Status Breakdown" card (lines 1675–1689):
+- Shows raw chips: `DRAFT: N`, `PENDING_REVIEW: N`, `PUBLISHED: N`, `REJECTED: N`
+- Uses `v-chip size="large"` — chip labels show raw enum values (not human-readable)
+- No chart, just chip row. Occupies md=6 space without filling the height of its neighbor (Contract Value by Status donut at h=220)
+- Data: `analyticsSummary.by_publication_status` — same data structure as other chart sources
+
+**Recommendation:** Replace with a **donut chart** for "Publication Status Breakdown" using:
+- Labels: `{ DRAFT: 'Draft', PENDING_REVIEW: 'Pending Review', PUBLISHED: 'Published', REJECTED: 'Rejected' }`
+- Colors: grey / orange / success (#059669) / error (#ef4444)
+- `height="220"` — matches Contract Value by Status donut neighbor
+- Uses the existing `analyticsSummary.by_publication_status` data already fetched
+
+---
+
+### R-142: "Implementation" Section Label — COI Detail Page (D1)
+
+**Topic:** "Implementation" label in detail-[id].vue overview sidebar
+
+**Finding:** `pmo-frontend/pages/coi/detail-[id].vue` line 1031:
+```html
+<div class="text-overline text-medium-emphasis mb-1">Implementation</div>
+```
+This labels a block showing Implementing Agency + Contractor in the project overview sidebar card. The label "Implementation" is:
+- Too vague (doesn't say what "implementation" refers to)
+- Redundant — the field labels below ("Agency", "Contractor") are already self-explanatory
+- The containing `<template v-if="project.implementingAgency || project.contractor">` makes the block conditional
+
+**Fix:** Remove the single label line. The "Agency" and "Contractor" rows below are self-explanatory.
+
+Note: No "Implementation" label exists in any University Operations page — the brief may have mislabeled the section origin. The only match is in `coi/detail-[id].vue`.
 
 ---
 

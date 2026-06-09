@@ -5,10 +5,16 @@
 
 ## Current Phase
 
-**Phase PPP** — ✅ Phase 3 complete (2026-06-09). vue-tsc: 0 new errors (16 pre-existing, all unrelated). Committed + pushed to `pmo-coi`.
-- **Priority 1 (UO):** ✅ PPP-A1 "Pillar"→"Program" terminology; PPP-A2 quarterly trend fix (now plots `accomplishment_rate_pct`, 0–120% axis + 100% reference line); PPP-A3 section labels + skeleton loaders
-- **Priority 2 (COI):** ✅ PPP-B1 view switcher overflow fix; PPP-B2 remove duplicate New Project; PPP-B3 table card styling; PPP-B4 filter spacing; PPP-B5 missing section labels
-- **Research:** R-126–R-135 (research.md) | **Plan:** Phase PPP (plan.md)
+**Phase QQQ** — ✅ Phase 3 complete (2026-06-09). vue-tsc 0 new errors (16 pre-existing, unrelated). Committed + pushed to `pmo-coi`.
+- **Priority D (COI Detail):** ✅ QQQ-D1 removed vague "Implementation" overline from detail-[id].vue overview sidebar
+- **Priority B (COI Index):** ✅ QQQ-B1 restored all PPP-B fixes (via `git checkout HEAD`); QQQ-B2 "Completing in 30 Days" → "On Hold" KPI (`onHoldProjects` computed); QQQ-B3 dynamic `tableHeight` computed (min 5 rows, max 580px)
+- **Priority A (Dashboard):** ✅ QQQ-A1 infrastructure portfolio → 4 tonal stat tiles (Total/Ongoing/Completed/On Hold) + skeleton loader
+- **Priority C (Analytics):** ✅ QQQ-C1/C2 Publication Status chips → donut chart; `elevation="1" rounded="lg"` on all 9 analytics chart cards
+- **Research:** R-136–R-142 (research.md) | **Plan:** Phase QQQ (plan.md)
+
+> **Note:** QQQ-B1 root cause — PPP-B on-disk changes were overwritten by a stash pop during the prior session; the committed code in `6a817f8` was correct, so `git checkout HEAD -- coi/index.vue` restored it before B2/B3/C layered on top.
+
+**Previous Phase PPP** — ✅ Phase 3 complete (2026-06-09). Committed + pushed to `pmo-coi` (`6a817f8`, `96b76e1`). vue-tsc 0 new errors.
 
 ---
 
