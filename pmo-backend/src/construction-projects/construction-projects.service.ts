@@ -369,9 +369,12 @@ export class ConstructionProjectsService {
               cp.description, cp.status, cp.campus, cp.start_date, cp.target_completion_date,
               cp.physical_progress, cp.financial_progress, cp.contract_amount,
               cp.contractor_id, cp.funding_source_id, cp.publication_status, cp.created_at,
+              cp.updated_at, cp.project_duration,
               cp.submitted_by, cp.submitted_at,
               cp.original_start_date, cp.revised_start_date,
               cp.original_completion_date, cp.revised_completion_date,
+              fs.name as funding_source_name,
+              COALESCE(c.name, cp.contractor) as contractor_name,
               submitter.first_name || ' ' || submitter.last_name as submitted_by_name,
               (SELECT COALESCE(json_agg(json_build_object(
                   'id', u.id,
@@ -391,6 +394,8 @@ export class ConstructionProjectsService {
                WHERE ra.module = 'CONSTRUCTION' AND ra.record_id = cp.id) as assigned_users
        FROM construction_projects cp
        LEFT JOIN users submitter ON cp.submitted_by = submitter.id
+       LEFT JOIN funding_sources fs ON cp.funding_source_id = fs.id
+       LEFT JOIN contractors c ON cp.contractor_id = c.id
        WHERE ${whereClause}
        ORDER BY cp.${sortColumn} ${sortOrder}
        LIMIT ? OFFSET ?`,
@@ -542,16 +547,23 @@ export class ConstructionProjectsService {
          FROM construction_projects WHERE deleted_at IS NULL`,
       ),
       conn.execute(
-        `SELECT funding_source_name, COUNT(*) as count, COALESCE(SUM(contract_amount),0) as total_contract
-         FROM construction_projects
-         WHERE deleted_at IS NULL AND funding_source_name IS NOT NULL
-         GROUP BY funding_source_name ORDER BY count DESC`,
+        // MMM-A: join funding_sources — construction_projects has no funding_source_name
+        // column; it stores funding_source_id (FK). The display name lives in
+        // funding_sources.name. Prior query referenced a non-existent column → HTTP 500.
+        `SELECT fs.name as funding_source_name, COUNT(*) as count,
+                COALESCE(SUM(cp.contract_amount),0) as total_contract
+         FROM construction_projects cp
+         LEFT JOIN funding_sources fs ON cp.funding_source_id = fs.id
+         WHERE cp.deleted_at IS NULL AND fs.name IS NOT NULL
+         GROUP BY fs.name ORDER BY count DESC`,
       ),
       conn.execute(
-        `SELECT contractor_name, COUNT(*) as count, COALESCE(SUM(contract_amount),0) as total_contract
+        // MMM-A: column is `contractor` (varchar), not `contractor_name`.
+        `SELECT contractor as contractor_name, COUNT(*) as count,
+                COALESCE(SUM(contract_amount),0) as total_contract
          FROM construction_projects
-         WHERE deleted_at IS NULL AND contractor_name IS NOT NULL
-         GROUP BY contractor_name ORDER BY count DESC LIMIT 10`,
+         WHERE deleted_at IS NULL AND contractor IS NOT NULL
+         GROUP BY contractor ORDER BY count DESC LIMIT 10`,
       ),
     ]);
     return {
