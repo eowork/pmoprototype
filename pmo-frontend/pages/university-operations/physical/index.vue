@@ -997,6 +997,33 @@ async function saveQuarterlyData() {
   }
 }
 
+// Phase SSS-A: Per-quarter accomplishment percentage (read-only, real-time)
+const quarterlyComputedPct = computed(() => {
+  const f = entryForm.value
+  const quarters = [
+    { target: f.target_q1, actual: f.accomplishment_q1 },
+    { target: f.target_q2, actual: f.accomplishment_q2 },
+    { target: f.target_q3, actual: f.accomplishment_q3 },
+    { target: f.target_q4, actual: f.accomplishment_q4 },
+  ]
+  return quarters.map(({ target, actual }) => {
+    const t = Number(target)
+    const a = actual
+    if (a === null || a === undefined || a === '' || isNaN(Number(a))) return null
+    if (!t || t === 0) return null
+    return Math.min((Number(a) / t) * 100, 9999.99)
+  })
+})
+
+// Phase SSS-B: Unit-type-aware instructional banner text
+const entryBannerText = computed(() => {
+  const type = selectedIndicator.value?.unit_type || 'COUNT'
+  if (type === 'PERCENTAGE') {
+    return 'This indicator tracks a percentage benchmark (e.g., pass rate, employment rate). Enter the target and actual percentage values directly — for example, enter 80 for 80%. Accomplishment percentages are automatically computed by the system.'
+  }
+  return 'Enter the target and actual values for each quarter (e.g., number of beneficiaries, graduates). Accomplishment percentages are automatically computed — do not pre-compute or enter percentages manually.'
+})
+
 // Phase FY-1: DBM BAR1 standard — ALL indicator types use SUM (Directive 211/212)
 const computedPreview = computed(() => {
   const f = entryForm.value
@@ -1975,6 +2002,18 @@ onMounted(async () => {
             All values pre-filled from <strong>{{ prefillSourceQ }}</strong> record — edit freely. This will create a new {{ selectedQuarter }} record.
           </v-alert>
 
+          <!-- Phase SSS-B: Instructional banner — unit-type-aware guidance -->
+          <v-alert
+            type="info"
+            variant="tonal"
+            density="compact"
+            class="mb-3"
+            closable
+            icon="mdi-information-outline"
+          >
+            {{ entryBannerText }}
+          </v-alert>
+
           <!-- Phase DU-A: Vertical tabular data entry — rows = quarters, cols = T/A/S -->
           <v-table density="compact" class="mb-4">
             <thead>
@@ -1983,6 +2022,7 @@ onMounted(async () => {
                 <th class="text-center">Target</th>
                 <th class="text-center">Actual</th>
                 <th class="text-center">Score (optional)</th>
+                <th class="text-center acc-pct-col">Acc. %</th>
               </tr>
             </thead>
             <tbody>
@@ -2004,6 +2044,14 @@ onMounted(async () => {
                   <v-text-field v-model="entryForm.score_q1" placeholder="e.g. 148/200"
                     maxlength="250" density="compact" variant="outlined" hide-details />
                 </td>
+                <td class="text-center acc-pct-col">
+                  <v-chip v-if="quarterlyComputedPct[0] !== null" size="x-small"
+                    :color="quarterlyComputedPct[0]! >= 100 ? 'success' : quarterlyComputedPct[0]! >= 80 ? 'warning' : 'error'"
+                    variant="tonal">
+                    {{ quarterlyComputedPct[0]!.toFixed(1) }}%
+                  </v-chip>
+                  <span v-else class="text-grey text-caption">—</span>
+                </td>
               </tr>
               <!-- Q2 -->
               <tr>
@@ -2021,6 +2069,14 @@ onMounted(async () => {
                 <td class="du-input-cell">
                   <v-text-field v-model="entryForm.score_q2" placeholder="e.g. 148/200"
                     maxlength="250" density="compact" variant="outlined" hide-details />
+                </td>
+                <td class="text-center acc-pct-col">
+                  <v-chip v-if="quarterlyComputedPct[1] !== null" size="x-small"
+                    :color="quarterlyComputedPct[1]! >= 100 ? 'success' : quarterlyComputedPct[1]! >= 80 ? 'warning' : 'error'"
+                    variant="tonal">
+                    {{ quarterlyComputedPct[1]!.toFixed(1) }}%
+                  </v-chip>
+                  <span v-else class="text-grey text-caption">—</span>
                 </td>
               </tr>
               <!-- Q3 -->
@@ -2040,6 +2096,14 @@ onMounted(async () => {
                   <v-text-field v-model="entryForm.score_q3" placeholder="e.g. 148/200"
                     maxlength="250" density="compact" variant="outlined" hide-details />
                 </td>
+                <td class="text-center acc-pct-col">
+                  <v-chip v-if="quarterlyComputedPct[2] !== null" size="x-small"
+                    :color="quarterlyComputedPct[2]! >= 100 ? 'success' : quarterlyComputedPct[2]! >= 80 ? 'warning' : 'error'"
+                    variant="tonal">
+                    {{ quarterlyComputedPct[2]!.toFixed(1) }}%
+                  </v-chip>
+                  <span v-else class="text-grey text-caption">—</span>
+                </td>
               </tr>
               <!-- Q4 -->
               <tr>
@@ -2057,6 +2121,14 @@ onMounted(async () => {
                 <td class="du-input-cell">
                   <v-text-field v-model="entryForm.score_q4" placeholder="e.g. 148/200"
                     maxlength="250" density="compact" variant="outlined" hide-details />
+                </td>
+                <td class="text-center acc-pct-col">
+                  <v-chip v-if="quarterlyComputedPct[3] !== null" size="x-small"
+                    :color="quarterlyComputedPct[3]! >= 100 ? 'success' : quarterlyComputedPct[3]! >= 80 ? 'warning' : 'error'"
+                    variant="tonal">
+                    {{ quarterlyComputedPct[3]!.toFixed(1) }}%
+                  </v-chip>
+                  <span v-else class="text-grey text-caption">—</span>
                 </td>
               </tr>
             </tbody>
@@ -2093,6 +2165,15 @@ onMounted(async () => {
                   size="small"
                 >
                   Rate: {{ computedPreview.rate !== null ? formatPercent(computedPreview.rate) : '—' }}
+                </v-chip>
+                <v-chip
+                  v-if="computedPreview.rate !== null && computedPreview.rate > 100"
+                  color="success"
+                  variant="tonal"
+                  size="small"
+                >
+                  <v-icon start size="x-small">mdi-trophy-outline</v-icon>
+                  Overachievement
                 </v-chip>
               </div>
 
@@ -2679,6 +2760,12 @@ onMounted(async () => {
 }
 .du-input-cell {
   padding: 8px 6px !important;
+  vertical-align: middle;
+}
+
+.acc-pct-col {
+  width: 72px;
+  min-width: 72px;
   vertical-align: middle;
 }
 
