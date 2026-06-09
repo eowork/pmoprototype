@@ -50,6 +50,15 @@ export default defineNuxtRouteMiddleware((to) => {
     }
   }
 
+  // MMM-F: COI Activity Logs — Admin/SuperAdmin only (backend enforces via RolesGuard;
+  // this is the UX-layer guard so non-admins cannot reach the page by direct URL).
+  if (to.path.startsWith('/coi/activity-logs')) {
+    if (!isAdmin.value && !isSuperAdmin.value) {
+      console.warn('[Permission] Access denied to /coi/activity-logs - insufficient permissions')
+      return navigateTo('/dashboard')
+    }
+  }
+
   // Phase HU: University Operations sub-module guards (Directives 213–215)
   // Admins/SuperAdmins bypass — only restrict Staff with explicit can_access=false overrides
   if (!isAdmin.value && !isSuperAdmin.value) {

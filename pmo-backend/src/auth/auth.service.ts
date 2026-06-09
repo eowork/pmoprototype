@@ -372,6 +372,13 @@ export class AuthService {
       avatar_url: user.avatarUrl,
       rank_level: user.rankLevel,
       campus: user.campus,
+      // NNN-H: profile-page fields
+      phone: user.phone,
+      display_name: user.displayName,
+      last_login_at: user.lastLoginAt,
+      last_password_change_at: user.lastPasswordChangeAt,
+      // NNN-G: SSO-only accounts (Google, no local password) cannot change password
+      is_sso: !!user.googleId && !user.passwordHash,
       roles,
       is_superadmin: rolesData.some((r) => r.is_superadmin),
       permissions,
@@ -380,6 +387,70 @@ export class AuthService {
       pillar_assignments,
       role: roles.length > 0 ? { name: roles[0].name } : undefined,
     };
+  }
+
+  // NNN-G: authenticated self-service password change (distinct from public reset flow)
+  async changePassword(
+    userId: string,
+    dto: { currentPassword: string; newPassword: string; confirmPassword: string },
+  ): Promise<{ message: string }> {
+    if (!dto.currentPassword || !dto.newPassword || !dto.confirmPassword) {
+      throw new BadRequestException('All password fields are required');
+    }
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException('New passwords do not match');
+    }
+    if (dto.newPassword.length < 8) {
+      throw new BadRequestException(
+        'New password must be at least 8 characters',
+      );
+    }
+    const user = await this.em.findOne(User, { id: userId });
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+    if (user.googleId && !user.passwordHash) {
+      throw new BadRequestException(
+        'Account uses Google Sign-In — password change is not available',
+      );
+    }
+    const isValid = await bcrypt.compare(
+      dto.currentPassword,
+      user.passwordHash || '',
+    );
+    if (!isValid) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+    if (dto.newPassword === dto.currentPassword) {
+      throw new BadRequestException(
+        'New password must differ from the current password',
+      );
+    }
+    user.passwordHash = await bcrypt.hash(dto.newPassword, 12);
+    user.lastPasswordChangeAt = new Date();
+    await this.em.flush();
+    this.logger.log(`PASSWORD_CHANGE: user_id=${userId}`);
+    return { message: 'Password changed successfully' };
+  }
+
+  // NNN-H: authenticated self-service profile update (display name + phone)
+  async updateProfile(
+    userId: string,
+    dto: { displayName?: string; phone?: string },
+  ) {
+    const user = await this.em.findOne(User, { id: userId });
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+    if (dto.displayName !== undefined) {
+      user.displayName = dto.displayName?.trim() || undefined;
+    }
+    if (dto.phone !== undefined) {
+      user.phone = dto.phone?.trim() || undefined;
+    }
+    await this.em.flush();
+    this.logger.log(`PROFILE_UPDATE: user_id=${userId}`);
+    return this.getProfile(userId);
   }
 
   async logout(userId: string): Promise<void> {

@@ -22,6 +22,13 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => !!token.value)
   const userFullName = computed(() => user.value?.fullName || '')
   const userEmail = computed(() => user.value?.email || '')
+  // NNN-F: avatar URL surfaced for app-bar + profile page
+  const userAvatarUrl = computed(() => user.value?.avatarUrl || '')
+
+  // NNN-I: merge a partial profile update into the cached user (after PATCH /auth/me)
+  function patchUser(partial: Partial<UIUser>): void {
+    if (user.value) user.value = { ...user.value, ...partial }
+  }
 
   // Actions
   async function login(identifier: string, password: string): Promise<void> {
@@ -114,11 +121,13 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     userFullName,
     userEmail,
+    userAvatarUrl,
     // Actions
     login,
     loginWithToken,
     logout,
     fetchCurrentUser,
+    patchUser,
     hasPermission,
     hasAnyPermission,
     initialize,

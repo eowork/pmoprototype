@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Patch,
   Get,
   Body,
   Req,
@@ -105,6 +106,54 @@ export class AuthController {
   })
   async getProfile(@CurrentUser() user: JwtPayload) {
     return this.authService.getProfile(user.sub);
+  }
+
+  // NNN-H: authenticated profile update (display name + phone)
+  @UseGuards(JwtAuthGuard)
+  @Patch('me')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Update own profile',
+    description: 'Updates the authenticated user display name and phone',
+  })
+  @ApiResponse({ status: 200, description: 'Profile updated' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async updateProfile(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { displayName?: string; phone?: string },
+  ) {
+    return this.authService.updateProfile(user.sub, body);
+  }
+
+  // NNN-G: authenticated self-service change password
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 3, ttl: 600000 } }) // 3 attempts per 10 minutes
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Change own password',
+    description:
+      'Authenticated self-service password change (separate from public reset). Requires current password.',
+  })
+  @ApiResponse({ status: 200, description: 'Password changed successfully' })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation error, wrong current password, or SSO-only account',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 429, description: 'Too many attempts' })
+  async changePassword(
+    @CurrentUser() user: JwtPayload,
+    @Body()
+    body: {
+      currentPassword: string;
+      newPassword: string;
+      confirmPassword: string;
+    },
+  ) {
+    return this.authService.changePassword(user.sub, body);
   }
 
   @UseGuards(JwtAuthGuard)
