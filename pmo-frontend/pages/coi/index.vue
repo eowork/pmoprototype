@@ -605,20 +605,24 @@ const budgetGauge = computed(() => {
   }
 })
 
-const upcomingCompletions = computed(() => {
-  const now = new Date()
-  const cutoff = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
-  return projects.value.filter(p => {
-    if ((p.status || '').toUpperCase() !== 'ONGOING') return false
-    const end = p.revisedCompletionDate || p.endDate
-    if (!end) return false
-    const d = new Date(end)
-    return !Number.isNaN(d.getTime()) && d >= now && d <= cutoff
-  }).sort((a, b) => {
-    const da = new Date(a.revisedCompletionDate || a.endDate || '').getTime()
-    const db = new Date(b.revisedCompletionDate || b.endDate || '').getTime()
-    return da - db
-  }).slice(0, 5)
+// QQQ-B2: On Hold projects — always-meaningful executive metric (replaces the
+// near-always-empty "Completing in 30 Days" card; infrastructure projects span years).
+const onHoldProjects = computed(() =>
+  projects.value
+    .filter(p => (p.status || '').toUpperCase() === 'ON_HOLD')
+    .slice(0, 5)
+)
+
+// QQQ-B3: Dynamic table height — reserve at least 5 rows of space but shrink to fit
+// the actual filtered row count, capped at 580px (avoids ~300px of blank space when
+// only a few results match a filter).
+const tableHeight = computed(() => {
+  const ROW_PX = 52
+  const HEAD_PX = 56
+  const MIN_ROWS = 5
+  const MAX_PX = 580
+  const rowCount = Math.max(filteredProjects.value.length, MIN_ROWS)
+  return Math.min(rowCount * ROW_PX + HEAD_PX, MAX_PX)
 })
 
 const statusChartOptions = computed(() => ({
@@ -781,6 +785,33 @@ const contractByStatusChart = computed(() => {
       colors: data.map(d => STATUS_HEX[d.status] || '#9ca3af'),
       legend: { position: 'bottom' as const },
       tooltip: { y: { formatter: fmt } },
+    },
+  }
+})
+
+// QQQ-C2: Publication Status donut (replaces low-value chip row; balances grid symmetry)
+const publicationStatusChart = computed(() => {
+  const data = (analyticsSummary.value?.by_publication_status || []) as Array<{ publication_status: string; count: number }>
+  const labelMap: Record<string, string> = {
+    DRAFT: 'Draft',
+    PENDING_REVIEW: 'Pending Review',
+    PUBLISHED: 'Published',
+    REJECTED: 'Rejected',
+  }
+  const colorMap: Record<string, string> = {
+    DRAFT: '#9e9e9e',
+    PENDING_REVIEW: '#f59e0b',
+    PUBLISHED: '#059669',
+    REJECTED: '#ef4444',
+  }
+  return {
+    series: data.map(d => Number(d.count) || 0),
+    options: {
+      chart: { type: 'donut' as const, toolbar: { show: false } },
+      labels: data.map(d => labelMap[d.publication_status] || d.publication_status),
+      colors: data.map(d => colorMap[d.publication_status] || '#9e9e9e'),
+      legend: { position: 'bottom' as const },
+      dataLabels: { enabled: true },
     },
   }
 })
@@ -954,19 +985,19 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
         <v-col cols="12" md="4">
           <v-card elevation="1" rounded="lg" class="h-100 pa-3">
             <div class="text-caption text-grey-darken-1 font-weight-medium text-uppercase mb-2">
-              <v-icon icon="mdi-calendar-clock" size="small" color="info" class="mr-1" />Completing in 30 Days
+              <v-icon icon="mdi-pause-circle-outline" size="small" color="warning" class="mr-1" />On Hold
             </div>
-            <div v-if="!upcomingCompletions.length" class="text-caption text-grey py-2">No projects completing in the next 30 days.</div>
+            <div v-if="!onHoldProjects.length" class="text-caption text-grey py-2">No projects currently on hold.</div>
             <v-list v-else density="compact" class="pa-0">
               <v-list-item
-                v-for="p in upcomingCompletions"
+                v-for="p in onHoldProjects"
                 :key="p.id"
                 class="px-0 cursor-pointer"
                 @click="router.push(`/coi/detail-${p.id}`)"
               >
                 <v-list-item-title class="text-caption font-weight-medium text-truncate">{{ p.projectName }}</v-list-item-title>
                 <v-list-item-subtitle class="text-caption text-grey">
-                  Due {{ formatDate(p.revisedCompletionDate || p.endDate) }} · {{ (Number(p.physicalAccomplishment) || 0).toFixed(0) }}% complete
+                  {{ p.campus }} · {{ (Number(p.physicalAccomplishment) || 0).toFixed(0) }}% complete
                 </v-list-item-subtitle>
               </v-list-item>
             </v-list>
@@ -1290,7 +1321,7 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
         v-model:sort-by="sortBy"
         :items-per-page-options="[{ value: 10, title: '10' }, { value: 25, title: '25' }, { value: 50, title: '50' }, { value: -1, title: 'All' }]"
         fixed-header
-        height="600"
+        :height="tableHeight"
         item-value="id"
         hover
         class="elevation-0"
@@ -1594,7 +1625,7 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
         <!-- Charts Row -->
         <v-row>
           <v-col cols="12" md="5">
-            <v-card class="pa-4">
+            <v-card class="pa-4" elevation="1" rounded="lg">
               <v-card-title class="text-body-1 font-weight-bold mb-2">Status Distribution</v-card-title>
               <VueApexCharts
                 v-if="statusChartSeries.length > 0"
@@ -1607,7 +1638,7 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
             </v-card>
           </v-col>
           <v-col cols="12" md="7">
-            <v-card class="pa-4">
+            <v-card class="pa-4" elevation="1" rounded="lg">
               <v-card-title class="text-body-1 font-weight-bold mb-2">Projects by Campus</v-card-title>
               <VueApexCharts
                 v-if="campusChartSeries[0]?.data?.length > 0"
@@ -1629,7 +1660,7 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
         <!-- Physical Progress Distribution (full-width) -->
         <v-row>
           <v-col cols="12">
-            <v-card class="pa-4">
+            <v-card class="pa-4" elevation="1" rounded="lg">
               <v-card-title class="text-body-1 font-weight-bold mb-2">Physical Progress Distribution</v-card-title>
               <VueApexCharts
                 v-if="projects.length > 0"
@@ -1651,7 +1682,7 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
         <!-- III-C + III-D: Avg Progress by Campus + Budget by Campus -->
         <v-row class="mt-1">
           <v-col cols="12" md="6">
-            <v-card class="pa-4">
+            <v-card class="pa-4" elevation="1" rounded="lg">
               <v-card-title class="text-body-1 font-weight-bold mb-1">Avg Physical Progress by Campus</v-card-title>
               <v-card-subtitle class="text-caption pb-2">Which campuses are most advanced in construction delivery?</v-card-subtitle>
               <VueApexCharts
@@ -1665,7 +1696,7 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
             </v-card>
           </v-col>
           <v-col cols="12" md="6">
-            <v-card class="pa-4">
+            <v-card class="pa-4" elevation="1" rounded="lg">
               <v-card-title class="text-body-1 font-weight-bold mb-1">Budget Concentration by Campus</v-card-title>
               <v-card-subtitle class="text-caption pb-2">Where is infrastructure investment concentrated?</v-card-subtitle>
               <VueApexCharts
@@ -1683,7 +1714,7 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
         <!-- III-D: Contract Value by Status -->
         <v-row class="mt-4">
           <v-col cols="12" md="6">
-            <v-card class="pa-4">
+            <v-card class="pa-4" elevation="1" rounded="lg">
               <v-card-title class="text-body-1 font-weight-bold mb-1">Contract Value by Status</v-card-title>
               <v-card-subtitle class="text-caption pb-2">How much budget is allocated per project status?</v-card-subtitle>
               <VueApexCharts
@@ -1697,20 +1728,17 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
             </v-card>
           </v-col>
           <v-col cols="12" md="6">
-            <v-card class="pa-4">
-              <v-card-title class="text-body-1 font-weight-bold mb-1">Publication Status Breakdown</v-card-title>
+            <v-card class="pa-4" elevation="1" rounded="lg">
+              <v-card-title class="text-body-1 font-weight-bold mb-1">Publication Status</v-card-title>
               <v-card-subtitle class="text-caption pb-2">Review readiness across the portfolio</v-card-subtitle>
-              <div class="d-flex flex-wrap ga-3 pt-2">
-                <v-chip
-                  v-for="item in analyticsSummary.by_publication_status"
-                  :key="item.publication_status"
-                  :color="item.publication_status === 'PUBLISHED' ? 'success' : item.publication_status === 'PENDING_REVIEW' ? 'orange' : item.publication_status === 'REJECTED' ? 'error' : 'grey'"
-                  variant="tonal"
-                  size="large"
-                >
-                  {{ item.publication_status }}: {{ item.count }}
-                </v-chip>
-              </div>
+              <VueApexCharts
+                v-if="publicationStatusChart.series.some(v => v > 0)"
+                type="donut"
+                height="220"
+                :options="publicationStatusChart.options"
+                :series="publicationStatusChart.series"
+              />
+              <CiChartEmpty v-else icon="mdi-chart-donut" title="No publication data" description="Status breakdown appears once projects are reviewed." />
             </v-card>
           </v-col>
         </v-row>
@@ -1723,7 +1751,7 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
         <!-- III-E: Contractor + Funding Source row -->
         <v-row class="mt-1">
           <v-col cols="12" md="7">
-            <v-card class="pa-4">
+            <v-card class="pa-4" elevation="1" rounded="lg">
               <v-card-title class="text-body-1 font-weight-bold mb-1">Projects by Contractor</v-card-title>
               <v-card-subtitle class="text-caption pb-2">Which contractors have the most active projects?</v-card-subtitle>
               <VueApexCharts
@@ -1737,7 +1765,7 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
             </v-card>
           </v-col>
           <v-col cols="12" md="5">
-            <v-card class="pa-4">
+            <v-card class="pa-4" elevation="1" rounded="lg">
               <v-card-title class="text-body-1 font-weight-bold mb-1">Funding Source Distribution</v-card-title>
               <v-card-subtitle class="text-caption pb-2">How projects are distributed by funding source</v-card-subtitle>
               <VueApexCharts
