@@ -703,6 +703,15 @@ async function openEntryDialogDirect(indicator: any) {
       // Phase HA: Total overrides (Directive 371)
       override_total_target: existingData.override_total_target ?? null,
       override_total_actual: existingData.override_total_actual ?? null,
+      // Phase TTT: Fraction fields for PERCENTAGE indicators
+      numerator_q1: existingData.numerator_q1 ?? null,
+      denominator_q1: existingData.denominator_q1 ?? null,
+      numerator_q2: existingData.numerator_q2 ?? null,
+      denominator_q2: existingData.denominator_q2 ?? null,
+      numerator_q3: existingData.numerator_q3 ?? null,
+      denominator_q3: existingData.denominator_q3 ?? null,
+      numerator_q4: existingData.numerator_q4 ?? null,
+      denominator_q4: existingData.denominator_q4 ?? null,
       _existingId: existingData.id || null,
     }
   } else {
@@ -759,6 +768,11 @@ async function openEntryDialogDirect(indicator: any) {
         // Phase HA: Do not inherit prior quarter's total overrides (Directive 371)
         override_total_target: null,
         override_total_actual: null,
+        // Phase TTT: Do not inherit N/D from prior quarter
+        numerator_q1: null, denominator_q1: null,
+        numerator_q2: null, denominator_q2: null,
+        numerator_q3: null, denominator_q3: null,
+        numerator_q4: null, denominator_q4: null,
         _existingId: preservedId,
       }
       wasPrefilled.value = true
@@ -783,6 +797,11 @@ async function openEntryDialogDirect(indicator: any) {
         // Phase HA: Total overrides default to null (Directive 371)
         override_total_target: null,
         override_total_actual: null,
+        // Phase TTT: Fraction fields default to null
+        numerator_q1: null, denominator_q1: null,
+        numerator_q2: null, denominator_q2: null,
+        numerator_q3: null, denominator_q3: null,
+        numerator_q4: null, denominator_q4: null,
         _existingId: preservedId,
       }
     }
@@ -816,6 +835,14 @@ function sanitizeNumericPayload(data: any): any {
     'accomplishment_q4',
     'override_total_target',
     'override_total_actual',
+    'numerator_q1',
+    'denominator_q1',
+    'numerator_q2',
+    'denominator_q2',
+    'numerator_q3',
+    'denominator_q3',
+    'numerator_q4',
+    'denominator_q4',
   ]
 
   const sanitized = { ...data }
@@ -859,6 +886,22 @@ async function saveQuarterlyData() {
   })));
   console.groupEnd();
 
+  // TTT-G: Denominator zero guard for PERCENTAGE indicators
+  if (selectedIndicator.value?.unit_type === 'PERCENTAGE') {
+    const quarters = [
+      { n: entryForm.value.numerator_q1, d: entryForm.value.denominator_q1, label: 'Q1' },
+      { n: entryForm.value.numerator_q2, d: entryForm.value.denominator_q2, label: 'Q2' },
+      { n: entryForm.value.numerator_q3, d: entryForm.value.denominator_q3, label: 'Q3' },
+      { n: entryForm.value.numerator_q4, d: entryForm.value.denominator_q4, label: 'Q4' },
+    ]
+    for (const q of quarters) {
+      if ((q.n !== null && q.n !== undefined && q.n !== '') && (q.d === 0 || q.d === '0')) {
+        toast.error(`${q.label}: Denominator cannot be zero.`)
+        return
+      }
+    }
+  }
+
   saving.value = true
   try {
     // First ensure we have an operation
@@ -880,6 +923,20 @@ async function saveQuarterlyData() {
 
     // Phase FL-1: Full 12-field payload — record-level isolation via per-quarter DB records
     // Each quarter has its own independent record; all columns are editable
+    // Phase TTT: For PERCENTAGE indicators, compute accomplishment from N/D before submission
+    const isPctType = selectedIndicator.value?.unit_type === 'PERCENTAGE'
+    const computePctAccomplishment = (num: any, den: any): number | null => {
+      const n = Number(num)
+      const d = Number(den)
+      if (num === null || num === undefined || num === '') return null
+      if (!den || d === 0) return null
+      return Math.min((n / d) * 100, 9999.99)
+    }
+    const pctA1 = isPctType ? computePctAccomplishment(entryForm.value.numerator_q1, entryForm.value.denominator_q1) : null
+    const pctA2 = isPctType ? computePctAccomplishment(entryForm.value.numerator_q2, entryForm.value.denominator_q2) : null
+    const pctA3 = isPctType ? computePctAccomplishment(entryForm.value.numerator_q3, entryForm.value.denominator_q3) : null
+    const pctA4 = isPctType ? computePctAccomplishment(entryForm.value.numerator_q4, entryForm.value.denominator_q4) : null
+
     const quarterPayload: any = {
       pillar_indicator_id: entryForm.value.pillar_indicator_id,
       fiscal_year: entryForm.value.fiscal_year,
@@ -888,10 +945,10 @@ async function saveQuarterlyData() {
       target_q2: entryForm.value.target_q2,
       target_q3: entryForm.value.target_q3,
       target_q4: entryForm.value.target_q4,
-      accomplishment_q1: entryForm.value.accomplishment_q1,
-      accomplishment_q2: entryForm.value.accomplishment_q2,
-      accomplishment_q3: entryForm.value.accomplishment_q3,
-      accomplishment_q4: entryForm.value.accomplishment_q4,
+      accomplishment_q1: isPctType ? (pctA1 ?? entryForm.value.accomplishment_q1) : entryForm.value.accomplishment_q1,
+      accomplishment_q2: isPctType ? (pctA2 ?? entryForm.value.accomplishment_q2) : entryForm.value.accomplishment_q2,
+      accomplishment_q3: isPctType ? (pctA3 ?? entryForm.value.accomplishment_q3) : entryForm.value.accomplishment_q3,
+      accomplishment_q4: isPctType ? (pctA4 ?? entryForm.value.accomplishment_q4) : entryForm.value.accomplishment_q4,
       score_q1: entryForm.value.score_q1,
       score_q2: entryForm.value.score_q2,
       score_q3: entryForm.value.score_q3,
@@ -908,6 +965,15 @@ async function saveQuarterlyData() {
       // Phase HA: Total overrides (Directive 373)
       override_total_target: entryForm.value.override_total_target,
       override_total_actual: entryForm.value.override_total_actual,
+      // Phase TTT: Fraction fields for PERCENTAGE indicators
+      numerator_q1: entryForm.value.numerator_q1,
+      denominator_q1: entryForm.value.denominator_q1,
+      numerator_q2: entryForm.value.numerator_q2,
+      denominator_q2: entryForm.value.denominator_q2,
+      numerator_q3: entryForm.value.numerator_q3,
+      denominator_q3: entryForm.value.denominator_q3,
+      numerator_q4: entryForm.value.numerator_q4,
+      denominator_q4: entryForm.value.denominator_q4,
     }
 
     // Phase DV-A: Sanitize empty strings to null for numeric fields
@@ -997,21 +1063,34 @@ async function saveQuarterlyData() {
   }
 }
 
-// Phase SSS-A: Per-quarter accomplishment percentage (read-only, real-time)
+// Phase SSS-A / TTT-F: Per-quarter accomplishment percentage (read-only, real-time)
+// PERCENTAGE indicators: uses N/D fraction; COUNT/WEIGHTED_COUNT: uses (actual/target)*100
 const quarterlyComputedPct = computed(() => {
   const f = entryForm.value
+  const isPct = selectedIndicator.value?.unit_type === 'PERCENTAGE'
   const quarters = [
-    { target: f.target_q1, actual: f.accomplishment_q1 },
-    { target: f.target_q2, actual: f.accomplishment_q2 },
-    { target: f.target_q3, actual: f.accomplishment_q3 },
-    { target: f.target_q4, actual: f.accomplishment_q4 },
+    { target: f.target_q1, actual: f.accomplishment_q1, num: f.numerator_q1, den: f.denominator_q1 },
+    { target: f.target_q2, actual: f.accomplishment_q2, num: f.numerator_q2, den: f.denominator_q2 },
+    { target: f.target_q3, actual: f.accomplishment_q3, num: f.numerator_q3, den: f.denominator_q3 },
+    { target: f.target_q4, actual: f.accomplishment_q4, num: f.numerator_q4, den: f.denominator_q4 },
   ]
-  return quarters.map(({ target, actual }) => {
-    const t = Number(target)
-    const a = actual
-    if (a === null || a === undefined || a === '' || isNaN(Number(a))) return null
-    if (!t || t === 0) return null
-    return Math.min((Number(a) / t) * 100, 9999.99)
+  return quarters.map(({ target, actual, num, den }) => {
+    if (isPct) {
+      const n = Number(num)
+      const d = Number(den)
+      if (num === null || num === undefined || num === '') {
+        // Fall back to stored accomplishment value (legacy records without N/D)
+        return actual !== null && actual !== undefined && actual !== '' ? Number(actual) : null
+      }
+      if (!den || d === 0) return null
+      return Math.min((n / d) * 100, 9999.99)
+    } else {
+      const t = Number(target)
+      const a = actual
+      if (a === null || a === undefined || a === '' || isNaN(Number(a))) return null
+      if (!t || t === 0) return null
+      return Math.min((Number(a) / t) * 100, 9999.99)
+    }
   })
 })
 
@@ -1019,7 +1098,7 @@ const quarterlyComputedPct = computed(() => {
 const entryBannerText = computed(() => {
   const type = selectedIndicator.value?.unit_type || 'COUNT'
   if (type === 'PERCENTAGE') {
-    return 'This indicator tracks a percentage benchmark (e.g., pass rate, employment rate). Enter the target and actual percentage values directly — for example, enter 80 for 80%. Accomplishment percentages are automatically computed by the system.'
+    return 'Enter the numerator and denominator for each quarter (e.g., 286 / 268). The system automatically computes the percentage. Do not enter the percentage directly.'
   }
   return 'Enter the target and actual values for each quarter (e.g., number of beneficiaries, graduates). Accomplishment percentages are automatically computed — do not pre-compute or enter percentages manually.'
 })
@@ -2014,19 +2093,19 @@ onMounted(async () => {
             {{ entryBannerText }}
           </v-alert>
 
-          <!-- Phase DU-A: Vertical tabular data entry — rows = quarters, cols = T/A/S -->
+          <!-- Phase DU-A / TTT-F: Vertical tabular data entry — rows = quarters, cols = T/A(or N/D)/S -->
           <v-table density="compact" class="mb-4">
             <thead>
               <tr class="bg-primary text-white">
                 <th class="q-label-cell">Quarter</th>
                 <th class="text-center">Target</th>
-                <th class="text-center">Actual</th>
+                <th class="text-center">{{ selectedIndicator?.unit_type === 'PERCENTAGE' ? 'Fraction (N/D)' : 'Actual' }}</th>
                 <th class="text-center">Score (optional)</th>
                 <th class="text-center acc-pct-col">Acc. %</th>
               </tr>
             </thead>
             <tbody>
-              <!-- Phase FL-1: All quarter fields are fully editable — record isolation at DB level -->
+              <!-- Phase FL-1 / TTT-F: All quarter fields are fully editable — record isolation at DB level -->
               <!-- Q1 -->
               <tr>
                 <td class="q-label-cell">
@@ -2037,8 +2116,24 @@ onMounted(async () => {
                     density="compact" variant="outlined" hide-details />
                 </td>
                 <td class="du-input-cell">
-                  <v-text-field v-model.number="entryForm.accomplishment_q1" type="number" step="0.01" min="0"
-                    density="compact" variant="outlined" hide-details />
+                  <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
+                    <v-text-field v-model.number="entryForm.accomplishment_q1" type="number" step="0.01" min="0"
+                      density="compact" variant="outlined" hide-details />
+                  </template>
+                  <template v-else>
+                    <div class="d-flex align-center ga-1">
+                      <v-text-field v-model.number="entryForm.numerator_q1" type="number" min="0"
+                        label="N" density="compact" variant="outlined" hide-details style="width:72px" />
+                      <span class="text-grey text-caption">/</span>
+                      <v-text-field v-model.number="entryForm.denominator_q1" type="number" min="1"
+                        label="D" density="compact" variant="outlined" hide-details style="width:72px"
+                        :error="entryForm.denominator_q1 === 0" />
+                    </div>
+                    <div v-if="(entryForm.numerator_q1 === null || entryForm.numerator_q1 === undefined) && entryForm.accomplishment_q1 !== null"
+                         class="text-caption text-grey mt-1">
+                      Legacy: {{ entryForm.accomplishment_q1 }}%
+                    </div>
+                  </template>
                 </td>
                 <td class="du-input-cell">
                   <v-text-field v-model="entryForm.score_q1" placeholder="e.g. 148/200"
@@ -2063,8 +2158,24 @@ onMounted(async () => {
                     density="compact" variant="outlined" hide-details />
                 </td>
                 <td class="du-input-cell">
-                  <v-text-field v-model.number="entryForm.accomplishment_q2" type="number" step="0.01" min="0"
-                    density="compact" variant="outlined" hide-details />
+                  <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
+                    <v-text-field v-model.number="entryForm.accomplishment_q2" type="number" step="0.01" min="0"
+                      density="compact" variant="outlined" hide-details />
+                  </template>
+                  <template v-else>
+                    <div class="d-flex align-center ga-1">
+                      <v-text-field v-model.number="entryForm.numerator_q2" type="number" min="0"
+                        label="N" density="compact" variant="outlined" hide-details style="width:72px" />
+                      <span class="text-grey text-caption">/</span>
+                      <v-text-field v-model.number="entryForm.denominator_q2" type="number" min="1"
+                        label="D" density="compact" variant="outlined" hide-details style="width:72px"
+                        :error="entryForm.denominator_q2 === 0" />
+                    </div>
+                    <div v-if="(entryForm.numerator_q2 === null || entryForm.numerator_q2 === undefined) && entryForm.accomplishment_q2 !== null"
+                         class="text-caption text-grey mt-1">
+                      Legacy: {{ entryForm.accomplishment_q2 }}%
+                    </div>
+                  </template>
                 </td>
                 <td class="du-input-cell">
                   <v-text-field v-model="entryForm.score_q2" placeholder="e.g. 148/200"
@@ -2089,8 +2200,24 @@ onMounted(async () => {
                     density="compact" variant="outlined" hide-details />
                 </td>
                 <td class="du-input-cell">
-                  <v-text-field v-model.number="entryForm.accomplishment_q3" type="number" step="0.01" min="0"
-                    density="compact" variant="outlined" hide-details />
+                  <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
+                    <v-text-field v-model.number="entryForm.accomplishment_q3" type="number" step="0.01" min="0"
+                      density="compact" variant="outlined" hide-details />
+                  </template>
+                  <template v-else>
+                    <div class="d-flex align-center ga-1">
+                      <v-text-field v-model.number="entryForm.numerator_q3" type="number" min="0"
+                        label="N" density="compact" variant="outlined" hide-details style="width:72px" />
+                      <span class="text-grey text-caption">/</span>
+                      <v-text-field v-model.number="entryForm.denominator_q3" type="number" min="1"
+                        label="D" density="compact" variant="outlined" hide-details style="width:72px"
+                        :error="entryForm.denominator_q3 === 0" />
+                    </div>
+                    <div v-if="(entryForm.numerator_q3 === null || entryForm.numerator_q3 === undefined) && entryForm.accomplishment_q3 !== null"
+                         class="text-caption text-grey mt-1">
+                      Legacy: {{ entryForm.accomplishment_q3 }}%
+                    </div>
+                  </template>
                 </td>
                 <td class="du-input-cell">
                   <v-text-field v-model="entryForm.score_q3" placeholder="e.g. 148/200"
@@ -2115,8 +2242,24 @@ onMounted(async () => {
                     density="compact" variant="outlined" hide-details />
                 </td>
                 <td class="du-input-cell">
-                  <v-text-field v-model.number="entryForm.accomplishment_q4" type="number" step="0.01" min="0"
-                    density="compact" variant="outlined" hide-details />
+                  <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
+                    <v-text-field v-model.number="entryForm.accomplishment_q4" type="number" step="0.01" min="0"
+                      density="compact" variant="outlined" hide-details />
+                  </template>
+                  <template v-else>
+                    <div class="d-flex align-center ga-1">
+                      <v-text-field v-model.number="entryForm.numerator_q4" type="number" min="0"
+                        label="N" density="compact" variant="outlined" hide-details style="width:72px" />
+                      <span class="text-grey text-caption">/</span>
+                      <v-text-field v-model.number="entryForm.denominator_q4" type="number" min="1"
+                        label="D" density="compact" variant="outlined" hide-details style="width:72px"
+                        :error="entryForm.denominator_q4 === 0" />
+                    </div>
+                    <div v-if="(entryForm.numerator_q4 === null || entryForm.numerator_q4 === undefined) && entryForm.accomplishment_q4 !== null"
+                         class="text-caption text-grey mt-1">
+                      Legacy: {{ entryForm.accomplishment_q4 }}%
+                    </div>
+                  </template>
                 </td>
                 <td class="du-input-cell">
                   <v-text-field v-model="entryForm.score_q4" placeholder="e.g. 148/200"

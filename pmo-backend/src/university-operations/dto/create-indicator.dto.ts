@@ -170,6 +170,55 @@ export class CreateIndicatorQuarterlyDto {
   @IsOptional()
   @IsString()
   mov?: string | null;
+
+  // Phase TTT: Numerator/denominator fraction fields for PERCENTAGE unit_type indicators
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  numerator_q1?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  denominator_q1?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  numerator_q2?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  denominator_q2?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  numerator_q3?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  denominator_q3?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  numerator_q4?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  denominator_q4?: number | null;
 }
 
 /**
