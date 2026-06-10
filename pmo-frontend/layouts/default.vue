@@ -208,7 +208,7 @@ async function handleLogout() {
           :title="item.title"
           color="primary"
           rounded="lg"
-          class="mb-1"
+          class="mb-1 ga-1"
         />
       </v-list>
 

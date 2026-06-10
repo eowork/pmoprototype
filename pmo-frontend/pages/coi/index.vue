@@ -871,14 +871,6 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
     <!-- Projects Tab -->
     <v-window-item value="projects">
 
-    <!-- GGG-B / MMM-G: Action strip — primary action left, navigation actions right.
-         "Review Projects" removed (redundant with Pending Review KPI + Status filter). -->
-    <div class="d-flex flex-wrap align-center ga-2 mb-3">
-      <v-spacer />
-      <v-btn color="info" variant="tonal" prepend-icon="mdi-chart-bar" size="small" @click="activeTab = 'analytics'">Portfolio Analytics</v-btn>
-      <v-btn color="grey-darken-1" variant="tonal" prepend-icon="mdi-earth" size="small" :to="'/coi/public'">Public View</v-btn>
-    </div>
-
     <!-- LLL-F / NNN-J: Portfolio Summary section banner -->
     <div class="mb-3">
       <div class="d-flex align-center ga-2 mb-1">

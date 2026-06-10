@@ -186,7 +186,7 @@ const headers = [
     <v-card-title class="d-flex align-center justify-space-between py-2 px-4 bg-grey-lighten-4">
       <div class="d-flex align-center ga-2">
         <v-icon size="small" icon="mdi-chart-timeline-variant" color="info" />
-        <span class="text-subtitle-1 font-weight-medium">A. Progress Reports</span>
+        <span class="text-subtitle-1 font-weight-bold">A. Progress Reports</span>
         <v-chip size="x-small" variant="tonal" color="info">{{ items.length }}</v-chip>
       </div>
       <div class="d-flex align-center ga-2">
