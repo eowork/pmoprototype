@@ -859,79 +859,110 @@ const pillarChartSeries = computed(() => {
   return [{ name: 'Achievement Rate (%)', data: sorted.map((p: any) => Number((p.accomplishment_rate_pct || 0).toFixed(1))) }]
 })
 
-const quarterlyTrendOptions = computed(() => ({
-  chart: {
-    type: 'line' as const,
-    height: 280,
-    toolbar: { show: false },
-    zoom: { enabled: false },
-  },
-  stroke: {
-    curve: 'smooth' as const,
-    width: 3,
-  },
-  colors: ['#1976D2'],
-  xaxis: {
-    categories: ['Q1', 'Q2', 'Q3', 'Q4'],
-  },
-  yaxis: {
-    // Phase PPP-A2: Plot the true accomplishment rate (%) instead of raw counts/sums
-    title: { text: 'Accomplishment Rate (%)' },
-    min: 0,
-    max: 120,
-    forceNiceScale: false,
-    labels: {
-      formatter: (val: number) => val.toFixed(0) + '%',
-    },
-  },
-  annotations: {
-    yaxis: [{
-      y: 100,
-      borderColor: '#E53935',
-      strokeDashArray: 4,
-      label: {
-        text: 'Target (100%)',
-        position: 'left' as const,
-        offsetX: 5,
-        offsetY: -5,
-        style: {
-          color: '#E53935',
-          background: '#FFFFFF',
-          fontSize: '12px',
-          padding: { left: 4, right: 4, top: 2, bottom: 2 },
-        },
-      },
-    }],
-  },
-  legend: { show: false },
-  markers: {
-    size: 5,
-  },
-  dataLabels: {
-    enabled: true,
-    formatter: (val: number) => val.toFixed(1) + '%',
-    offsetY: -20,
-    style: { fontSize: '11px', colors: ['#333'] },
-  },
-  tooltip: {
-    y: {
-      formatter: (val: number) => val.toFixed(1) + '%',
-    },
-  },
-}))
-
-// Phase PPP-A2: Single-series quarterly accomplishment rate (actual/target × 100)
-const quarterlyTrendSeries = computed(() => {
-  if (!quarterlyTrend.value?.quarters) {
-    return [{ name: 'Quarterly Accomplishment Rate (%)', data: [0, 0, 0, 0] }]
+// Phase AAAI: bar-friendly y-axis. Auto-scale to the data but CAP at 200% so a single
+// extreme over-achiever can't flatten every other bar to invisibility (the failure mode of
+// the AAAG line chart). Floor at 120% to keep the 100% target line framed. Resilient to both
+// the per-pillar shape (pillars[]) and the legacy single-series shape (quarters[]).
+const quarterlyTrendMax = computed(() => {
+  const t: any = quarterlyTrend.value
+  const vals: number[] = []
+  if (Array.isArray(t?.pillars)) {
+    for (const p of t.pillars)
+      for (const v of (p.accomplishment_rate_pct ?? [])) if (v != null) vals.push(Number(v))
+  } else if (Array.isArray(t?.quarters)) {
+    for (const q of t.quarters)
+      if (q && typeof q === 'object' && q.accomplishment_rate_pct != null) vals.push(Number(q.accomplishment_rate_pct))
   }
-  const quarters = quarterlyTrend.value.quarters
-  return [{
-    name: 'Quarterly Accomplishment Rate (%)',
-    data: quarters.map((q: any) => q.accomplishment_rate_pct != null
-      ? parseFloat(q.accomplishment_rate_pct.toFixed(1))
-      : 0),
-  }]
+  const peak = vals.length ? Math.max(...vals) : 100
+  return Math.min(200, Math.max(120, Math.ceil((peak * 1.1) / 10) * 10))
+})
+
+// Phase AAAI: Quarterly accomplishment rate as a BAR chart (replaces the AAAG line, which
+// rendered nothing when an extreme value blew up the axis). Grouped bars per program when
+// "ALL", a single coloured series when a pillar is filtered.
+const quarterlyTrendOptions = computed(() => {
+  const isSingle = selectedGlobalPillar.value !== 'ALL'
+  const colors = isSingle
+    ? [PILLARS.find(p => p.id === selectedGlobalPillar.value)?.color || '#1976D2']
+    : PILLARS.map(p => p.color)
+  return {
+    chart: { type: 'bar' as const, height: 280, toolbar: { show: false } },
+    plotOptions: {
+      bar: { horizontal: false, columnWidth: '60%', borderRadius: 4, dataLabels: { position: 'top' as const } },
+    },
+    colors,
+    xaxis: {
+      categories: ['Q1', 'Q2', 'Q3', 'Q4'],
+      title: { text: 'Quarter' },
+    },
+    yaxis: {
+      title: { text: 'Accomplishment Rate (%)' },
+      min: 0,
+      max: quarterlyTrendMax.value,
+      forceNiceScale: false,
+      labels: { formatter: (val: number) => val.toFixed(0) + '%' },
+    },
+    annotations: {
+      yaxis: [{
+        y: 100,
+        borderColor: '#E53935',
+        strokeDashArray: 4,
+        label: {
+          text: 'Target (100%)',
+          position: 'left' as const,
+          offsetX: 5,
+          offsetY: -5,
+          style: {
+            color: '#E53935',
+            background: '#FFFFFF',
+            fontSize: '12px',
+            padding: { left: 4, right: 4, top: 2, bottom: 2 },
+          },
+        },
+      }],
+    },
+    // Legend identifies each program (pillar) when multiple bars are grouped
+    legend: { show: !isSingle, position: 'top' as const, horizontalAlign: 'center' as const },
+    dataLabels: {
+      // Per-bar labels only for the single-series case (grouped bars would overlap)
+      enabled: isSingle,
+      formatter: (val: number) => (val == null ? '' : val.toFixed(1) + '%'),
+      offsetY: -20,
+      style: { fontSize: '11px', colors: ['#333'] },
+    },
+    tooltip: {
+      // Shared tooltip lists every program (pillar) by name for the hovered quarter
+      shared: true,
+      intersect: false,
+      y: { formatter: (val: number) => (val == null ? 'No data' : val.toFixed(1) + '%') },
+    },
+  }
+})
+
+// Phase AAAI: per-program bar series. Resilient to BOTH the per-pillar backend shape
+// (pillars[]) and the legacy single-series shape (quarters[]), so the chart renders
+// regardless of backend build state.
+const quarterlyTrendSeries = computed(() => {
+  const t: any = quarterlyTrend.value
+  // Per-pillar shape → grouped bars (programs stay independent)
+  if (Array.isArray(t?.pillars) && t.pillars.length) {
+    const toData = (pt: string) =>
+      (t.pillars.find((p: any) => p.pillar_type === pt)?.accomplishment_rate_pct ?? [null, null, null, null])
+        .map((v: any) => (v == null ? null : Number(v)))
+    if (selectedGlobalPillar.value !== 'ALL') {
+      const pillar = PILLARS.find(p => p.id === selectedGlobalPillar.value)
+      return [{ name: pillar?.name ?? 'Accomplishment Rate (%)', data: toData(selectedGlobalPillar.value) }]
+    }
+    return PILLARS.map(pillar => ({ name: pillar.name, data: toData(pillar.id) }))
+  }
+  // Legacy single-series shape (quarters[] of objects)
+  if (Array.isArray(t?.quarters) && t.quarters.length && typeof t.quarters[0] === 'object') {
+    return [{
+      name: 'Accomplishment Rate (%)',
+      data: t.quarters.map((q: any) => (q?.accomplishment_rate_pct == null ? null : Number(q.accomplishment_rate_pct))),
+    }]
+  }
+  return [{ name: 'Accomplishment Rate (%)', data: [null, null, null, null] }]
 })
 
 // Phase EE-C: YoY chart — all 4 pillars as separate series
@@ -2047,13 +2078,13 @@ onMounted(async () => {
           <v-col cols="12" md="6">
             <v-card variant="tonal" class="h-100">
               <v-card-title class="text-subtitle-1 d-flex align-center">
-                <v-icon start size="small" color="success">mdi-trending-up</v-icon>
-                Quarterly Trend
+                <v-icon start size="small" color="success">mdi-chart-bar</v-icon>
+                Quarterly Accomplishment Rate by Program
               </v-card-title>
               <v-card-text>
                 <ClientOnly>
                   <VueApexCharts
-                    type="line"
+                    type="bar"
                     height="280"
                     :options="quarterlyTrendOptions"
                     :series="quarterlyTrendSeries"

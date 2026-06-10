@@ -110,6 +110,8 @@ const form = ref({
   socioeconomic_agenda: [] as string[],
   csu_likha_goals: [] as string[],
   sdg_goals: [] as string[],
+  rdp2017_alignment: [] as string[],
+  point_agenda_10: [] as string[],
   strategic_alignment: '',
   // NC: Migrated from textareas to bullet lists
   output_indicators_list: [] as string[],
@@ -134,6 +136,7 @@ const form = ref({
   revised_completion_date: '',
   revised_project_duration: '',
   original_contract_duration: '',
+  implementation_period: '',
   // Progress / financial (existing tabs)
   physical_progress: null as number | null,
   financial_progress: null as number | null,
@@ -207,14 +210,7 @@ function removeSignatory(i: number) { signatoryRows.value.splice(i, 1) }
 
 // KW-F4: Project monitoring log rows
 // BBB-B: incidentLogRows removed — Incident Log removed from Others tab per R-055
-const riskRegisterRows   = ref<Array<{ risk: string; likelihood: string; impact: string; mitigation: string; status: string }>>([])
-const escalationRows     = ref<Array<{ escalatedTo: string; date: string; issue: string; resolution: string }>>([])
-
-
-function addRisk()             { riskRegisterRows.value.push({ risk: '', likelihood: 'MEDIUM', impact: 'MEDIUM', mitigation: '', status: 'OPEN' }) }
-function removeRisk(i: number) { riskRegisterRows.value.splice(i, 1) }
-function addEscalation()            { escalationRows.value.push({ escalatedTo: '', date: '', issue: '', resolution: '' }) }
-function removeEscalation(i: number) { escalationRows.value.splice(i, 1) }
+// XXX-M: riskRegisterRows/escalationRows removed — Project Governance section removed
 
 // GGG-E: Others-tab data banking
 const notesAdditional       = ref('')
@@ -391,6 +387,9 @@ async function fetchData() {
       socioeconomic_agenda: Array.isArray(pAny.socioeconomic_agenda) ? pAny.socioeconomic_agenda : [],
       csu_likha_goals: Array.isArray(pAny.csu_likha_goals) ? pAny.csu_likha_goals : [],
       sdg_goals: Array.isArray(pAny.sdg_goals ?? pAny.sdgGoals) ? (pAny.sdg_goals ?? pAny.sdgGoals) : [],
+      // XXX-K: Historical Planning Frameworks (2017-2022)
+      rdp2017_alignment: Array.isArray(pAny.rdp2017_alignment) ? pAny.rdp2017_alignment : [],
+      point_agenda_10: Array.isArray(pAny.point_agenda_10) ? pAny.point_agenda_10 : [],
       strategic_alignment: p.strategic_alignment || '',
       // NC: hydrate both array (canonical) and legacy textarea fields
       output_indicators_list: Array.isArray(p.output_indicators) ? p.output_indicators.map(String) : [],
@@ -418,6 +417,8 @@ async function fetchData() {
       revised_completion_date: pAny.revised_completion_date ? String(pAny.revised_completion_date).split('T')[0] : '',
       revised_project_duration: pAny.revised_project_duration || '',
       original_contract_duration: p.original_contract_duration || '',
+      // XXX-K: Implementation Period (free-text, R-222)
+      implementation_period: pAny.implementation_period || '',
       // Progress / financial
       physical_progress: p.physical_progress ?? null,
       financial_progress: p.financial_progress ?? null,
@@ -489,12 +490,8 @@ async function fetchData() {
       ? (p as any).signatories.map((r: any) => ({ name: r.name || '', position: r.position || '', date: r.date || '' }))
       : []
 
-    // KW-F4 / LB-A: load monitoring log rows with [[]] normalization
-    // Same filter as adaptProjectDetail — removes corrupt empty-array elements
-    const monNorm = (v: any): any[] => Array.isArray(v) ? v.filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)) : []
     // BBB-B: incidentLogRows hydration removed
-    riskRegisterRows.value = monNorm((p as any).risk_register)
-    escalationRows.value   = monNorm((p as any).escalation_records)
+    // XXX-M: riskRegisterRows/escalationRows hydration removed — Project Governance section removed
     // GGG-E: hydrate notes banking
     const nb = (p as any).project_notes_banking || {}
     notesAdditional.value   = nb.additionalNotes || ''
@@ -553,7 +550,7 @@ const tabCompletion = computed(() => ({
   // PQ-A: personnel gated on currentAssignedUsers (managed by CiPersonnelAccessCard)
   personnel: currentAssignedUsers.value.length > 0,
   documents: existingDocs.value.length > 0,
-  others: statusUpdateRows.value.length > 0 || readinessDocRows.value.length > 0 || signatoryRows.value.length > 0 || riskRegisterRows.value.length > 0 || escalationRows.value.length > 0,
+  others: statusUpdateRows.value.length > 0 || readinessDocRows.value.length > 0 || signatoryRows.value.length > 0,
 }))
 
 // JP-D: Required-field validity for navigation gating
@@ -672,6 +669,9 @@ async function handleSubmit() {
       socioeconomic_agenda: form.value.socioeconomic_agenda?.length ? form.value.socioeconomic_agenda : undefined,
       csu_likha_goals: form.value.csu_likha_goals?.length ? form.value.csu_likha_goals : undefined,
       sdg_goals: form.value.sdg_goals?.length ? form.value.sdg_goals : undefined,
+      // XXX-K: Historical Planning Frameworks (2017-2022)
+      rdp2017_alignment: form.value.rdp2017_alignment?.length ? form.value.rdp2017_alignment : undefined,
+      point_agenda_10: form.value.point_agenda_10?.length ? form.value.point_agenda_10 : undefined,
       // Other attributes
       project_engineer: form.value.project_engineer || undefined,
       project_manager: form.value.project_manager || undefined,
@@ -692,6 +692,8 @@ async function handleSubmit() {
       revised_completion_date: form.value.revised_completion_date || undefined,
       revised_project_duration: form.value.revised_project_duration || undefined,
       original_contract_duration: form.value.original_contract_duration || undefined,
+      // XXX-K: Implementation Period (free-text, R-222)
+      implementation_period: form.value.implementation_period || undefined,
       // Legacy supplementary (still persisted)
       contractor_id: form.value.contractor_id || undefined,
       contract_number: form.value.contract_number || undefined,
@@ -748,8 +750,7 @@ async function handleSubmit() {
       signatories: signatoryRows.value,
       // KW-F4: project monitoring logs
       // BBB-B: incident_log removed from save payload
-      risk_register: riskRegisterRows.value,
-      escalation_records: escalationRows.value,
+      // XXX-M: risk_register/escalation_records removed — Project Governance section removed
       // GGG-E: Others-tab data banking
       project_notes_banking: {
         additionalNotes: notesAdditional.value || undefined,

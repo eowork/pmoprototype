@@ -110,7 +110,7 @@ const cleanedCount = computed(() => rows.value.filter(s => s.trim()).length)
         :key="i"
         class="d-flex align-center ga-1 mb-1"
       >
-        <v-icon size="x-small" :color="color">{{ icon }}</v-icon>
+        <v-icon size="medium" :color="color">{{ icon }}</v-icon>
         <v-text-field
           v-model="rows[i]"
           :placeholder="placeholder(i)"
@@ -122,7 +122,7 @@ const cleanedCount = computed(() => rows.value.filter(s => s.trim()).length)
         />
         <v-btn
           icon="mdi-close"
-          size="x-small"
+          size="small"
           variant="text"
           color="error"
           @click="removeRow(i)"

@@ -161,6 +161,37 @@ const saving = ref(false)
 // Phase FJ: Prior-quarter prefill state
 const wasPrefilled = ref(false)
 const prefillSourceQ = ref<string | null>(null)
+
+// Phase AAAA-C: Cross-quarter fraction display fallback for the entry dialog.
+// Presentation-only — does NOT mutate entryForm's save-bound numerator/denominator fields.
+// Holds a fraction caption (e.g. "286/268") per quarter for target/actual when the
+// current record's own fraction columns are empty but a value is present.
+const dialogFractionFallback = ref<{ target: (string | null)[]; actual: (string | null)[] }>({
+  target: [null, null, null, null],
+  actual: [null, null, null, null],
+})
+
+async function refreshDialogFractionFallback(record: any) {
+  const fallback: { target: (string | null)[]; actual: (string | null)[] } = {
+    target: [null, null, null, null],
+    actual: [null, null, null, null],
+  }
+  if (record && selectedIndicator.value?.unit_type === 'PERCENTAGE') {
+    for (let i = 1; i <= 4; i++) {
+      const targetFractionText = parsePctInput(entryForm.value[`target_str_q${i}`]).fractionText
+      if (!targetFractionText) {
+        const str = await getFractionAwareStr(record, i, 'target')
+        fallback.target[i - 1] = parsePctInput(str).fractionText
+      }
+      const actualFractionText = parsePctInput(entryForm.value[`actual_str_q${i}`]).fractionText
+      if (!actualFractionText) {
+        const str = await getFractionAwareStr(record, i, 'actual')
+        fallback.actual[i - 1] = parsePctInput(str).fractionText
+      }
+    }
+  }
+  dialogFractionFallback.value = fallback
+}
 const PRIOR_QUARTER_MAP: Record<string, string | null> = {
   Q1: null, Q2: 'Q1', Q3: 'Q2', Q4: 'Q3',
 }
@@ -275,6 +306,65 @@ function buildPctStrFromRecord(num: any, den: any, accomplishment: any): string 
     return isNaN(v) ? '' : String(v)
   }
   return ''
+}
+
+// XXX-G: Reconstruct override fraction string input from stored fraction text or numeric override
+function buildOverridePctStr(fractionStr: any, totalValue: any): string {
+  if (typeof fractionStr === 'string' && fractionStr.includes('/')) {
+    return fractionStr
+  }
+  if (totalValue != null && totalValue !== '') {
+    const v = Number(totalValue)
+    return isNaN(v) ? '' : String(v)
+  }
+  return ''
+}
+
+// Phase AAAA-A: Cache of per-quarter indicator lists for the active pillar/fiscal year.
+// One fetch per quarter — cleared whenever pillar or fiscal year changes.
+const quarterIndicatorCache = ref<Map<string, any[]>>(new Map())
+
+async function getQuarterIndicatorList(quarter: string): Promise<any[]> {
+  if (quarterIndicatorCache.value.has(quarter)) {
+    return quarterIndicatorCache.value.get(quarter)!
+  }
+  if (!selectedFiscalYear.value || selectedFiscalYear.value < 2020) return []
+  try {
+    const res = await api.get<any[]>(
+      `/api/university-operations/indicators?pillar_type=${activePillar.value}&fiscal_year=${selectedFiscalYear.value}&quarter=${quarter}`
+    )
+    const list = Array.isArray(res) ? res : (res as any)?.data || []
+    quarterIndicatorCache.value.set(quarter, list)
+    return list
+  } catch (err) {
+    console.error('[Physical] getQuarterIndicatorList failed:', err)
+    return []
+  }
+}
+
+// Phase AAAA-B: Cross-quarter fraction-aware fallback. If the given record's own
+// numerator/denominator for quarter `quarterIndex` are missing but its target/actual
+// value is present, fall back to the indicator's own reported_quarter=QN record's
+// fraction columns to reconstruct an "N/D" string.
+async function getFractionAwareStr(record: any, quarterIndex: number, kind: 'target' | 'actual'): Promise<string> {
+  const qKey = `q${quarterIndex}`
+  const numField = kind === 'target' ? `target_numerator_${qKey}` : `numerator_${qKey}`
+  const denField = kind === 'target' ? `target_denominator_${qKey}` : `denominator_${qKey}`
+  const valField = kind === 'target' ? `target_${qKey}` : `accomplishment_${qKey}`
+
+  if (record?.[numField] != null && record?.[denField] != null) {
+    return buildPctStrFromRecord(record[numField], record[denField], record[valField])
+  }
+  if (record?.[valField] === null || record?.[valField] === undefined) {
+    return ''
+  }
+
+  const list = await getQuarterIndicatorList(`Q${quarterIndex}`)
+  const match = list.find((r: any) => r.pillar_indicator_id === record?.pillar_indicator_id)
+  if (match?.[numField] != null && match?.[denField] != null) {
+    return buildPctStrFromRecord(match[numField], match[denField], record[valField])
+  }
+  return buildPctStrFromRecord(record?.[numField], record?.[denField], record?.[valField])
 }
 
 // Outcome indicators
@@ -524,15 +614,65 @@ function getPctCellDisplay(
     return { primary: num.toLocaleString(undefined, { maximumFractionDigits: 2 }) + suffix, fraction: null }
   }
   const primary = `${num.toFixed(2)}%`
-  const numerator = record?.[`numerator_${qKey}`]
-  const denominator = record?.[`denominator_${qKey}`]
+  // XXX-D: branch on fieldPrefix so 'target' reads target_numerator/denominator_qN
+  // (new XXX-A columns) and 'accomplishment' reads the existing numerator/denominator_qN
+  // (VVV fix, unchanged) — prevents the actual fraction from bleeding into the target cell
+  const numerator = fieldPrefix === 'target' ? record?.[`target_numerator_${qKey}`] : record?.[`numerator_${qKey}`]
+  const denominator = fieldPrefix === 'target' ? record?.[`target_denominator_${qKey}`] : record?.[`denominator_${qKey}`]
   const n = numerator != null ? Number(numerator) : null
   const d = denominator != null ? Number(denominator) : null
-  const fraction = (n !== null && d !== null && !isNaN(n) && !isNaN(d) && d > 0)
+  let fraction = (n !== null && d !== null && !isNaN(n) && !isNaN(d) && d > 0)
     ? `${n}/${d}`
     : null
+
+  // Phase AAAA-D: fall back to the indicator's own reported_quarter=QN record's
+  // fraction columns when this snapshot's numerator/denominator are missing
+  if (fraction === null && record?.pillar_indicator_id) {
+    fraction = fractionOverlay.value[`${record.pillar_indicator_id}|${qKey}|${fieldPrefix}`] ?? null
+  }
+
   return { primary, fraction }
 }
+
+// Phase AAAA-D: Cross-quarter fraction overlay for the read-only indicator tables.
+// Maps "<pillarIndicatorId>|<qKey>|<fieldPrefix>" -> "N/D" for cells whose own
+// numerator/denominator are missing for that quarter but a value is present,
+// falling back to the indicator's own reported_quarter=QN record.
+const fractionOverlay = ref<Record<string, string>>({})
+
+async function buildFractionOverlay() {
+  const overlay: Record<string, string> = {}
+  for (const record of pillarIndicators.value) {
+    const taxonomyId = record?.pillar_indicator_id
+    if (!taxonomyId) continue
+    const indicator = pillarTaxonomy.value.find(t => t.id === taxonomyId)
+    if (indicator?.unit_type !== 'PERCENTAGE') continue
+
+    for (let i = 1; i <= 4; i++) {
+      const qKey = `q${i}`
+      for (const fieldPrefix of ['target', 'accomplishment'] as const) {
+        const numField = fieldPrefix === 'target' ? `target_numerator_${qKey}` : `numerator_${qKey}`
+        const denField = fieldPrefix === 'target' ? `target_denominator_${qKey}` : `denominator_${qKey}`
+        const valField = `${fieldPrefix}_${qKey}`
+
+        if (record[numField] != null && record[denField] != null) continue
+        if (record[valField] === null || record[valField] === undefined) continue
+
+        const list = await getQuarterIndicatorList(`Q${i}`)
+        const match = list.find((r: any) => r.pillar_indicator_id === taxonomyId)
+        if (match?.[numField] != null && match?.[denField] != null && Number(match[denField]) > 0) {
+          overlay[`${taxonomyId}|${qKey}|${fieldPrefix}`] = `${Number(match[numField])}/${Number(match[denField])}`
+        }
+      }
+    }
+  }
+  fractionOverlay.value = overlay
+}
+
+// Phase AAAA-D: Rebuild the overlay whenever the current quarter's indicator data changes
+watch(pillarIndicators, () => {
+  buildFractionOverlay()
+})
 
 // Format percentage (used in indicator table rows and entry dialog)
 function formatPercent(val: number | null | undefined): string {
@@ -559,6 +699,7 @@ function getVarianceColor(variance: number | null | undefined): string {
 const columnVisibility = reactive({
   score: false,
   remarks: false,
+  notes: false, // XXX-F: per-quarter Notes (remarks_q1-4)
   catch_up_plans: false,
   facilitating_factors: false,
   ways_forward: false,
@@ -567,7 +708,7 @@ const columnVisibility = reactive({
 
 // Phase HK: Stacked panel visibility guard (Directive 138)
 const anyNarrativeVisible = computed(() =>
-  columnVisibility.score || columnVisibility.remarks || columnVisibility.catch_up_plans || columnVisibility.facilitating_factors || columnVisibility.ways_forward || columnVisibility.mov
+  columnVisibility.score || columnVisibility.remarks || columnVisibility.notes || columnVisibility.catch_up_plans || columnVisibility.facilitating_factors || columnVisibility.ways_forward || columnVisibility.mov
 )
 
 // Phase HK: Colspan = 13 base + edit col (Directive 136)
@@ -782,6 +923,9 @@ async function openEntryDialogDirect(indicator: any) {
       // Phase HA: Total overrides (Directive 371)
       override_total_target: existingData.override_total_target ?? null,
       override_total_actual: existingData.override_total_actual ?? null,
+      // XXX-G: Override fraction string inputs for PERCENTAGE indicators
+      override_total_target_str: buildOverridePctStr(existingData.override_total_target_fraction, existingData.override_total_target),
+      override_total_actual_str: buildOverridePctStr(existingData.override_total_actual_fraction, existingData.override_total_actual),
       // Phase TTT/UUU: N/D stored for PERCENTAGE fraction auditability
       numerator_q1: existingData.numerator_q1 ?? null,
       denominator_q1: existingData.denominator_q1 ?? null,
@@ -791,15 +935,30 @@ async function openEntryDialogDirect(indicator: any) {
       denominator_q3: existingData.denominator_q3 ?? null,
       numerator_q4: existingData.numerator_q4 ?? null,
       denominator_q4: existingData.denominator_q4 ?? null,
+      // XXX-E: Target N/D stored for PERCENTAGE fraction auditability (mirrors numerator_qN above)
+      target_numerator_q1: existingData.target_numerator_q1 ?? null,
+      target_denominator_q1: existingData.target_denominator_q1 ?? null,
+      target_numerator_q2: existingData.target_numerator_q2 ?? null,
+      target_denominator_q2: existingData.target_denominator_q2 ?? null,
+      target_numerator_q3: existingData.target_numerator_q3 ?? null,
+      target_denominator_q3: existingData.target_denominator_q3 ?? null,
+      target_numerator_q4: existingData.target_numerator_q4 ?? null,
+      target_denominator_q4: existingData.target_denominator_q4 ?? null,
       // Phase UUU: Smart string inputs for PERCENTAGE dual-entry (Target + Actual)
-      target_str_q1: existingData.target_q1 != null ? String(Number(existingData.target_q1)) : '',
-      target_str_q2: existingData.target_q2 != null ? String(Number(existingData.target_q2)) : '',
-      target_str_q3: existingData.target_q3 != null ? String(Number(existingData.target_q3)) : '',
-      target_str_q4: existingData.target_q4 != null ? String(Number(existingData.target_q4)) : '',
+      // XXX-E: target_str_qN reconstructs from target_numerator/denominator_qN when present (mirrors actual_str_qN)
+      target_str_q1: buildPctStrFromRecord(existingData.target_numerator_q1, existingData.target_denominator_q1, existingData.target_q1),
+      target_str_q2: buildPctStrFromRecord(existingData.target_numerator_q2, existingData.target_denominator_q2, existingData.target_q2),
+      target_str_q3: buildPctStrFromRecord(existingData.target_numerator_q3, existingData.target_denominator_q3, existingData.target_q3),
+      target_str_q4: buildPctStrFromRecord(existingData.target_numerator_q4, existingData.target_denominator_q4, existingData.target_q4),
       actual_str_q1: buildPctStrFromRecord(existingData.numerator_q1, existingData.denominator_q1, existingData.accomplishment_q1),
       actual_str_q2: buildPctStrFromRecord(existingData.numerator_q2, existingData.denominator_q2, existingData.accomplishment_q2),
       actual_str_q3: buildPctStrFromRecord(existingData.numerator_q3, existingData.denominator_q3, existingData.accomplishment_q3),
       actual_str_q4: buildPctStrFromRecord(existingData.numerator_q4, existingData.denominator_q4, existingData.accomplishment_q4),
+      // XXX-F: Per-quarter notes (optional, no calculation impact)
+      remarks_str_q1: existingData.remarks_q1 || '',
+      remarks_str_q2: existingData.remarks_q2 || '',
+      remarks_str_q3: existingData.remarks_q3 || '',
+      remarks_str_q4: existingData.remarks_q4 || '',
       _existingId: existingData.id || null,
     }
   } else {
@@ -852,6 +1011,9 @@ async function openEntryDialogDirect(indicator: any) {
         // Phase HA: Do not inherit prior quarter's total overrides (Directive 371)
         override_total_target: null,
         override_total_actual: null,
+        // XXX-G: Override fraction string inputs not inherited (mirrors override_total_target/actual)
+        override_total_target_str: '',
+        override_total_actual_str: '',
         // Phase UUU: Inherit N/D from prior quarter (prefill starting point, user edits freely)
         numerator_q1: priorData.numerator_q1 ?? null,
         denominator_q1: priorData.denominator_q1 ?? null,
@@ -861,15 +1023,30 @@ async function openEntryDialogDirect(indicator: any) {
         denominator_q3: priorData.denominator_q3 ?? null,
         numerator_q4: priorData.numerator_q4 ?? null,
         denominator_q4: priorData.denominator_q4 ?? null,
+        // XXX-E: Inherit Target N/D from prior quarter (prefill starting point, user edits freely)
+        target_numerator_q1: priorData.target_numerator_q1 ?? null,
+        target_denominator_q1: priorData.target_denominator_q1 ?? null,
+        target_numerator_q2: priorData.target_numerator_q2 ?? null,
+        target_denominator_q2: priorData.target_denominator_q2 ?? null,
+        target_numerator_q3: priorData.target_numerator_q3 ?? null,
+        target_denominator_q3: priorData.target_denominator_q3 ?? null,
+        target_numerator_q4: priorData.target_numerator_q4 ?? null,
+        target_denominator_q4: priorData.target_denominator_q4 ?? null,
         // Phase UUU: Smart string inputs — reconstruct from prior data
-        target_str_q1: priorData.target_q1 != null ? String(Number(priorData.target_q1)) : '',
-        target_str_q2: priorData.target_q2 != null ? String(Number(priorData.target_q2)) : '',
-        target_str_q3: priorData.target_q3 != null ? String(Number(priorData.target_q3)) : '',
-        target_str_q4: priorData.target_q4 != null ? String(Number(priorData.target_q4)) : '',
+        // XXX-E: target_str_qN reconstructs from target_numerator/denominator_qN when present
+        target_str_q1: buildPctStrFromRecord(priorData.target_numerator_q1, priorData.target_denominator_q1, priorData.target_q1),
+        target_str_q2: buildPctStrFromRecord(priorData.target_numerator_q2, priorData.target_denominator_q2, priorData.target_q2),
+        target_str_q3: buildPctStrFromRecord(priorData.target_numerator_q3, priorData.target_denominator_q3, priorData.target_q3),
+        target_str_q4: buildPctStrFromRecord(priorData.target_numerator_q4, priorData.target_denominator_q4, priorData.target_q4),
         actual_str_q1: buildPctStrFromRecord(priorData.numerator_q1, priorData.denominator_q1, priorData.accomplishment_q1),
         actual_str_q2: buildPctStrFromRecord(priorData.numerator_q2, priorData.denominator_q2, priorData.accomplishment_q2),
         actual_str_q3: buildPctStrFromRecord(priorData.numerator_q3, priorData.denominator_q3, priorData.accomplishment_q3),
         actual_str_q4: buildPctStrFromRecord(priorData.numerator_q4, priorData.denominator_q4, priorData.accomplishment_q4),
+        // XXX-F: Inherit per-quarter notes from prior quarter (prefill starting point, user edits freely)
+        remarks_str_q1: priorData.remarks_q1 || '',
+        remarks_str_q2: priorData.remarks_q2 || '',
+        remarks_str_q3: priorData.remarks_q3 || '',
+        remarks_str_q4: priorData.remarks_q4 || '',
         _existingId: preservedId,
       }
       wasPrefilled.value = true
@@ -893,14 +1070,24 @@ async function openEntryDialogDirect(indicator: any) {
         // Phase HA: Total overrides default to null (Directive 371)
         override_total_target: null,
         override_total_actual: null,
+        // XXX-G: Override fraction string inputs default empty
+        override_total_target_str: '',
+        override_total_actual_str: '',
         // Phase TTT/UUU: Fraction fields default to null
         numerator_q1: null, denominator_q1: null,
         numerator_q2: null, denominator_q2: null,
         numerator_q3: null, denominator_q3: null,
         numerator_q4: null, denominator_q4: null,
+        // XXX-E: Target fraction fields default to null
+        target_numerator_q1: null, target_denominator_q1: null,
+        target_numerator_q2: null, target_denominator_q2: null,
+        target_numerator_q3: null, target_denominator_q3: null,
+        target_numerator_q4: null, target_denominator_q4: null,
         // Phase UUU: Smart string inputs default empty
         target_str_q1: '', target_str_q2: '', target_str_q3: '', target_str_q4: '',
         actual_str_q1: '', actual_str_q2: '', actual_str_q3: '', actual_str_q4: '',
+        // XXX-F: Per-quarter notes default empty
+        remarks_str_q1: '', remarks_str_q2: '', remarks_str_q3: '', remarks_str_q4: '',
         _existingId: preservedId,
       }
     }
@@ -913,6 +1100,9 @@ async function openEntryDialogDirect(indicator: any) {
   movValue.value = movParsed.value
   movFileMetadata.value = movParsed.metadata
   entryDialog.value = true
+
+  // Phase AAAA-C: Compute cross-quarter fraction display fallbacks (presentation-only)
+  refreshDialogFractionFallback(existingData)
 }
 
 /**
@@ -942,6 +1132,16 @@ function sanitizeNumericPayload(data: any): any {
     'denominator_q3',
     'numerator_q4',
     'denominator_q4',
+    // Phase XXX: target-fraction columns (XXX-C) — excludes remarks_q1-4 and
+    // override_total_*_fraction (text fields, must not be coerced to numeric)
+    'target_numerator_q1',
+    'target_denominator_q1',
+    'target_numerator_q2',
+    'target_denominator_q2',
+    'target_numerator_q3',
+    'target_denominator_q3',
+    'target_numerator_q4',
+    'target_denominator_q4',
   ]
 
   const sanitized = { ...data }
@@ -994,6 +1194,9 @@ async function saveQuarterlyData() {
       { str: f.target_str_q3, label: 'Target Q3' }, { str: f.target_str_q4, label: 'Target Q4' },
       { str: f.actual_str_q1, label: 'Actual Q1' }, { str: f.actual_str_q2, label: 'Actual Q2' },
       { str: f.actual_str_q3, label: 'Actual Q3' }, { str: f.actual_str_q4, label: 'Actual Q4' },
+      // XXX-G: Validate override fraction string inputs
+      { str: f.override_total_target_str, label: 'Override Total Target' },
+      { str: f.override_total_actual_str, label: 'Override Total Actual' },
     ]
     for (const { str, label } of checks) {
       if (str && str.trim() !== '') {
@@ -1035,6 +1238,9 @@ async function saveQuarterlyData() {
     const aP2 = isPctType ? parsePctInput(f.actual_str_q2) : null
     const aP3 = isPctType ? parsePctInput(f.actual_str_q3) : null
     const aP4 = isPctType ? parsePctInput(f.actual_str_q4) : null
+    // XXX-G: Parse override fraction string inputs for PERCENTAGE indicators
+    const oTP = isPctType ? parsePctInput(f.override_total_target_str) : null
+    const oAP = isPctType ? parsePctInput(f.override_total_actual_str) : null
 
     const quarterPayload: any = {
       pillar_indicator_id: f.pillar_indicator_id,
@@ -1060,8 +1266,11 @@ async function saveQuarterlyData() {
       override_rate: f.override_rate,
       override_variance: f.override_variance,
       // Phase HA: Total overrides (Directive 373)
-      override_total_target: f.override_total_target,
-      override_total_actual: f.override_total_actual,
+      // XXX-G: PERCENTAGE indicators derive override totals from the fraction/% string input
+      override_total_target: isPctType ? (oTP?.computed ?? null) : f.override_total_target,
+      override_total_actual: isPctType ? (oAP?.computed ?? null) : f.override_total_actual,
+      override_total_target_fraction: isPctType ? (oTP?.fractionText ?? null) : null,
+      override_total_actual_fraction: isPctType ? (oAP?.fractionText ?? null) : null,
       // Phase TTT/UUU: N/D from Actual parse (null for direct % entry, populated for fraction entry)
       numerator_q1: isPctType ? (aP1?.numerator ?? null) : null,
       denominator_q1: isPctType ? (aP1?.denominator ?? null) : null,
@@ -1071,6 +1280,20 @@ async function saveQuarterlyData() {
       denominator_q3: isPctType ? (aP3?.denominator ?? null) : null,
       numerator_q4: isPctType ? (aP4?.numerator ?? null) : null,
       denominator_q4: isPctType ? (aP4?.denominator ?? null) : null,
+      // XXX-E: N/D from Target parse (mirrors Actual numerator/denominator above)
+      target_numerator_q1: isPctType ? (tP1?.numerator ?? null) : null,
+      target_denominator_q1: isPctType ? (tP1?.denominator ?? null) : null,
+      target_numerator_q2: isPctType ? (tP2?.numerator ?? null) : null,
+      target_denominator_q2: isPctType ? (tP2?.denominator ?? null) : null,
+      target_numerator_q3: isPctType ? (tP3?.numerator ?? null) : null,
+      target_denominator_q3: isPctType ? (tP3?.denominator ?? null) : null,
+      target_numerator_q4: isPctType ? (tP4?.numerator ?? null) : null,
+      target_denominator_q4: isPctType ? (tP4?.denominator ?? null) : null,
+      // XXX-F: Per-quarter notes (optional, no calculation impact)
+      remarks_q1: f.remarks_str_q1?.trim() || null,
+      remarks_q2: f.remarks_str_q2?.trim() || null,
+      remarks_q3: f.remarks_str_q3?.trim() || null,
+      remarks_q4: f.remarks_str_q4?.trim() || null,
     }
 
     // Phase DV-A: Sanitize empty strings to null for numeric fields
@@ -1197,34 +1420,84 @@ const entryBannerText = computed(() => {
 })
 
 // Phase FY-1: DBM BAR1 standard — ALL indicator types use SUM (Directive 211/212)
+// Phase ZZZ-A: PERCENTAGE indicators derive totals/overrides live from the `_str`
+// fraction inputs (mirroring the save-time parsing in saveQuarterlyData), so the
+// Variance/Rate preview updates immediately while editing — including Override
+// Total Target/Actual.
 const computedPreview = computed(() => {
   const f = entryForm.value
-  const targets = [f.target_q1, f.target_q2, f.target_q3, f.target_q4]
-    .filter(v => v !== null && v !== undefined && v !== '')
-  const actuals = [f.accomplishment_q1, f.accomplishment_q2, f.accomplishment_q3, f.accomplishment_q4]
-    .filter(v => v !== null && v !== undefined && v !== '')
+  const isPctType = selectedIndicator.value?.unit_type === 'PERCENTAGE'
 
-  const totalTarget = targets.length > 0
-    ? targets.reduce((a, b) => Number(a) + Number(b), 0)
-    : null
-  const totalActual = actuals.length > 0
-    ? actuals.reduce((a, b) => Number(a) + Number(b), 0)
-    : null
+  let totalTarget: number | null
+  let totalActual: number | null
+  let overrideTarget: number | null
+  let overrideActual: number | null
+  // Phase AAAC-C: fraction-aggregate caption strings (ΣN/ΣD), parity with backend AAAC-A
+  let totalTargetFraction: string | null = null
+  let totalActualFraction: string | null = null
 
-  // Phase HA: Apply override totals as effective base for variance/rate (Directive 374)
-  const effectiveTarget = (f.override_total_target != null && f.override_total_target !== '')
-    ? Number(f.override_total_target)
-    : totalTarget
-  const effectiveActual = (f.override_total_actual != null && f.override_total_actual !== '')
-    ? Number(f.override_total_actual)
-    : totalActual
+  if (isPctType) {
+    // Phase AAAC-C: mirror backend AAAC-A — when every filled quarter has a valid
+    // numerator/denominator pair, total = ΣN/ΣD × 100; otherwise legacy sum-of-%.
+    const sideTotal = (strs: string[]): { total: number | null; fraction: string | null } => {
+      const parsed = strs.map(s => parsePctInput(s))
+      const filled = parsed.filter(p => p.computed !== null)
+      const legacySum = filled.length > 0
+        ? filled.reduce((a, p) => a + (p.computed as number), 0)
+        : null
+      let sumNum = 0
+      let sumDen = 0
+      let allHaveFraction = filled.length > 0
+      for (const p of parsed) {
+        if (p.computed === null) continue
+        if (p.numerator === null || p.denominator === null || p.denominator <= 0) {
+          allHaveFraction = false
+          break
+        }
+        sumNum += p.numerator
+        sumDen += p.denominator
+      }
+      if (allHaveFraction && sumDen > 0) {
+        return { total: parseFloat(((sumNum / sumDen) * 100).toFixed(4)), fraction: `${sumNum}/${sumDen}` }
+      }
+      return { total: legacySum, fraction: null }
+    }
+
+    const tSide = sideTotal([f.target_str_q1, f.target_str_q2, f.target_str_q3, f.target_str_q4])
+    const aSide = sideTotal([f.actual_str_q1, f.actual_str_q2, f.actual_str_q3, f.actual_str_q4])
+    totalTarget = tSide.total
+    totalActual = aSide.total
+    totalTargetFraction = tSide.fraction
+    totalActualFraction = aSide.fraction
+    overrideTarget = parsePctInput(f.override_total_target_str).computed
+    overrideActual = parsePctInput(f.override_total_actual_str).computed
+  } else {
+    const targets = [f.target_q1, f.target_q2, f.target_q3, f.target_q4]
+      .filter(v => v !== null && v !== undefined && v !== '')
+    const actuals = [f.accomplishment_q1, f.accomplishment_q2, f.accomplishment_q3, f.accomplishment_q4]
+      .filter(v => v !== null && v !== undefined && v !== '')
+
+    totalTarget = targets.length > 0 ? targets.reduce((a, b) => Number(a) + Number(b), 0) : null
+    totalActual = actuals.length > 0 ? actuals.reduce((a, b) => Number(a) + Number(b), 0) : null
+
+    // Phase HA: Apply override totals as effective base for variance/rate (Directive 374)
+    overrideTarget = (f.override_total_target != null && f.override_total_target !== '')
+      ? Number(f.override_total_target)
+      : null
+    overrideActual = (f.override_total_actual != null && f.override_total_actual !== '')
+      ? Number(f.override_total_actual)
+      : null
+  }
+
+  const effectiveTarget = overrideTarget ?? totalTarget
+  const effectiveActual = overrideActual ?? totalActual
 
   const variance = effectiveTarget !== null && effectiveActual !== null ? effectiveActual - effectiveTarget : null
   const rate = effectiveTarget !== null && effectiveTarget !== 0 && effectiveActual !== null
     ? (effectiveActual / effectiveTarget) * 100
     : null
 
-  return { totalTarget, totalActual, variance, rate }
+  return { totalTarget, totalActual, totalTargetFraction, totalActualFraction, variance, rate }
 })
 
 // Phase EM-C: Submit quarterly report for the current FY+quarter (single API call)
@@ -1318,6 +1591,8 @@ watch(activePillar, async () => {
     console.warn('[Physical] Skipping fetch - fiscal year not initialized')
     return
   }
+  // Phase AAAA-A: Pillar changed — cached per-quarter indicator lists are stale
+  quarterIndicatorCache.value.clear()
   loading.value = true
   await fetchTaxonomy()
   await fetchIndicatorData()
@@ -1331,6 +1606,8 @@ watch(selectedFiscalYear, async (newYear) => {
   // Phase EP-A: Skip during onMounted initialization to prevent race condition
   if (isInitializing) return
   if (!newYear || newYear < 2020) return
+  // Phase AAAA-A: Fiscal year changed — cached per-quarter indicator lists are stale
+  quarterIndicatorCache.value.clear()
   // Phase DI-B: Sync year changes to URL query
   router.replace({
     query: { ...route.query, year: newYear.toString() }
@@ -1477,6 +1754,9 @@ onMounted(async () => {
           </v-list-item>
           <v-list-item>
             <v-checkbox v-model="columnVisibility.remarks" label="Remarks" density="compact" hide-details color="primary" />
+          </v-list-item>
+          <v-list-item>
+            <v-checkbox v-model="columnVisibility.notes" label="Notes (per-quarter)" density="compact" hide-details color="primary" />
           </v-list-item>
           <v-list-subheader class="text-caption">Narrative Fields (APR/UPR)</v-list-subheader>
           <v-list-item>
@@ -1833,14 +2113,23 @@ onMounted(async () => {
                   <!-- Phase GZ: Total Target + Total Actual (Directive 361) -->
                   <td class="text-center">
                     {{ formatNumber(getIndicatorData(indicator.id)?.total_target) }}{{ getUnitConfig(indicator.unit_type).suffix }}
+                    <!-- XXX-G: Override target fraction caption -->
+                    <div v-if="getIndicatorData(indicator.id)?.override_total_target_fraction" class="text-caption text-grey">{{ getIndicatorData(indicator.id)?.override_total_target_fraction }}</div>
+                    <!-- AAAC-B: fraction-aggregate caption (ΣN/ΣD) when no override fraction set -->
+                    <div v-else-if="getIndicatorData(indicator.id)?.total_target_fraction" class="text-caption text-grey">{{ getIndicatorData(indicator.id)?.total_target_fraction }}</div>
                   </td>
                   <td class="text-center text-success">
                     {{ formatNumber(getIndicatorData(indicator.id)?.total_accomplishment) }}{{ getUnitConfig(indicator.unit_type).suffix }}
+                    <!-- XXX-G: Override actual fraction caption -->
+                    <div v-if="getIndicatorData(indicator.id)?.override_total_actual_fraction" class="text-caption text-grey">{{ getIndicatorData(indicator.id)?.override_total_actual_fraction }}</div>
+                    <!-- AAAC-B: fraction-aggregate caption (ΣN/ΣD) when no override fraction set -->
+                    <div v-else-if="getIndicatorData(indicator.id)?.total_actual_fraction" class="text-caption text-grey">{{ getIndicatorData(indicator.id)?.total_actual_fraction }}</div>
                   </td>
                   <!-- Phase GZ: Annual Variance + Rate (Directives 360, 363) -->
                   <td class="text-right">
                     <v-chip
                       size="x-small"
+                      class="metric-chip"
                       :color="getVarianceColor(getIndicatorData(indicator.id)?.variance)"
                       variant="tonal"
                     >
@@ -1850,6 +2139,7 @@ onMounted(async () => {
                   <td class="text-right">
                     <v-chip
                       size="x-small"
+                      class="metric-chip"
                       :color="getRateColor(getIndicatorData(indicator.id)?.accomplishment_rate)"
                       variant="tonal"
                     >
@@ -1885,6 +2175,17 @@ onMounted(async () => {
                     <div v-if="columnVisibility.remarks" class="narrative-stacked-item">
                       <span class="narrative-stacked-label">Remarks:</span>
                       <span v-if="getIndicatorData(indicator.id)?.remarks" class="narrative-stacked-text">{{ getIndicatorData(indicator.id)?.remarks }}</span>
+                      <span v-else class="text-grey text-caption">—</span>
+                    </div>
+                    <!-- XXX-F: Per-quarter Notes (Issue A) -->
+                    <div v-if="columnVisibility.notes" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">Notes:</span>
+                      <span v-if="getIndicatorData(indicator.id)?.remarks_q1 || getIndicatorData(indicator.id)?.remarks_q2 || getIndicatorData(indicator.id)?.remarks_q3 || getIndicatorData(indicator.id)?.remarks_q4" class="narrative-stacked-text">
+                        <template v-if="getIndicatorData(indicator.id)?.remarks_q1">Q1: {{ getIndicatorData(indicator.id)?.remarks_q1 }}<br></template>
+                        <template v-if="getIndicatorData(indicator.id)?.remarks_q2">Q2: {{ getIndicatorData(indicator.id)?.remarks_q2 }}<br></template>
+                        <template v-if="getIndicatorData(indicator.id)?.remarks_q3">Q3: {{ getIndicatorData(indicator.id)?.remarks_q3 }}<br></template>
+                        <template v-if="getIndicatorData(indicator.id)?.remarks_q4">Q4: {{ getIndicatorData(indicator.id)?.remarks_q4 }}</template>
+                      </span>
                       <span v-else class="text-grey text-caption">—</span>
                     </div>
                     <div v-if="columnVisibility.catch_up_plans" class="narrative-stacked-item">
@@ -2039,14 +2340,23 @@ onMounted(async () => {
                   <!-- Phase GZ: Total Target + Total Actual (Directive 361) -->
                   <td class="text-center">
                     {{ formatNumber(getIndicatorData(indicator.id)?.total_target) }}{{ getUnitConfig(indicator.unit_type).suffix }}
+                    <!-- XXX-G: Override target fraction caption -->
+                    <div v-if="getIndicatorData(indicator.id)?.override_total_target_fraction" class="text-caption text-grey">{{ getIndicatorData(indicator.id)?.override_total_target_fraction }}</div>
+                    <!-- AAAC-B: fraction-aggregate caption (ΣN/ΣD) when no override fraction set -->
+                    <div v-else-if="getIndicatorData(indicator.id)?.total_target_fraction" class="text-caption text-grey">{{ getIndicatorData(indicator.id)?.total_target_fraction }}</div>
                   </td>
                   <td class="text-center text-success">
                     {{ formatNumber(getIndicatorData(indicator.id)?.total_accomplishment) }}{{ getUnitConfig(indicator.unit_type).suffix }}
+                    <!-- XXX-G: Override actual fraction caption -->
+                    <div v-if="getIndicatorData(indicator.id)?.override_total_actual_fraction" class="text-caption text-grey">{{ getIndicatorData(indicator.id)?.override_total_actual_fraction }}</div>
+                    <!-- AAAC-B: fraction-aggregate caption (ΣN/ΣD) when no override fraction set -->
+                    <div v-else-if="getIndicatorData(indicator.id)?.total_actual_fraction" class="text-caption text-grey">{{ getIndicatorData(indicator.id)?.total_actual_fraction }}</div>
                   </td>
                   <!-- Phase GZ: Annual Variance + Rate (Directives 360, 363) -->
                   <td class="text-right">
                     <v-chip
                       size="x-small"
+                      class="metric-chip"
                       :color="getVarianceColor(getIndicatorData(indicator.id)?.variance)"
                       variant="tonal"
                     >
@@ -2056,6 +2366,7 @@ onMounted(async () => {
                   <td class="text-right">
                     <v-chip
                       size="x-small"
+                      class="metric-chip"
                       :color="getRateColor(getIndicatorData(indicator.id)?.accomplishment_rate)"
                       variant="tonal"
                     >
@@ -2091,6 +2402,17 @@ onMounted(async () => {
                     <div v-if="columnVisibility.remarks" class="narrative-stacked-item">
                       <span class="narrative-stacked-label">Remarks:</span>
                       <span v-if="getIndicatorData(indicator.id)?.remarks" class="narrative-stacked-text">{{ getIndicatorData(indicator.id)?.remarks }}</span>
+                      <span v-else class="text-grey text-caption">—</span>
+                    </div>
+                    <!-- XXX-F: Per-quarter Notes (Issue A) -->
+                    <div v-if="columnVisibility.notes" class="narrative-stacked-item">
+                      <span class="narrative-stacked-label">Notes:</span>
+                      <span v-if="getIndicatorData(indicator.id)?.remarks_q1 || getIndicatorData(indicator.id)?.remarks_q2 || getIndicatorData(indicator.id)?.remarks_q3 || getIndicatorData(indicator.id)?.remarks_q4" class="narrative-stacked-text">
+                        <template v-if="getIndicatorData(indicator.id)?.remarks_q1">Q1: {{ getIndicatorData(indicator.id)?.remarks_q1 }}<br></template>
+                        <template v-if="getIndicatorData(indicator.id)?.remarks_q2">Q2: {{ getIndicatorData(indicator.id)?.remarks_q2 }}<br></template>
+                        <template v-if="getIndicatorData(indicator.id)?.remarks_q3">Q3: {{ getIndicatorData(indicator.id)?.remarks_q3 }}<br></template>
+                        <template v-if="getIndicatorData(indicator.id)?.remarks_q4">Q4: {{ getIndicatorData(indicator.id)?.remarks_q4 }}</template>
+                      </span>
                       <span v-else class="text-grey text-caption">—</span>
                     </div>
                     <div v-if="columnVisibility.catch_up_plans" class="narrative-stacked-item">
@@ -2155,7 +2477,7 @@ onMounted(async () => {
 
     <!-- Phase DU-A: Quarterly Data Entry Dialog — Vertical Quarter-Row Table -->
     <!-- Phase HD: persistent removed — enables outside-click + ESC close (Directive 384) -->
-    <v-dialog v-model="entryDialog" max-width="700">
+    <v-dialog v-model="entryDialog" max-width="900">
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon start>mdi-table-edit</v-icon>
@@ -2212,6 +2534,8 @@ onMounted(async () => {
 
           <!-- Phase UUU: Vertical tabular data entry — Quarter / Target / Actual / Acc. % -->
           <!-- Score column removed: fraction is now native to Target/Actual dual-entry inputs -->
+          <!-- Phase YYY-A: overflow-x wrapper so widened columns scroll on narrow viewports -->
+          <div style="overflow-x: auto">
           <v-table density="compact" class="mb-4">
             <thead>
               <tr class="bg-primary text-white">
@@ -2219,6 +2543,7 @@ onMounted(async () => {
                 <th class="text-center">Target</th>
                 <th class="text-center">Actual</th>
                 <th class="text-center acc-pct-col">Acc. %</th>
+                <th class="text-center">Notes (Optional)</th>
               </tr>
             </thead>
             <tbody>
@@ -2228,7 +2553,7 @@ onMounted(async () => {
                   <v-chip size="small" color="blue" variant="tonal" class="font-weight-bold">Q1</v-chip>
                 </td>
                 <!-- Target Q1 -->
-                <td class="du-input-cell">
+                <td class="du-input-cell du-input-cell--target">
                   <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
                     <v-text-field v-model.number="entryForm.target_q1" type="number" step="0.01" min="0"
                       density="compact" variant="outlined" hide-details />
@@ -2240,12 +2565,13 @@ onMounted(async () => {
                     <div v-if="parsePctInput(entryForm.target_str_q1).computed !== null" class="text-caption mt-1">
                       <span class="font-weight-medium">{{ parsePctInput(entryForm.target_str_q1).display }}</span>
                       <span v-if="parsePctInput(entryForm.target_str_q1).fractionText" class="text-grey-darken-1 ml-1">{{ parsePctInput(entryForm.target_str_q1).fractionText }}</span>
+                      <span v-else-if="dialogFractionFallback.target[0]" class="text-grey-darken-1 ml-1 font-italic">({{ dialogFractionFallback.target[0] }})</span>
                     </div>
                     <div v-if="entryForm.target_str_q1 && parsePctInput(entryForm.target_str_q1).error" class="text-caption text-error mt-1">{{ parsePctInput(entryForm.target_str_q1).error }}</div>
                   </template>
                 </td>
                 <!-- Actual Q1 -->
-                <td class="du-input-cell">
+                <td class="du-input-cell du-input-cell--actual">
                   <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
                     <v-text-field v-model.number="entryForm.accomplishment_q1" type="number" step="0.01" min="0"
                       density="compact" variant="outlined" hide-details />
@@ -2257,6 +2583,7 @@ onMounted(async () => {
                     <div v-if="parsePctInput(entryForm.actual_str_q1).computed !== null" class="text-caption mt-1">
                       <span class="font-weight-medium">{{ parsePctInput(entryForm.actual_str_q1).display }}</span>
                       <span v-if="parsePctInput(entryForm.actual_str_q1).fractionText" class="text-grey-darken-1 ml-1">{{ parsePctInput(entryForm.actual_str_q1).fractionText }}</span>
+                      <span v-else-if="dialogFractionFallback.actual[0]" class="text-grey-darken-1 ml-1 font-italic">({{ dialogFractionFallback.actual[0] }})</span>
                     </div>
                     <div v-if="entryForm.actual_str_q1 && parsePctInput(entryForm.actual_str_q1).error" class="text-caption text-error mt-1">{{ parsePctInput(entryForm.actual_str_q1).error }}</div>
                   </template>
@@ -2269,6 +2596,11 @@ onMounted(async () => {
                   </v-chip>
                   <span v-else class="text-grey text-caption">—</span>
                 </td>
+                <!-- XXX-F: Notes Q1 (optional, no calculation impact) -->
+                <td class="du-input-cell du-input-cell--notes">
+                  <v-textarea v-model="entryForm.remarks_str_q1" placeholder="Optional note"
+                    density="compact" variant="outlined" hide-details rows="2" auto-grow />
+                </td>
               </tr>
               <!-- Q2 -->
               <tr>
@@ -2276,7 +2608,7 @@ onMounted(async () => {
                   <v-chip size="small" color="teal" variant="tonal" class="font-weight-bold">Q2</v-chip>
                 </td>
                 <!-- Target Q2 -->
-                <td class="du-input-cell">
+                <td class="du-input-cell du-input-cell--target">
                   <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
                     <v-text-field v-model.number="entryForm.target_q2" type="number" step="0.01" min="0"
                       density="compact" variant="outlined" hide-details />
@@ -2288,12 +2620,13 @@ onMounted(async () => {
                     <div v-if="parsePctInput(entryForm.target_str_q2).computed !== null" class="text-caption mt-1">
                       <span class="font-weight-medium">{{ parsePctInput(entryForm.target_str_q2).display }}</span>
                       <span v-if="parsePctInput(entryForm.target_str_q2).fractionText" class="text-grey-darken-1 ml-1">{{ parsePctInput(entryForm.target_str_q2).fractionText }}</span>
+                      <span v-else-if="dialogFractionFallback.target[1]" class="text-grey-darken-1 ml-1 font-italic">({{ dialogFractionFallback.target[1] }})</span>
                     </div>
                     <div v-if="entryForm.target_str_q2 && parsePctInput(entryForm.target_str_q2).error" class="text-caption text-error mt-1">{{ parsePctInput(entryForm.target_str_q2).error }}</div>
                   </template>
                 </td>
                 <!-- Actual Q2 -->
-                <td class="du-input-cell">
+                <td class="du-input-cell du-input-cell--actual">
                   <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
                     <v-text-field v-model.number="entryForm.accomplishment_q2" type="number" step="0.01" min="0"
                       density="compact" variant="outlined" hide-details />
@@ -2305,6 +2638,7 @@ onMounted(async () => {
                     <div v-if="parsePctInput(entryForm.actual_str_q2).computed !== null" class="text-caption mt-1">
                       <span class="font-weight-medium">{{ parsePctInput(entryForm.actual_str_q2).display }}</span>
                       <span v-if="parsePctInput(entryForm.actual_str_q2).fractionText" class="text-grey-darken-1 ml-1">{{ parsePctInput(entryForm.actual_str_q2).fractionText }}</span>
+                      <span v-else-if="dialogFractionFallback.actual[1]" class="text-grey-darken-1 ml-1 font-italic">({{ dialogFractionFallback.actual[1] }})</span>
                     </div>
                     <div v-if="entryForm.actual_str_q2 && parsePctInput(entryForm.actual_str_q2).error" class="text-caption text-error mt-1">{{ parsePctInput(entryForm.actual_str_q2).error }}</div>
                   </template>
@@ -2317,6 +2651,11 @@ onMounted(async () => {
                   </v-chip>
                   <span v-else class="text-grey text-caption">—</span>
                 </td>
+                <!-- XXX-F: Notes Q2 (optional, no calculation impact) -->
+                <td class="du-input-cell du-input-cell--notes">
+                  <v-textarea v-model="entryForm.remarks_str_q2" placeholder="Optional note"
+                    density="compact" variant="outlined" hide-details rows="2" auto-grow />
+                </td>
               </tr>
               <!-- Q3 -->
               <tr>
@@ -2324,7 +2663,7 @@ onMounted(async () => {
                   <v-chip size="small" color="orange" variant="tonal" class="font-weight-bold">Q3</v-chip>
                 </td>
                 <!-- Target Q3 -->
-                <td class="du-input-cell">
+                <td class="du-input-cell du-input-cell--target">
                   <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
                     <v-text-field v-model.number="entryForm.target_q3" type="number" step="0.01" min="0"
                       density="compact" variant="outlined" hide-details />
@@ -2336,12 +2675,13 @@ onMounted(async () => {
                     <div v-if="parsePctInput(entryForm.target_str_q3).computed !== null" class="text-caption mt-1">
                       <span class="font-weight-medium">{{ parsePctInput(entryForm.target_str_q3).display }}</span>
                       <span v-if="parsePctInput(entryForm.target_str_q3).fractionText" class="text-grey-darken-1 ml-1">{{ parsePctInput(entryForm.target_str_q3).fractionText }}</span>
+                      <span v-else-if="dialogFractionFallback.target[2]" class="text-grey-darken-1 ml-1 font-italic">({{ dialogFractionFallback.target[2] }})</span>
                     </div>
                     <div v-if="entryForm.target_str_q3 && parsePctInput(entryForm.target_str_q3).error" class="text-caption text-error mt-1">{{ parsePctInput(entryForm.target_str_q3).error }}</div>
                   </template>
                 </td>
                 <!-- Actual Q3 -->
-                <td class="du-input-cell">
+                <td class="du-input-cell du-input-cell--actual">
                   <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
                     <v-text-field v-model.number="entryForm.accomplishment_q3" type="number" step="0.01" min="0"
                       density="compact" variant="outlined" hide-details />
@@ -2353,6 +2693,7 @@ onMounted(async () => {
                     <div v-if="parsePctInput(entryForm.actual_str_q3).computed !== null" class="text-caption mt-1">
                       <span class="font-weight-medium">{{ parsePctInput(entryForm.actual_str_q3).display }}</span>
                       <span v-if="parsePctInput(entryForm.actual_str_q3).fractionText" class="text-grey-darken-1 ml-1">{{ parsePctInput(entryForm.actual_str_q3).fractionText }}</span>
+                      <span v-else-if="dialogFractionFallback.actual[2]" class="text-grey-darken-1 ml-1 font-italic">({{ dialogFractionFallback.actual[2] }})</span>
                     </div>
                     <div v-if="entryForm.actual_str_q3 && parsePctInput(entryForm.actual_str_q3).error" class="text-caption text-error mt-1">{{ parsePctInput(entryForm.actual_str_q3).error }}</div>
                   </template>
@@ -2365,6 +2706,11 @@ onMounted(async () => {
                   </v-chip>
                   <span v-else class="text-grey text-caption">—</span>
                 </td>
+                <!-- XXX-F: Notes Q3 (optional, no calculation impact) -->
+                <td class="du-input-cell du-input-cell--notes">
+                  <v-textarea v-model="entryForm.remarks_str_q3" placeholder="Optional note"
+                    density="compact" variant="outlined" hide-details rows="2" auto-grow />
+                </td>
               </tr>
               <!-- Q4 -->
               <tr>
@@ -2372,7 +2718,7 @@ onMounted(async () => {
                   <v-chip size="small" color="deep-purple" variant="tonal" class="font-weight-bold">Q4</v-chip>
                 </td>
                 <!-- Target Q4 -->
-                <td class="du-input-cell">
+                <td class="du-input-cell du-input-cell--target">
                   <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
                     <v-text-field v-model.number="entryForm.target_q4" type="number" step="0.01" min="0"
                       density="compact" variant="outlined" hide-details />
@@ -2384,12 +2730,13 @@ onMounted(async () => {
                     <div v-if="parsePctInput(entryForm.target_str_q4).computed !== null" class="text-caption mt-1">
                       <span class="font-weight-medium">{{ parsePctInput(entryForm.target_str_q4).display }}</span>
                       <span v-if="parsePctInput(entryForm.target_str_q4).fractionText" class="text-grey-darken-1 ml-1">{{ parsePctInput(entryForm.target_str_q4).fractionText }}</span>
+                      <span v-else-if="dialogFractionFallback.target[3]" class="text-grey-darken-1 ml-1 font-italic">({{ dialogFractionFallback.target[3] }})</span>
                     </div>
                     <div v-if="entryForm.target_str_q4 && parsePctInput(entryForm.target_str_q4).error" class="text-caption text-error mt-1">{{ parsePctInput(entryForm.target_str_q4).error }}</div>
                   </template>
                 </td>
                 <!-- Actual Q4 -->
-                <td class="du-input-cell">
+                <td class="du-input-cell du-input-cell--actual">
                   <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
                     <v-text-field v-model.number="entryForm.accomplishment_q4" type="number" step="0.01" min="0"
                       density="compact" variant="outlined" hide-details />
@@ -2401,6 +2748,7 @@ onMounted(async () => {
                     <div v-if="parsePctInput(entryForm.actual_str_q4).computed !== null" class="text-caption mt-1">
                       <span class="font-weight-medium">{{ parsePctInput(entryForm.actual_str_q4).display }}</span>
                       <span v-if="parsePctInput(entryForm.actual_str_q4).fractionText" class="text-grey-darken-1 ml-1">{{ parsePctInput(entryForm.actual_str_q4).fractionText }}</span>
+                      <span v-else-if="dialogFractionFallback.actual[3]" class="text-grey-darken-1 ml-1 font-italic">({{ dialogFractionFallback.actual[3] }})</span>
                     </div>
                     <div v-if="entryForm.actual_str_q4 && parsePctInput(entryForm.actual_str_q4).error" class="text-caption text-error mt-1">{{ parsePctInput(entryForm.actual_str_q4).error }}</div>
                   </template>
@@ -2413,9 +2761,15 @@ onMounted(async () => {
                   </v-chip>
                   <span v-else class="text-grey text-caption">—</span>
                 </td>
+                <!-- XXX-F: Notes Q4 (optional, no calculation impact) -->
+                <td class="du-input-cell du-input-cell--notes">
+                  <v-textarea v-model="entryForm.remarks_str_q4" placeholder="Optional note"
+                    density="compact" variant="outlined" hide-details rows="2" auto-grow />
+                </td>
               </tr>
             </tbody>
           </v-table>
+          </div>
 
           <!-- Phase HB: Annual Performance Summary (Directives 375–380) — Moved before remarks (HQ-8, Directive 180) -->
           <v-card variant="outlined" class="bg-grey-lighten-4 mb-4">
@@ -2431,9 +2785,12 @@ onMounted(async () => {
               <div class="d-flex ga-3 flex-wrap mb-2">
                 <v-chip variant="tonal" size="small">
                   Total Target: {{ formatNumber(computedPreview.totalTarget) }}
+                  <!-- AAAC-C: fraction-aggregate caption (ΣN/ΣD) -->
+                  <span v-if="computedPreview.totalTargetFraction" class="ml-1 text-grey-darken-1">({{ computedPreview.totalTargetFraction }})</span>
                 </v-chip>
                 <v-chip variant="tonal" size="small">
                   Total Actual: {{ formatNumber(computedPreview.totalActual) }}
+                  <span v-if="computedPreview.totalActualFraction" class="ml-1 text-grey-darken-1">({{ computedPreview.totalActualFraction }})</span>
                 </v-chip>
                 <v-chip
                   :color="getVarianceColor(computedPreview.variance)"
@@ -2471,21 +2828,45 @@ onMounted(async () => {
               <!-- HB-3: 2-column grid, no max-width (Directives 377–379) -->
               <v-row dense class="mt-1">
                 <v-col cols="12" sm="6">
-                  <v-text-field
-                    v-model.number="entryForm.override_total_target"
-                    label="Override Total Target"
-                    type="number"
-                    step="0.01"
-                    :min="0"
-                    variant="outlined"
-                    density="compact"
-                    clearable
-                    hide-details="auto"
-                    hint="Replaces quarterly sum as base for variance/rate."
-                    persistent-hint
-                    class="mb-3"
-                    @click:clear="entryForm.override_total_target = null"
-                  />
+                  <!-- XXX-G: PERCENTAGE indicators support fraction entry for override total target -->
+                  <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
+                    <v-text-field
+                      v-model.number="entryForm.override_total_target"
+                      label="Override Total Target"
+                      type="number"
+                      step="0.01"
+                      :min="0"
+                      variant="outlined"
+                      density="compact"
+                      clearable
+                      hide-details="auto"
+                      hint="Replaces quarterly sum as base for variance/rate."
+                      persistent-hint
+                      class="mb-3"
+                      @click:clear="entryForm.override_total_target = null"
+                    />
+                  </template>
+                  <template v-else>
+                    <v-text-field
+                      v-model="entryForm.override_total_target_str"
+                      label="Override Total Target"
+                      placeholder="90 or 200/200"
+                      variant="outlined"
+                      density="compact"
+                      clearable
+                      hide-details="auto"
+                      hint="Replaces quarterly sum as base for variance/rate. Enter % or N/D fraction."
+                      persistent-hint
+                      class="mb-3"
+                      :error="!!(entryForm.override_total_target_str && parsePctInput(entryForm.override_total_target_str).error)"
+                      @click:clear="entryForm.override_total_target_str = ''"
+                    />
+                    <div v-if="parsePctInput(entryForm.override_total_target_str).computed !== null" class="text-caption mt-1 mb-2">
+                      <span class="font-weight-medium">{{ parsePctInput(entryForm.override_total_target_str).display }}</span>
+                      <span v-if="parsePctInput(entryForm.override_total_target_str).fractionText" class="text-grey-darken-1 ml-1">{{ parsePctInput(entryForm.override_total_target_str).fractionText }}</span>
+                    </div>
+                    <div v-if="entryForm.override_total_target_str && parsePctInput(entryForm.override_total_target_str).error" class="text-caption text-error mt-1 mb-2">{{ parsePctInput(entryForm.override_total_target_str).error }}</div>
+                  </template>
                   <v-text-field
                     v-model.number="entryForm.override_rate"
                     label="Override Rate (%)"
@@ -2502,21 +2883,45 @@ onMounted(async () => {
                   />
                 </v-col>
                 <v-col cols="12" sm="6">
-                  <v-text-field
-                    v-model.number="entryForm.override_total_actual"
-                    label="Override Total Actual"
-                    type="number"
-                    step="0.01"
-                    :min="0"
-                    variant="outlined"
-                    density="compact"
-                    clearable
-                    hide-details="auto"
-                    hint="Replaces quarterly sum as base for variance/rate."
-                    persistent-hint
-                    class="mb-3"
-                    @click:clear="entryForm.override_total_actual = null"
-                  />
+                  <!-- XXX-G: PERCENTAGE indicators support fraction entry for override total actual -->
+                  <template v-if="selectedIndicator?.unit_type !== 'PERCENTAGE'">
+                    <v-text-field
+                      v-model.number="entryForm.override_total_actual"
+                      label="Override Total Actual"
+                      type="number"
+                      step="0.01"
+                      :min="0"
+                      variant="outlined"
+                      density="compact"
+                      clearable
+                      hide-details="auto"
+                      hint="Replaces quarterly sum as base for variance/rate."
+                      persistent-hint
+                      class="mb-3"
+                      @click:clear="entryForm.override_total_actual = null"
+                    />
+                  </template>
+                  <template v-else>
+                    <v-text-field
+                      v-model="entryForm.override_total_actual_str"
+                      label="Override Total Actual"
+                      placeholder="75 or 286/268"
+                      variant="outlined"
+                      density="compact"
+                      clearable
+                      hide-details="auto"
+                      hint="Replaces quarterly sum as base for variance/rate. Enter % or N/D fraction."
+                      persistent-hint
+                      class="mb-3"
+                      :error="!!(entryForm.override_total_actual_str && parsePctInput(entryForm.override_total_actual_str).error)"
+                      @click:clear="entryForm.override_total_actual_str = ''"
+                    />
+                    <div v-if="parsePctInput(entryForm.override_total_actual_str).computed !== null" class="text-caption mt-1 mb-2">
+                      <span class="font-weight-medium">{{ parsePctInput(entryForm.override_total_actual_str).display }}</span>
+                      <span v-if="parsePctInput(entryForm.override_total_actual_str).fractionText" class="text-grey-darken-1 ml-1">{{ parsePctInput(entryForm.override_total_actual_str).fractionText }}</span>
+                    </div>
+                    <div v-if="entryForm.override_total_actual_str && parsePctInput(entryForm.override_total_actual_str).error" class="text-caption text-error mt-1 mb-2">{{ parsePctInput(entryForm.override_total_actual_str).error }}</div>
+                  </template>
                   <v-text-field
                     v-model.number="entryForm.override_variance"
                     label="Override Variance"
@@ -2867,10 +3272,17 @@ onMounted(async () => {
 }
 
 .variance-column {
-  width: 80px;
-  min-width: 80px;
+  width: 100px;
+  min-width: 100px;
   text-align: right;
   vertical-align: top;
+}
+
+/* Phase ZZZ-C / AAAB-A: Variance/Rate chip — middle value, readable but less dominant */
+.metric-chip {
+  font-size: 0.8125rem !important;
+  font-weight: 500;
+  height: 22px;
 }
 
 /* Phase GZ: Total Target + Total Actual columns (Directive 361) */
@@ -2916,8 +3328,8 @@ onMounted(async () => {
 }
 
 .rate-column {
-  width: 80px;
-  min-width: 80px;
+  width: 100px;
+  min-width: 100px;
   text-align: right;
   vertical-align: top;
 }
@@ -2957,6 +3369,12 @@ onMounted(async () => {
 
   .v-table .text-caption {
     font-size: 0.7rem !important;
+  }
+
+  /* Phase ZZZ-C / AAAB-A: Variance/Rate chips — tuned down on mobile */
+  .metric-chip {
+    font-size: 0.75rem !important;
+    height: 20px;
   }
 }
 
@@ -3044,6 +3462,16 @@ onMounted(async () => {
 .du-input-cell {
   padding: 8px 6px !important;
   vertical-align: middle;
+}
+
+/* Phase YYY-A: widen Target/Actual/Notes input cells in the Quarterly Entry Dialog */
+.du-input-cell--target,
+.du-input-cell--actual {
+  min-width: 220px;
+}
+
+.du-input-cell--notes {
+  min-width: 180px;
 }
 
 .acc-pct-col {

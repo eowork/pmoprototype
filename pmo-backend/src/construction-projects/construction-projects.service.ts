@@ -721,7 +721,7 @@ export class ConstructionProjectsService {
           `INSERT INTO construction_projects
            (project_id, project_code, title, description, ideal_infrastructure_image, beneficiaries,
             summary, scope, facilities,
-            objectives, key_features, original_contract_duration, contract_number, contractor_id, contractor,
+            objectives, key_features, original_contract_duration, implementation_period, contract_number, contractor_id, contractor,
             contract_amount, start_date, target_completion_date, actual_completion_date, project_duration, project_engineer,
             project_manager, building_type, floor_area, number_of_floors, funding_source_id,
             subcategory_id, campus, status, latitude, longitude,
@@ -732,11 +732,11 @@ export class ConstructionProjectsService {
             co_implementing_agency, attached_agency,
             original_start_date, revised_start_date, original_completion_date, revised_completion_date, revised_project_duration,
             as_of_date, cost_incurred_to_date,
-            rdp_alignment, socioeconomic_agenda, csu_likha_goals, sdg_goals, beneficiary_list,
+            rdp_alignment, socioeconomic_agenda, csu_likha_goals, sdg_goals, rdp2017_alignment, point_agenda_10, beneficiary_list,
             funding_source_type, additional_funding_sources,
             remarks_log, personnel_groups,
-            status_updates, readiness_documents, signatories, risk_register, escalation_records)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status_updates, readiness_documents, signatories)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`,
           [
             projectId,
@@ -751,6 +751,7 @@ export class ConstructionProjectsService {
             dto.objectives ? JSON.stringify(dto.objectives) : null,
             dto.key_features ? JSON.stringify(dto.key_features) : null,
             dto.original_contract_duration,
+            dto.implementation_period ?? null,
             dto.contract_number,
             dto.contractor_id,
             dto.contractor ?? null,
@@ -796,6 +797,8 @@ export class ConstructionProjectsService {
             dto.socioeconomic_agenda ? JSON.stringify(dto.socioeconomic_agenda) : null,
             dto.csu_likha_goals ? JSON.stringify(dto.csu_likha_goals) : null,
             dto.sdg_goals ? JSON.stringify(dto.sdg_goals) : null,
+            dto.rdp2017_alignment ? JSON.stringify(dto.rdp2017_alignment) : null,
+            dto.point_agenda_10 ? JSON.stringify(dto.point_agenda_10) : null,
             dto.beneficiary_list ? JSON.stringify(dto.beneficiary_list) : null,
             dto.funding_source_type ?? null,
             dto.additional_funding_sources ? JSON.stringify(dto.additional_funding_sources) : null,
@@ -805,8 +808,6 @@ export class ConstructionProjectsService {
             dto.status_updates ? JSON.stringify(dto.status_updates) : '[]',
             dto.readiness_documents ? JSON.stringify(dto.readiness_documents) : '[]',
             dto.signatories ? JSON.stringify(dto.signatories) : '[]',
-            dto.risk_register ? JSON.stringify(dto.risk_register) : '[]',
-            dto.escalation_records ? JSON.stringify(dto.escalation_records) : '[]',
           ],
         );
       } catch (err: any) {
@@ -951,11 +952,10 @@ export class ConstructionProjectsService {
 
     // KY-B1: exclude undefined AND empty arrays — empty arrays must not overwrite
     // existing JSONB data (prevents [[]] double-wrapping corruption).
-    // EEE-B: Others-tab scalar JSONB arrays (status_updates, risk_register, etc.) CAN be
+    // EEE-B: Others-tab scalar JSONB arrays (status_updates, etc.) CAN be
     // set to [] to clear all entries — they do not suffer from [[]] wrapping, so exempt them.
     const clearableArrayFields = new Set([
       'status_updates', 'readiness_documents', 'signatories',
-      'risk_register', 'escalation_records',
     ])
     const fields = Object.keys(dto).filter(
       (k) =>
@@ -987,10 +987,12 @@ export class ConstructionProjectsService {
       'objectives', 'key_features', 'metadata',
       'output_indicators', 'outcome_indicators',
       'status_updates', 'readiness_documents', 'signatories',
-      'incident_log', 'risk_register', 'escalation_records',
+      'incident_log',
       'document_checklist_remarks',
       // MC: new JSONB fields
       'rdp_alignment', 'socioeconomic_agenda', 'csu_likha_goals', 'sdg_goals',
+      // XXX-K: Historical Planning Frameworks (2017-2022)
+      'rdp2017_alignment', 'point_agenda_10',
       'beneficiary_list', 'additional_funding_sources',
       'remarks_log', 'personnel_groups',
       'project_notes_banking', // GGG-E

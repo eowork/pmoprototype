@@ -195,6 +195,95 @@ export const SOCIOECONOMIC_OPTIONS: HierarchyOption[] = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
+// XXX-I: RDP 2017–2022 (Caraga Regional Development Plan) — historical framework.
+// Flat 2-level hierarchy (Part → Chapter, no sub-chapters), per R-219.
+// Key prefix RDP17_* — distinct from RDP_* (2023–2028) to avoid key collisions.
+// ─────────────────────────────────────────────────────────────────────────────
+export const RDP2017_OPTIONS: HierarchyOption[] = [
+  {
+    key: 'RDP17_PART_I',
+    label: 'Part I — Introduction',
+    children: [
+      { key: 'RDP17_CH1', label: 'Chapter 1: The Long View' },
+      { key: 'RDP17_CH2', label: 'Chapter 2: Regional Trends and Prospects' },
+      { key: 'RDP17_CH3', label: 'Chapter 3: Regional Spatial Strategy' },
+      { key: 'RDP17_CH4', label: 'Chapter 4: RDP 2017-2022 Overall Framework' },
+    ],
+  },
+  {
+    key: 'RDP17_PART_II',
+    label: 'Part II — Enhancing the Social Fabric ("Malasakit")',
+    children: [
+      { key: 'RDP17_CH5', label: 'Chapter 5: Ensuring People-Centered, Clean, and Efficient Governance' },
+      { key: 'RDP17_CH6', label: 'Chapter 6: Pursuing Swift and Fair Administration of Justice' },
+      { key: 'RDP17_CH7', label: 'Chapter 7: Promoting Philippine Culture and Values' },
+    ],
+  },
+  {
+    key: 'RDP17_PART_III',
+    label: 'Part III — Inequality-Reducing Transformation ("Pagbabago")',
+    children: [
+      { key: 'RDP17_CH8',  label: 'Chapter 8: Expanding Economic Opportunities in Agriculture, Forestry, and Fisheries' },
+      { key: 'RDP17_CH9',  label: 'Chapter 9: Expanding Economic Opportunities in Industry and Services through Trabaho at Negosyo' },
+      { key: 'RDP17_CH10', label: 'Chapter 10: Accelerating Human Capital Development' },
+      { key: 'RDP17_CH11', label: 'Chapter 11: Reducing Vulnerabilities of Individuals and Families' },
+      { key: 'RDP17_CH12', label: 'Chapter 12: Building Safe and Secure Communities' },
+    ],
+  },
+  {
+    key: 'RDP17_PART_IV',
+    label: 'Part IV — Increasing Growth Potential ("Patuloy na Pag-unlad")',
+    children: [
+      { key: 'RDP17_CH13', label: 'Chapter 13: Reaching for the Demographic Dividend' },
+      { key: 'RDP17_CH14', label: 'Chapter 14: Vigorously Advancing Science, Technology, and Innovation' },
+    ],
+  },
+  {
+    key: 'RDP17_PART_V',
+    label: 'Part V — Enabling and Supportive Economic Environment',
+    children: [
+      { key: 'RDP17_CH15', label: 'Chapter 15: Ensuring Sound Macroeconomic Management' },
+      { key: 'RDP17_CH16', label: 'Chapter 16: Leveling the Playing Field through a National Competition Policy' },
+    ],
+  },
+  {
+    key: 'RDP17_PART_VI',
+    label: 'Part VI — Foundations for Sustainable Development',
+    children: [
+      { key: 'RDP17_CH17', label: 'Chapter 17: Attaining Just and Lasting Peace' },
+      { key: 'RDP17_CH18', label: 'Chapter 18: Ensuring Security, Public Order, and Safety' },
+      { key: 'RDP17_CH19', label: 'Chapter 19: Accelerating Infrastructure Development' },
+      { key: 'RDP17_CH20', label: 'Chapter 20: Ensuring Ecological Integrity, Clean and Healthy Environment' },
+    ],
+  },
+  {
+    key: 'RDP17_PART_VII',
+    label: 'Part VII — From Plan to Action',
+    children: [
+      { key: 'RDP17_CH21', label: 'Chapter 21: Plan Implementation and Monitoring' },
+    ],
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// XXX-I: 0+10 Point Socioeconomic Agenda (2016) — historical framework.
+// Flat list, independently selectable, per R-220.
+// Wording flagged for operator verification against authoritative NEDA source.
+// ─────────────────────────────────────────────────────────────────────────────
+export const POINT_AGENDA_10_OPTIONS: HierarchyOption[] = [
+  { key: 'PA10_0', label: '0 — Continue and maintain current macroeconomic policy' },
+  { key: 'PA10_1', label: '1 — Institute progressive tax reform and more effective tax collection' },
+  { key: 'PA10_2', label: '2 — Increase competitiveness and ease of doing business' },
+  { key: 'PA10_3', label: '3 — Accelerate infrastructure spending ("Build, Build, Build")' },
+  { key: 'PA10_4', label: '4 — Promote rural and value-chain development for agriculture and rural enterprises' },
+  { key: 'PA10_5', label: '5 — Ensure security of land tenure' },
+  { key: 'PA10_6', label: '6 — Invest in human capital development (health and education)' },
+  { key: 'PA10_7', label: '7 — Promote science, technology, and the creative arts' },
+  { key: 'PA10_8', label: '8 — Improve social protection programs (e.g., 4Ps)' },
+  { key: 'PA10_9', label: '9 — Strengthen implementation of the Responsible Parenthood and Reproductive Health Law' },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Lookup helpers — used by detail page and chip displays to resolve key → label
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -210,10 +299,14 @@ function flattenHierarchy(opts: HierarchyOption[]): HierarchyOption[] {
 const _likhaIndex  = new Map(flattenHierarchy(LIKHA_OPTIONS).map(o => [o.key, o.label]));
 const _rdpIndex    = new Map(flattenHierarchy(RDP_OPTIONS).map(o => [o.key, o.label]));
 const _seaIndex    = new Map(flattenHierarchy(SOCIOECONOMIC_OPTIONS).map(o => [o.key, o.label]));
+const _rdp2017Index = new Map(flattenHierarchy(RDP2017_OPTIONS).map(o => [o.key, o.label]));
+const _pa10Index    = new Map(flattenHierarchy(POINT_AGENDA_10_OPTIONS).map(o => [o.key, o.label]));
 
 export function labelForLikha(key: string): string { return _likhaIndex.get(key) || key; }
 export function labelForRdp(key: string): string   { return _rdpIndex.get(key)   || key; }
 export function labelForSea(key: string): string   { return _seaIndex.get(key)   || key; }
+export function labelForRdp2017(key: string): string      { return _rdp2017Index.get(key) || key; }
+export function labelForPointAgenda10(key: string): string { return _pa10Index.get(key)    || key; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UN Sustainable Development Goals — flat, no sub-hierarchy (QQQ)

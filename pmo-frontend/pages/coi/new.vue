@@ -56,6 +56,8 @@ const form = ref({
   socioeconomic_agenda: [] as string[],
   csu_likha_goals: [] as string[],
   sdg_goals: [] as string[],
+  rdp2017_alignment: [] as string[],
+  point_agenda_10: [] as string[],
   strategic_alignment: '',
   // NC: Migrated from textareas to bullet lists
   output_indicators_list: [] as string[],
@@ -80,6 +82,7 @@ const form = ref({
   revised_completion_date: '',
   revised_project_duration: '',
   original_contract_duration: '',
+  implementation_period: '',
   // Progress targets
   target_physical_progress: 100 as number,
   target_financial_progress: 100 as number,
@@ -117,8 +120,7 @@ const readinessDocRows  = ref<Array<{ type: string; status: string; remarks: str
 const signatoryRows     = ref<Array<{ name: string; position: string; date: string }>>([])
 // LX-A: Others tab â€" mirrors edit-[id].vue administrative records
 // BBB-B: incidentLogRows removed per R-055
-const riskRegisterRows  = ref<Array<{ risk: string; likelihood: string; impact: string; mitigation: string; status: string }>>([])
-const escalationRows    = ref<Array<{ escalatedTo: string; date: string; issue: string; resolution: string }>>([])
+// XXX-M: riskRegisterRows/escalationRows removed — Project Governance section removed
 // MJ: Non-system personnel group rows (JSONB)
 const csuPersonnelRows        = ref<CsuPersonnelRow[]>([])
 const contractorPersonnelRows = ref<ContractorPersonnelRow[]>([])
@@ -159,11 +161,6 @@ function addReadinessDoc()            { readinessDocRows.value.push({ type: '', 
 function removeReadinessDoc(i: number){ readinessDocRows.value.splice(i, 1) }
 function addSignatory()               { signatoryRows.value.push({ name: '', position: '', date: '' }) }
 function removeSignatory(i: number)   { signatoryRows.value.splice(i, 1) }
-
-function addRisk()                    { riskRegisterRows.value.push({ risk: '', likelihood: 'MEDIUM', impact: 'MEDIUM', mitigation: '', status: 'OPEN' }) }
-function removeRisk(i: number)        { riskRegisterRows.value.splice(i, 1) }
-function addEscalation()              { escalationRows.value.push({ escalatedTo: '', date: '', issue: '', resolution: '' }) }
-function removeEscalation(i: number)  { escalationRows.value.splice(i, 1) }
 
 // AAA-E: Others tab — Data Banking + Institutional Knowledge (mirrors edit-[id].vue)
 const notesAdditional   = ref('')
@@ -347,7 +344,7 @@ const tabCompletion = computed(() => ({
   documents:
     pendingDocs.value.length + pendingImages.value.length + pendingLinks.value.length > 0,
   // LX-A: others tab completion
-  others: statusUpdateRows.value.length > 0 || readinessDocRows.value.length > 0 || signatoryRows.value.length > 0 || riskRegisterRows.value.length > 0 || escalationRows.value.length > 0,
+  others: statusUpdateRows.value.length > 0 || readinessDocRows.value.length > 0 || signatoryRows.value.length > 0,
 }))
 
 // JO-B: Required-field validity for navigation gating (separate from engagement)
@@ -457,6 +454,9 @@ async function handleSubmit() {
       socioeconomic_agenda: form.value.socioeconomic_agenda?.length ? form.value.socioeconomic_agenda : undefined,
       csu_likha_goals: form.value.csu_likha_goals?.length ? form.value.csu_likha_goals : undefined,
       sdg_goals: form.value.sdg_goals?.length ? form.value.sdg_goals : undefined,
+      // XXX-K: Historical Planning Frameworks (2017-2022)
+      rdp2017_alignment: form.value.rdp2017_alignment?.length ? form.value.rdp2017_alignment : undefined,
+      point_agenda_10: form.value.point_agenda_10?.length ? form.value.point_agenda_10 : undefined,
       strategic_alignment: form.value.strategic_alignment || undefined,
       // NC: Indicators now sourced from bullet-list arrays
       output_indicators: form.value.output_indicators_list?.length
@@ -484,6 +484,8 @@ async function handleSubmit() {
       revised_completion_date: form.value.revised_completion_date || undefined,
       revised_project_duration: form.value.revised_project_duration || undefined,
       original_contract_duration: form.value.original_contract_duration || undefined,
+      // XXX-K: Implementation Period (free-text, R-222)
+      implementation_period: form.value.implementation_period || undefined,
       target_physical_progress: form.value.target_physical_progress ?? undefined,
       target_financial_progress: form.value.target_financial_progress ?? undefined,
       // MI: Progress & Financial Status
@@ -504,8 +506,7 @@ async function handleSubmit() {
       signatories: signatoryRows.value.length > 0 ? signatoryRows.value : undefined,
       // LX-A: others tab fields
       // BBB-B: incident_log removed from create payload per R-055
-      risk_register: riskRegisterRows.value.length > 0 ? riskRegisterRows.value : undefined,
-      escalation_records: escalationRows.value.length > 0 ? escalationRows.value : undefined,
+      // XXX-M: risk_register/escalation_records removed — Project Governance section removed
       // AAA-E: Others tab — Data Banking + Institutional Knowledge
       project_notes_banking: (
         notesAdditional.value || notesSpecial.value ||
@@ -1220,68 +1221,8 @@ onBeforeUnmount(() => {
         <!-- ============= TAB 6: OTHERS (CCC-B: 4-Section UX Restructure) ============= -->
         <v-window-item value="others">
           <v-alert type="info" variant="tonal" density="compact" class="mb-4">
-            <strong>Milestones &amp; Timelogs</strong> will be available after saving. Record governance, administrative, and knowledge data below.
+            <strong>Milestones &amp; Timelogs</strong> will be available after saving. Record administrative, knowledge, and project notes data below.
           </v-alert>
-
-          <!-- ── SECTION A: Project Governance ── -->
-          <div class="d-flex align-center ga-2 mb-1">
-            <v-icon size="18" color="error">mdi-shield-alert-outline</v-icon>
-            <span class="text-subtitle-2 font-weight-semibold text-grey-darken-2">Project Governance</span>
-          </div>
-          <p class="text-body-2 text-grey-darken-1 mb-3">Track project risks, escalations, and governance-related concerns.</p>
-          <v-row dense class="mb-4">
-            <v-col cols="12" md="6">
-              <v-card class="h-100">
-                <v-card-title class="d-flex align-center justify-space-between">
-                  <div class="d-flex align-center ga-2">
-                    <v-icon icon="mdi-shield-alert-outline" size="small" color="warning" />
-                    Risk Register
-                    <v-chip v-if="riskRegisterRows.length" size="x-small" color="warning" variant="tonal" class="ml-1">{{ riskRegisterRows.length }}</v-chip>
-                  </div>
-                  <v-btn size="x-small" color="warning" prepend-icon="mdi-plus" variant="tonal" @click="addRisk">Add</v-btn>
-                </v-card-title>
-                <v-divider />
-                <v-card-text>
-                  <div v-if="riskRegisterRows.length === 0" class="text-center text-grey text-caption pa-3">No risks logged.</div>
-                  <div v-for="(row, i) in riskRegisterRows" :key="i" class="mb-3 pa-3 rounded bg-grey-lighten-5">
-                    <v-row dense align="center" class="mb-1">
-                      <v-col cols="12" sm="3"><v-select v-model="row.likelihood" label="Likelihood" :items="['LOW','MEDIUM','HIGH']" variant="outlined" density="compact" hide-details /></v-col>
-                      <v-col cols="12" sm="3"><v-select v-model="row.impact" label="Impact" :items="['LOW','MEDIUM','HIGH']" variant="outlined" density="compact" hide-details /></v-col>
-                      <v-col cols="12" sm="4"><v-select v-model="row.status" label="Status" :items="['OPEN','MITIGATED','CLOSED']" variant="outlined" density="compact" hide-details /></v-col>
-                      <v-col cols="12" sm="2" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeRisk(i)" /></v-col>
-                    </v-row>
-                    <v-text-field v-model="row.risk" label="Risk Description" variant="outlined" density="compact" class="mb-1" hide-details />
-                    <v-text-field v-model="row.mitigation" label="Mitigation Plan" variant="outlined" density="compact" hide-details />
-                  </div>
-                </v-card-text>
-              </v-card>
-            </v-col>
-            <v-col cols="12" md="6">
-              <v-card class="h-100">
-                <v-card-title class="d-flex align-center justify-space-between">
-                  <div class="d-flex align-center ga-2">
-                    <v-icon icon="mdi-arrow-up-circle-outline" size="small" color="info" />
-                    Escalation Records
-                    <v-chip v-if="escalationRows.length" size="x-small" color="info" variant="tonal" class="ml-1">{{ escalationRows.length }}</v-chip>
-                  </div>
-                  <v-btn size="x-small" color="info" prepend-icon="mdi-plus" variant="tonal" @click="addEscalation">Add</v-btn>
-                </v-card-title>
-                <v-divider />
-                <v-card-text>
-                  <div v-if="escalationRows.length === 0" class="text-center text-grey text-caption pa-3">No escalation records.</div>
-                  <div v-for="(row, i) in escalationRows" :key="i" class="mb-3 pa-3 rounded bg-grey-lighten-5">
-                    <v-row dense class="mb-1">
-                      <v-col cols="12" sm="8"><v-text-field v-model="row.escalatedTo" label="Escalated To" variant="outlined" density="compact" hide-details /></v-col>
-                      <v-col cols="12" sm="3"><v-text-field v-model="row.date" label="Date" type="date" variant="outlined" density="compact" hide-details /></v-col>
-                      <v-col cols="12" sm="1" class="d-flex justify-center"><v-btn icon="mdi-delete" size="small" variant="text" color="error" @click="removeEscalation(i)" /></v-col>
-                    </v-row>
-                    <v-text-field v-model="row.issue" label="Issue / Concern" variant="outlined" density="compact" class="mb-1" hide-details />
-                    <v-text-field v-model="row.resolution" label="Resolution / Action" variant="outlined" density="compact" hide-details />
-                  </div>
-                </v-card-text>
-              </v-card>
-            </v-col>
-          </v-row>
 
           <!-- ── SECTION B: Administrative Management ── -->
           <div class="d-flex align-center ga-2 mb-1">

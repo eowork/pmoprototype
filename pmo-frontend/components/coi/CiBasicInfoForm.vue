@@ -14,7 +14,7 @@
  * Beneficiary aggregate count removed per ECO directive 2026-05-21.
  */
 import type { BasicInfoFormState } from '~/utils/coiFormState'
-import { LIKHA_OPTIONS, RDP_OPTIONS, SOCIOECONOMIC_OPTIONS, SDG_OPTIONS } from '~/utils/coiHierarchies'
+import { LIKHA_OPTIONS, RDP_OPTIONS, SOCIOECONOMIC_OPTIONS, SDG_OPTIONS, RDP2017_OPTIONS, POINT_AGENDA_10_OPTIONS } from '~/utils/coiHierarchies'
 // NC fix (2026-05-21): Explicit imports — Nuxt default auto-import path-prefixes
 // nested-dir components (components/coi/Foo.vue → <CoiFoo>), so the filename-only
 // tags in this template would silently fail to render without these imports.
@@ -41,6 +41,9 @@ const rdpOptions   = RDP_OPTIONS
 const socioOptions = SOCIOECONOMIC_OPTIONS
 const likhaOptions = LIKHA_OPTIONS
 const sdgOptions   = SDG_OPTIONS
+// XXX-I: Historical Planning Frameworks (2017–2022)
+const rdp2017Options = RDP2017_OPTIONS
+const pointAgenda10Options = POINT_AGENDA_10_OPTIONS
 
 // ── Static Option Lists ──────────────────────────────────────────────────────
 const campusOptions = [
@@ -78,6 +81,21 @@ const filteredFundingSources = computed(() => {
 
 // NC: Inline bullet helpers (addObjective/addBeneficiary/etc) removed —
 // now handled internally by CiBulletListInput components.
+
+// XXX-J: Implementation Period suggested-duration hint (informational only, R-222)
+const implementationPeriodHint = computed(() => {
+  const start = form.value.original_start_date
+  const end = form.value.original_completion_date
+  if (!start || !end) return null
+  const startDate = new Date(start)
+  const endDate = new Date(end)
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return null
+  let months = (endDate.getFullYear() - startDate.getFullYear()) * 12
+    + (endDate.getMonth() - startDate.getMonth())
+  if (endDate.getDate() < startDate.getDate()) months--
+  if (months < 0) return null
+  return `Suggested: ~${months} month${months === 1 ? '' : 's'} (from Original Start/Completion dates)`
+})
 
 // ── Custom funding source row ───────────────────────────────────────────────
 const newCustomFundType = ref<'INTERNAL' | 'EXTERNAL' | 'CUSTOM'>('CUSTOM')
@@ -483,6 +501,20 @@ const totalAlignmentCount = computed(() =>
                 hide-details="auto"
               />
             </v-col>
+            <!-- XXX-J: Implementation Period (free-text, R-222) -->
+            <v-col cols="12">
+              <v-text-field
+                v-model="form.implementation_period"
+                label="Implementation Period"
+                placeholder="e.g., 18 Months"
+                density="compact"
+                variant="outlined"
+                hide-details="auto"
+              />
+              <div v-if="implementationPeriodHint" class="text-caption text-grey-darken-1 mt-1">
+                {{ implementationPeriodHint }}
+              </div>
+            </v-col>
           </v-row>
         </v-card-text>
       </v-card>
@@ -705,6 +737,79 @@ const totalAlignmentCount = computed(() =>
       </v-card>
     </v-col>
   </v-row>
+
+  <!-- XXX-J: Historical Planning Frameworks (2017–2022) — collapsed by default,
+       visually deprioritized vs the always-visible "Current Planning Frameworks"
+       cards above. R-221 Option B. -->
+  <v-expansion-panels class="mb-1" variant="accordion">
+    <v-expansion-panel>
+      <v-expansion-panel-title>
+        <div class="d-flex align-center ga-2">
+          <v-icon size="small" color="grey-darken-1">mdi-archive-clock-outline</v-icon>
+          <span class="text-subtitle-2 font-weight-medium">Historical Planning Frameworks (2017–2022)</span>
+          <v-chip size="x-small" variant="tonal" color="grey">Optional</v-chip>
+        </div>
+      </v-expansion-panel-title>
+      <v-expansion-panel-text>
+        <v-row dense class="mt-1">
+          <v-col cols="12" md="6">
+            <v-card elevation="2" rounded="lg" class="h-100">
+              <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
+                <v-icon size="small" icon="mdi-map-outline" color="grey-darken-1" />
+                <span class="text-subtitle-1 font-weight-medium">RDP 2017–2022</span>
+                <v-chip v-if="(form.rdp2017_alignment || []).length" size="x-small" variant="tonal" color="grey-darken-1">{{ (form.rdp2017_alignment || []).length }}</v-chip>
+              </v-card-title>
+              <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
+                Caraga Regional Development Plan 2017–2022 chapters (historical).
+              </v-card-subtitle>
+              <v-divider />
+              <v-card-text class="py-3">
+                <CiHierarchicalSelectorTrigger
+                  v-model="form.rdp2017_alignment"
+                  label="RDP 2017–2022 (Caraga)"
+                  title="RDP 2017–2022 — Caraga Regional Development Plan"
+                  :options="rdp2017Options"
+                  icon="mdi-map-outline"
+                  color="grey-darken-1"
+                  description="Select all applicable Parts and Chapters."
+                  search-placeholder="Search RDP chapters…"
+                  :read-only="readOnly"
+                  :max-visible-chips="5"
+                />
+              </v-card-text>
+            </v-card>
+          </v-col>
+          <v-col cols="12" md="6">
+            <v-card elevation="2" rounded="lg" class="h-100">
+              <v-card-title class="d-flex align-center ga-2 py-2 px-4 bg-grey-lighten-4">
+                <v-icon size="small" icon="mdi-flag-variant-outline" color="grey-darken-1" />
+                <span class="text-subtitle-1 font-weight-medium">0+10 Point Agenda</span>
+                <v-chip v-if="(form.point_agenda_10 || []).length" size="x-small" variant="tonal" color="grey-darken-1">{{ (form.point_agenda_10 || []).length }}</v-chip>
+              </v-card-title>
+              <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
+                0+10 Point Socioeconomic Agenda (2016, historical).
+              </v-card-subtitle>
+              <v-divider />
+              <v-card-text class="py-3">
+                <CiHierarchicalSelectorTrigger
+                  v-model="form.point_agenda_10"
+                  label="0+10 Point Agenda"
+                  title="0+10 Point Socioeconomic Agenda (2016)"
+                  :options="pointAgenda10Options"
+                  icon="mdi-flag-variant-outline"
+                  color="grey-darken-1"
+                  description="Select all applicable agenda points."
+                  search-placeholder="Search agenda points…"
+                  :read-only="readOnly"
+                  :max-visible-chips="5"
+                />
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+      </v-expansion-panel-text>
+    </v-expansion-panel>
+  </v-expansion-panels>
 
   <!-- ══════════════════════════════════════════════════════════════════════
        ROW G — Output / Outcome Indicators (OD: 2 dedicated cards)

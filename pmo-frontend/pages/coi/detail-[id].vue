@@ -3,7 +3,7 @@ import { adaptProjectDetail, adaptGalleryItem, type UIProjectDetail, type Backen
 import { getStatusColor, getPublicationStatusColor } from '~/utils/status-colors'
 import { formatDate } from '~/utils/date-utils'
 import { KEY_DOC_TYPECODES } from '~/utils/coiFormState'
-import { labelForSdg, labelForRdp, labelForSea, labelForLikha } from '~/utils/coiHierarchies'
+import { labelForSdg, labelForRdp, labelForSea, labelForLikha, labelForRdp2017, labelForPointAgenda10 } from '~/utils/coiHierarchies'
 import { useCoiProgressReports, type ProgressReport } from '~/composables/useCoiProgressReports'
 import CiDocumentChecklist from '~/components/coi/CiDocumentChecklist.vue'
 import CiPersonnelAccessCard from '~/components/coi/CiPersonnelAccessCard.vue'
@@ -487,7 +487,7 @@ const latestMilestoneUpdate = computed(() => {
 
 // CCC-B: Strategic Alignment Show More / Less
 const ALIGN_MAX_CHIPS = 4
-const showMoreAlignment = reactive<Record<string, boolean>>({ rdp: false, sea: false, likha: false, sdg: false })
+const showMoreAlignment = reactive<Record<string, boolean>>({ rdp: false, sea: false, likha: false, sdg: false, rdp2017: false, pa10: false })
 const showMoreNarrative = ref(false)
 
 // AAA-A / ZZZ-C: Team tab — client-side search + Institutional/External split.
@@ -982,6 +982,8 @@ onMounted(() => {
                     <div class="d-flex justify-space-between text-body-2"><span class="text-grey-darken-1">Start</span><span class="font-weight-medium">{{ project.startDate ? formatDate(project.startDate) : '—' }}</span></div>
                     <div class="d-flex justify-space-between text-body-2"><span class="text-grey-darken-1">Target Completion</span><span class="font-weight-medium">{{ project.targetCompletionDate ? formatDate(project.targetCompletionDate) : '—' }}</span></div>
                     <div class="d-flex justify-space-between text-body-2"><span class="text-grey-darken-1">Duration</span><span class="font-weight-medium">{{ project.projectDuration || '—' }}</span></div>
+                    <!-- XXX-L: Implementation Period (free-text, R-222) -->
+                    <div v-if="project.implementationPeriod" class="d-flex justify-space-between text-body-2"><span class="text-grey-darken-1">Implementation Period</span><span class="font-weight-medium">{{ project.implementationPeriod }}</span></div>
                   </div>
 
                   <!-- PPP-D: Original & Revised Dates — always visible, not hidden in panels -->
@@ -1450,6 +1452,34 @@ onMounted(() => {
                       </div>
                       <p v-else class="text-caption text-grey font-italic mb-0">No CSU LIKHA goals selected.</p>
                     </div>
+
+                    <!-- XXX-L: Historical Planning Frameworks (2017-2022) -->
+                    <template v-if="project.rdp2017Alignment?.length || project.pointAgenda10?.length">
+                      <v-divider class="my-3" />
+                      <p class="text-caption text-grey-darken-1 font-weight-bold text-uppercase mb-2">Historical Frameworks (2017–2022)</p>
+
+                      <!-- RDP 2017-2022 -->
+                      <div v-if="project.rdp2017Alignment?.length" class="mb-3">
+                        <p class="text-caption text-black font-weight-bold mb-2">RDP 2017–2022 Alignment</p>
+                        <div class="d-flex flex-wrap ga-2 align-center">
+                          <v-chip v-for="(item, i) in (showMoreAlignment.rdp2017 ? project.rdp2017Alignment : project.rdp2017Alignment.slice(0, ALIGN_MAX_CHIPS))" :key="i" color="grey-darken-1" variant="tonal" size="small">{{ labelForRdp2017(item) }}</v-chip>
+                          <v-btn v-if="project.rdp2017Alignment.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="grey-darken-1" class="pa-0" @click="showMoreAlignment.rdp2017 = !showMoreAlignment.rdp2017">
+                            {{ showMoreAlignment.rdp2017 ? 'Show less' : `+${project.rdp2017Alignment.length - ALIGN_MAX_CHIPS} more` }}
+                          </v-btn>
+                        </div>
+                      </div>
+
+                      <!-- 0+10 Point Agenda -->
+                      <div v-if="project.pointAgenda10?.length" class="mb-1">
+                        <p class="text-caption text-black font-weight-bold mb-2">0+10 Point Agenda</p>
+                        <div class="d-flex flex-wrap ga-2 align-center">
+                          <v-chip v-for="(item, i) in (showMoreAlignment.pa10 ? project.pointAgenda10 : project.pointAgenda10.slice(0, ALIGN_MAX_CHIPS))" :key="i" color="grey-darken-1" variant="tonal" size="small">{{ labelForPointAgenda10(item) }}</v-chip>
+                          <v-btn v-if="project.pointAgenda10.length > ALIGN_MAX_CHIPS" variant="text" size="x-small" color="grey-darken-1" class="pa-0" @click="showMoreAlignment.pa10 = !showMoreAlignment.pa10">
+                            {{ showMoreAlignment.pa10 ? 'Show less' : `+${project.pointAgenda10.length - ALIGN_MAX_CHIPS} more` }}
+                          </v-btn>
+                        </div>
+                      </div>
+                    </template>
                   </v-col>
                 </v-row>
               </v-expansion-panel-text>

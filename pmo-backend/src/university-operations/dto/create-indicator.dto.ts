@@ -219,6 +219,81 @@ export class CreateIndicatorQuarterlyDto {
   @Min(0)
   @Max(99999999)
   denominator_q4?: number | null;
+
+  // Phase XXX: Target-fraction fields for PERCENTAGE unit_type indicators (XXX-A/B)
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  target_numerator_q1?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  target_denominator_q1?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  target_numerator_q2?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  target_denominator_q2?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  target_numerator_q3?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  target_denominator_q3?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  target_numerator_q4?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99999999)
+  target_denominator_q4?: number | null;
+
+  // Phase XXX: Per-quarter notes/remarks (Issue A, XXX-F)
+  @IsOptional()
+  @IsString()
+  remarks_q1?: string | null;
+
+  @IsOptional()
+  @IsString()
+  remarks_q2?: string | null;
+
+  @IsOptional()
+  @IsString()
+  remarks_q3?: string | null;
+
+  @IsOptional()
+  @IsString()
+  remarks_q4?: string | null;
+
+  // Phase XXX: Override fraction text fields (Issue D, XXX-G)
+  @IsOptional()
+  @IsString()
+  override_total_target_fraction?: string | null;
+
+  @IsOptional()
+  @IsString()
+  override_total_actual_fraction?: string | null;
 }
 
 /**
