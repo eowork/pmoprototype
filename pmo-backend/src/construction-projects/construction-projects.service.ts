@@ -38,6 +38,7 @@ import {
   BatchCreateTimelineEntryDto,
 } from './dto';
 import { UploadsService } from '../uploads/uploads.service';
+import { PRIMARY_FUNDING_SOURCE_LABELS } from '../common/enums';
 import { JwtPayload } from '../common/interfaces';
 import { PermissionResolverService } from '../common/services';
 import { ActivityLogService } from '../activity-logs/activity-log.service';
@@ -354,6 +355,16 @@ export class ConstructionProjectsService {
       conditions.push(`cp.funding_source_id = ?`);
       params.push(query.funding_source_id);
     }
+    // AAAK: Two-Level Funding filters — primary (controlled Level-1 exact match) +
+    // description (free-text Level-2 partial match).
+    if (query.primary_funding_source) {
+      conditions.push(`cp.primary_funding_source = ?`);
+      params.push(query.primary_funding_source);
+    }
+    if (query.funding_source_description) {
+      conditions.push(`cp.funding_source_description ILIKE ?`);
+      params.push(`%${query.funding_source_description}%`);
+    }
 
     const whereClause = conditions.join(' AND ');
     const conn = this.em.getConnection();
@@ -373,6 +384,7 @@ export class ConstructionProjectsService {
               cp.submitted_by, cp.submitted_at,
               cp.original_start_date, cp.revised_start_date,
               cp.original_completion_date, cp.revised_completion_date,
+              cp.primary_funding_source, cp.funding_source_description,
               fs.name as funding_source_name,
               COALESCE(c.name, cp.contractor) as contractor_name,
               submitter.first_name || ' ' || submitter.last_name as submitted_by_name,
@@ -547,15 +559,17 @@ export class ConstructionProjectsService {
          FROM construction_projects WHERE deleted_at IS NULL`,
       ),
       conn.execute(
-        // MMM-A: join funding_sources — construction_projects has no funding_source_name
-        // column; it stores funding_source_id (FK). The display name lives in
-        // funding_sources.name. Prior query referenced a non-existent column → HTTP 500.
-        `SELECT fs.name as funding_source_name, COUNT(*) as count,
-                COALESCE(SUM(cp.contract_amount),0) as total_contract
-         FROM construction_projects cp
-         LEFT JOIN funding_sources fs ON cp.funding_source_id = fs.id
-         WHERE cp.deleted_at IS NULL AND fs.name IS NOT NULL
-         GROUP BY fs.name ORDER BY count DESC`,
+        // AAAK: Two-Level Funding — aggregate by the controlled Level-1 category
+        // (primary_funding_source) directly on construction_projects. No JOIN to
+        // funding_sources, so descriptive Level-2 variants (e.g. "GAA FY2025", "GAA Savings")
+        // no longer fragment the analytics — they all roll up under their Level-1 category.
+        `SELECT COALESCE(primary_funding_source, 'OTHER') as primary_funding_source,
+                COUNT(*) as count,
+                COALESCE(SUM(contract_amount),0) as total_contract
+         FROM construction_projects
+         WHERE deleted_at IS NULL
+         GROUP BY COALESCE(primary_funding_source, 'OTHER')
+         ORDER BY count DESC`,
       ),
       conn.execute(
         // MMM-A: column is `contractor` (varchar), not `contractor_name`.
@@ -587,7 +601,12 @@ export class ConstructionProjectsService {
         count: parseInt(r.count, 10),
       })),
       by_funding_source: fundingSourceRows.map((r) => ({
-        funding_source_name: r.funding_source_name,
+        // AAAK: raw Level-1 category + human label. `funding_source_name` retained as the
+        // label for backward-compat with existing frontend chart consumers.
+        primary_funding_source: r.primary_funding_source,
+        funding_source_name:
+          PRIMARY_FUNDING_SOURCE_LABELS[r.primary_funding_source] ||
+          r.primary_funding_source,
         count: parseInt(r.count, 10),
         total_contract: parseFloat(r.total_contract),
       })),
@@ -735,8 +754,9 @@ export class ConstructionProjectsService {
             rdp_alignment, socioeconomic_agenda, csu_likha_goals, sdg_goals, rdp2017_alignment, point_agenda_10, beneficiary_list,
             funding_source_type, additional_funding_sources,
             remarks_log, personnel_groups,
-            status_updates, readiness_documents, signatories)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status_updates, readiness_documents, signatories,
+            primary_funding_source, funding_source_description)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            RETURNING *`,
           [
             projectId,
@@ -808,6 +828,9 @@ export class ConstructionProjectsService {
             dto.status_updates ? JSON.stringify(dto.status_updates) : '[]',
             dto.readiness_documents ? JSON.stringify(dto.readiness_documents) : '[]',
             dto.signatories ? JSON.stringify(dto.signatories) : '[]',
+            // AAAK: Two-Level Funding — Level 1 defaults to OTHER if omitted, Level 2 free text
+            dto.primary_funding_source ?? 'OTHER',
+            dto.funding_source_description ?? null,
           ],
         );
       } catch (err: any) {

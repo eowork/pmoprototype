@@ -34,6 +34,10 @@ export interface BasicInfoFormState {
   attached_agency: string
 
   // ── Funding (MG-A hybrid) ───────────────────────────────────
+  // AAAK: Two-Level Funding — primary_funding_source (controlled Level-1, required) +
+  // funding_source_description (free-text Level-2). funding_source_id is legacy (optional).
+  primary_funding_source: string
+  funding_source_description: string
   funding_source_id: string
   funding_source_type: string
   additional_funding_sources: { type: string; name: string; notes?: string }[]

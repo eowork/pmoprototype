@@ -14,7 +14,7 @@
  * Beneficiary aggregate count removed per ECO directive 2026-05-21.
  */
 import type { BasicInfoFormState } from '~/utils/coiFormState'
-import { LIKHA_OPTIONS, RDP_OPTIONS, SOCIOECONOMIC_OPTIONS, SDG_OPTIONS, RDP2017_OPTIONS, POINT_AGENDA_10_OPTIONS } from '~/utils/coiHierarchies'
+import { LIKHA_OPTIONS, RDP_OPTIONS, SOCIOECONOMIC_OPTIONS, SDG_OPTIONS, RDP2017_OPTIONS, POINT_AGENDA_10_OPTIONS, PRIMARY_FUNDING_SOURCE_OPTIONS } from '~/utils/coiHierarchies'
 // NC fix (2026-05-21): Explicit imports — Nuxt default auto-import path-prefixes
 // nested-dir components (components/coi/Foo.vue → <CoiFoo>), so the filename-only
 // tags in this template would silently fail to render without these imports.
@@ -71,13 +71,9 @@ const r = computed(() => ({
   positiveNumber: props.rules?.positiveNumber ?? (() => true),
 }))
 
-// ── Funding source filtering ────────────────────────────────────────────────
-const filteredFundingSources = computed(() => {
-  if (!form.value.funding_source_type) return props.fundingSources
-  return props.fundingSources.filter(
-    fs => !fs.type || fs.type === form.value.funding_source_type,
-  )
-})
+// AAAK: Two-Level Funding — Level-1 controlled category options (single source of truth
+// in utils/coiHierarchies.ts, mirrors backend PrimaryFundingSource enum).
+const primaryFundingSourceOptions = PRIMARY_FUNDING_SOURCE_OPTIONS
 
 // NC: Inline bullet helpers (addObjective/addBeneficiary/etc) removed —
 // now handled internally by CiBulletListInput components.
@@ -333,7 +329,7 @@ const totalAlignmentCount = computed(() =>
           <span class="text-subtitle-1 font-weight-medium">Funding Source &amp; Cost</span>
         </v-card-title>
         <v-card-subtitle class="pt-2 pb-1 text-caption text-grey-darken-1">
-          Select fund type (Internal/External) to filter primary sources, then add cost in PHP. Use the chip area to register additional or custom funding sources.
+          Choose a standardized Funding Source (used for analytics), optionally add a specific Funding Source Description (e.g. GAA FY2025), and enter cost in PHP. Use the chip area to register additional co-funding sources.
         </v-card-subtitle>
         <v-divider />
         <v-card-text class="py-3">
@@ -362,17 +358,31 @@ const totalAlignmentCount = computed(() =>
                 hide-details="auto"
               />
             </v-col>
+            <!-- AAAK: Two-Level Funding — Level 1 (controlled category, required) -->
             <v-col cols="12">
-              <v-autocomplete
-                v-model="form.funding_source_id"
-                label="Primary Funding Source"
-                :items="filteredFundingSources"
-                item-title="name"
-                item-value="id"
+              <v-select
+                v-model="form.primary_funding_source"
+                label="Funding Source"
+                :items="primaryFundingSourceOptions"
+                item-title="title"
+                item-value="value"
+                :rules="[r.required]"
                 clearable
                 density="compact"
                 variant="outlined"
                 hide-details="auto"
+              />
+            </v-col>
+            <!-- AAAK: Two-Level Funding — Level 2 (free-text description, optional) -->
+            <v-col cols="12">
+              <v-text-field
+                v-model="form.funding_source_description"
+                label="Funding Source Description"
+                placeholder="e.g., GAA FY2025, GAA Savings, CHED Grant"
+                hint="Provide a specific funding description such as GAA FY2025, GAA Savings, CHED Grant, DOST Grant, etc."
+                persistent-hint
+                density="compact"
+                variant="outlined"
               />
             </v-col>
           </v-row>
