@@ -53,6 +53,8 @@ export interface BasicInfoFormState {
   socioeconomic_agenda: string[]
   csu_likha_goals: string[]
   sdg_goals: string[]            // QQQ: UN Sustainable Development Goals
+  rdp2017_alignment: string[]    // XXX-K: RDP 2017-2022 (historical)
+  point_agenda_10: string[]      // XXX-K: 0+10 Point Agenda (historical)
   strategic_alignment: string // legacy free-text narrative
 
   // ── Indicators (NC: migrated from textareas to dynamic bullet arrays) ──
@@ -93,6 +95,7 @@ export interface BasicInfoFormState {
   revised_completion_date?: string
   revised_project_duration?: string
   project_duration_days?: number | null
+  implementation_period?: string // XXX-K: free-text implementation period (R-222)
 }
 
 // ── JSONB row types (managed as separate refs in parents) ────────────

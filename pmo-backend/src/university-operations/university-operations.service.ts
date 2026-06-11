@@ -1364,28 +1364,102 @@ export class UniversityOperationsService {
       return parseFloat(v.toFixed(decimals));
     };
 
-    // Extract and convert quarterly values (null-safe, type-safe)
-    const targets = [
-      toNumber(record.target_q1),
-      toNumber(record.target_q2),
-      toNumber(record.target_q3),
-      toNumber(record.target_q4),
-    ].filter((v): v is number => v !== null);
+    // Phase FY-1: DBM BAR1 standard — COUNT/WEIGHTED_COUNT use SUM (Directive 211/212).
+    // Phase AAAC-A: PERCENTAGE indicators with complete per-quarter numerator/denominator
+    // data aggregate as ΣN/ΣD × 100 (denominator-weighted) rather than summing already-
+    // computed percentages (which produced meaningless values like 91.3+66.7+84.5=242.52).
+    // When any filled quarter lacks a valid fraction pair, fall back to the legacy SUM so
+    // existing direct-% records (no N/D columns) are unaffected.
+    const isPercentage = record.unit_type === 'PERCENTAGE';
 
-    const accomplishments = [
-      toNumber(record.accomplishment_q1),
-      toNumber(record.accomplishment_q2),
-      toNumber(record.accomplishment_q3),
-      toNumber(record.accomplishment_q4),
-    ].filter((v): v is number => v !== null);
+    // Computes the total for one side (target or actual). Returns the numeric total
+    // plus an optional "ΣN/ΣD" fraction string when the fraction-aggregate path applies.
+    const computeSideTotal = (
+      values: (number | null)[],
+      numerators: (number | null)[],
+      denominators: (number | null)[],
+    ): { total: number | null; fraction: string | null } => {
+      const filled = values.filter((v): v is number => v !== null);
+      const legacySum =
+        filled.length > 0 ? filled.reduce((a, b) => a + b, 0) : null;
 
-    // Phase FY-1: DBM BAR1 standard — ALL indicator types use SUM (Directive 211/212)
-    const totalTarget =
-      targets.length > 0 ? targets.reduce((a, b) => a + b, 0) : null;
-    const totalAccomplishment =
-      accomplishments.length > 0
-        ? accomplishments.reduce((a, b) => a + b, 0)
-        : null;
+      if (!isPercentage) {
+        return { total: legacySum, fraction: null };
+      }
+
+      // Fraction-aggregate path: every quarter that has a value must also have a
+      // valid numerator/denominator pair (denominator > 0).
+      let sumNum = 0;
+      let sumDen = 0;
+      let allFilledHaveFraction = filled.length > 0;
+      for (let i = 0; i < 4; i++) {
+        if (values[i] === null) continue; // unfilled quarter — ignore
+        const n = numerators[i];
+        const d = denominators[i];
+        if (n === null || d === null || d <= 0) {
+          allFilledHaveFraction = false;
+          break;
+        }
+        sumNum += n;
+        sumDen += d;
+      }
+
+      if (allFilledHaveFraction && sumDen > 0) {
+        const pct = Math.min((sumNum / sumDen) * 100, 9999.99);
+        return {
+          total: parseFloat(pct.toFixed(4)),
+          fraction: `${sumNum}/${sumDen}`,
+        };
+      }
+
+      return { total: legacySum, fraction: null };
+    };
+
+    const targetSide = computeSideTotal(
+      [
+        toNumber(record.target_q1),
+        toNumber(record.target_q2),
+        toNumber(record.target_q3),
+        toNumber(record.target_q4),
+      ],
+      [
+        toNumber(record.target_numerator_q1),
+        toNumber(record.target_numerator_q2),
+        toNumber(record.target_numerator_q3),
+        toNumber(record.target_numerator_q4),
+      ],
+      [
+        toNumber(record.target_denominator_q1),
+        toNumber(record.target_denominator_q2),
+        toNumber(record.target_denominator_q3),
+        toNumber(record.target_denominator_q4),
+      ],
+    );
+    const actualSide = computeSideTotal(
+      [
+        toNumber(record.accomplishment_q1),
+        toNumber(record.accomplishment_q2),
+        toNumber(record.accomplishment_q3),
+        toNumber(record.accomplishment_q4),
+      ],
+      [
+        toNumber(record.numerator_q1),
+        toNumber(record.numerator_q2),
+        toNumber(record.numerator_q3),
+        toNumber(record.numerator_q4),
+      ],
+      [
+        toNumber(record.denominator_q1),
+        toNumber(record.denominator_q2),
+        toNumber(record.denominator_q3),
+        toNumber(record.denominator_q4),
+      ],
+    );
+
+    const totalTarget = targetSide.total;
+    const totalAccomplishment = actualSide.total;
+    const totalTargetFraction = targetSide.fraction;
+    const totalActualFraction = actualSide.fraction;
 
     // Phase HA: Override totals — when set, replace quarterly sums as base for variance/rate (Directive 369)
     const overrideTotalTarget =
@@ -1447,6 +1521,10 @@ export class UniversityOperationsService {
       ),
       computed_total_target: formatDecimal(totalTarget, 4),
       computed_total_accomplishment: formatDecimal(totalAccomplishment, 4),
+      // Phase AAAC-A: fraction-aggregate caption ("ΣN/ΣD") for PERCENTAGE indicators
+      // with complete per-quarter numerator/denominator data (null otherwise)
+      total_target_fraction: totalTargetFraction,
+      total_actual_fraction: totalActualFraction,
       // Phase HA: Override totals passthrough (Directive 369)
       override_total_target: formatDecimal(overrideTotalTarget, 4),
       override_total_actual: formatDecimal(overrideTotalActual, 4),
@@ -1533,6 +1611,7 @@ export class UniversityOperationsService {
     // Phase GY/GZ: Include override_variance (annual-only override model — Directive 359)
     // Phase HA: Include override_total_target, override_total_actual (Directive 370)
     // Phase HE: Include catch_up_plan, facilitating_factors, ways_forward (Directive 386)
+    // Phase TTT: Include numerator/denominator fraction fields for PERCENTAGE indicators
     const result = await this.em.getConnection().execute(
       `INSERT INTO operation_indicators
        (operation_id, pillar_indicator_id, particular, fiscal_year, reported_quarter,
@@ -1541,8 +1620,16 @@ export class UniversityOperationsService {
         score_q1, score_q2, score_q3, score_q4,
         remarks, override_rate, override_variance,
         override_total_target, override_total_actual,
-        catch_up_plan, facilitating_factors, ways_forward, mov, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        catch_up_plan, facilitating_factors, ways_forward, mov,
+        numerator_q1, denominator_q1, numerator_q2, denominator_q2,
+        numerator_q3, denominator_q3, numerator_q4, denominator_q4,
+        target_numerator_q1, target_denominator_q1, target_numerator_q2, target_denominator_q2,
+        target_numerator_q3, target_denominator_q3, target_numerator_q4, target_denominator_q4,
+        remarks_q1, remarks_q2, remarks_q3, remarks_q4,
+        override_total_target_fraction, override_total_actual_fraction,
+        created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
       [
         operationId,
@@ -1571,6 +1658,28 @@ export class UniversityOperationsService {
         dto.facilitating_factors ?? null,
         dto.ways_forward ?? null,
         dto.mov ?? null,
+        dto.numerator_q1 ?? null,
+        dto.denominator_q1 ?? null,
+        dto.numerator_q2 ?? null,
+        dto.denominator_q2 ?? null,
+        dto.numerator_q3 ?? null,
+        dto.denominator_q3 ?? null,
+        dto.numerator_q4 ?? null,
+        dto.denominator_q4 ?? null,
+        dto.target_numerator_q1 ?? null,
+        dto.target_denominator_q1 ?? null,
+        dto.target_numerator_q2 ?? null,
+        dto.target_denominator_q2 ?? null,
+        dto.target_numerator_q3 ?? null,
+        dto.target_denominator_q3 ?? null,
+        dto.target_numerator_q4 ?? null,
+        dto.target_denominator_q4 ?? null,
+        dto.remarks_q1 ?? null,
+        dto.remarks_q2 ?? null,
+        dto.remarks_q3 ?? null,
+        dto.remarks_q4 ?? null,
+        dto.override_total_target_fraction ?? null,
+        dto.override_total_actual_fraction ?? null,
         userId,
       ],
     );
@@ -1744,13 +1853,13 @@ export class UniversityOperationsService {
       return this.computeIndicatorMetrics(current[0]);
     }
 
-    const setClause = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
+    const setClause = fields.map((f) => `${f} = ?`).join(', ');
     const values = fields.map((f) => dto[f]);
 
     await this.em.getConnection().execute(
       `UPDATE operation_indicators
-       SET ${setClause}, updated_by = $${fields.length + 1}, updated_at = NOW()
-       WHERE id = $${fields.length + 2}
+       SET ${setClause}, updated_by = ?, updated_at = NOW()
+       WHERE id = ?
        RETURNING *`,
       [...values, userId, indicatorId],
     );
@@ -2516,18 +2625,19 @@ export class UniversityOperationsService {
     fiscalYear: number,
     pillarType?: string,
   ): Promise<{
-    quarters: {
-      quarter: string;
-      target_rate: number;
-      actual_rate: number | null;
-      accomplishment_rate_pct: number | null;
+    quarters: string[];
+    pillars: {
+      pillar_type: string;
+      accomplishment_rate_pct: (number | null)[];
     }[];
     fiscal_year: number;
     pillar_type: string | null;
   }> {
-    // Phase DR-B: Rate-based quarterly trend with cross-operation deduplication
+    // Phase DR-B: Rate-based quarterly trend with cross-operation deduplication.
     // Per quarter: target_rate = count of indicators with target > 0
     //              actual_rate = SUM(accomplishment/target) for those indicators
+    // Phase AAAG-A: grouped BY pillar so each program (pillar) is an independent series —
+    // accomplishment rates of unlike indicators across pillars are no longer merged.
     let pillarFilter = '';
     const params: any[] = [fiscalYear];
 
@@ -2564,7 +2674,8 @@ export class UniversityOperationsService {
         GROUP BY oi.pillar_indicator_id, pit.pillar_type, pit.unit_type
       )
       SELECT
-        -- Phase DR-B: Per-quarter rate computation (unchanged)
+        -- Phase AAAG-A: per-pillar grouping (one row per pillar)
+        deduped.pillar_type,
         SUM(CASE WHEN deduped.target_q1 > 0 THEN 1.0 ELSE 0 END) AS target_rate_q1,
         SUM(CASE WHEN deduped.target_q2 > 0 THEN 1.0 ELSE 0 END) AS target_rate_q2,
         SUM(CASE WHEN deduped.target_q3 > 0 THEN 1.0 ELSE 0 END) AS target_rate_q3,
@@ -2574,34 +2685,33 @@ export class UniversityOperationsService {
         SUM(CASE WHEN deduped.target_q3 > 0 THEN COALESCE(deduped.accomplishment_q3,0)/deduped.target_q3 ELSE NULL END) AS actual_rate_q3,
         SUM(CASE WHEN deduped.target_q4 > 0 THEN COALESCE(deduped.accomplishment_q4,0)/deduped.target_q4 ELSE NULL END) AS actual_rate_q4
       FROM deduped
+      GROUP BY deduped.pillar_type
     `;
 
     const result = await this.em.getConnection().execute(query, [...params, fiscalYear]);
-    const row = result[0] || {};
 
-    const quarters = ['Q1', 'Q2', 'Q3', 'Q4'].map((q, i) => {
-      const qNum = i + 1;
-      const targetRate = parseFloat(row[`target_rate_q${qNum}`]) || 0;
-      const actualRate =
-        row[`actual_rate_q${qNum}`] != null
-          ? parseFloat(row[`actual_rate_q${qNum}`])
-          : null;
-      const ratePct =
-        targetRate > 0 && actualRate !== null
+    // Phase AAAG-A: build one per-quarter rate array per pillar (formula unchanged,
+    // now scoped within a single pillar).
+    const pillars = result.map((row: any) => {
+      const accomplishment_rate_pct = [1, 2, 3, 4].map((qNum) => {
+        const targetRate = parseFloat(row[`target_rate_q${qNum}`]) || 0;
+        const actualRate =
+          row[`actual_rate_q${qNum}`] != null
+            ? parseFloat(row[`actual_rate_q${qNum}`])
+            : null;
+        return targetRate > 0 && actualRate !== null
           ? parseFloat(((actualRate / targetRate) * 100).toFixed(2))
           : null;
-
+      });
       return {
-        quarter: q,
-        target_rate: targetRate,
-        actual_rate:
-          actualRate !== null ? parseFloat(actualRate.toFixed(4)) : null,
-        accomplishment_rate_pct: ratePct,
+        pillar_type: row.pillar_type as string,
+        accomplishment_rate_pct,
       };
     });
 
     return {
-      quarters,
+      quarters: ['Q1', 'Q2', 'Q3', 'Q4'],
+      pillars,
       fiscal_year: fiscalYear,
       pillar_type: pillarType || null,
     };

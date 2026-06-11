@@ -66,6 +66,11 @@ export class CreateConstructionProjectDto {
   @IsString()
   original_contract_duration?: string;
 
+  // XXX-K: Implementation Period (free-text, R-222)
+  @IsOptional()
+  @IsString()
+  implementation_period?: string;
+
   @IsOptional()
   @IsString()
   contract_number?: string;
@@ -221,13 +226,7 @@ export class CreateConstructionProjectDto {
   @IsArray()
   incident_log?: Record<string, any>[];
 
-  @IsOptional()
-  @IsArray()
-  risk_register?: Record<string, any>[];
-
-  @IsOptional()
-  @IsArray()
-  escalation_records?: Record<string, any>[];
+  // XXX-M: risk_register/escalation_records removed — Project Governance section removed
 
   // GGG-E: Others-tab data banking
   @IsOptional()
@@ -303,6 +302,15 @@ export class CreateConstructionProjectDto {
   @IsOptional()
   @IsArray()
   sdg_goals?: string[];
+
+  // XXX-K: Historical Planning Frameworks (2017-2022)
+  @IsOptional()
+  @IsArray()
+  rdp2017_alignment?: string[];
+
+  @IsOptional()
+  @IsArray()
+  point_agenda_10?: string[];
 
   // MC: Beneficiaries dynamic list
   @IsOptional()

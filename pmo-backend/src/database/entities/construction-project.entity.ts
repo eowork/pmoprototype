@@ -51,6 +51,10 @@ export class ConstructionProject {
   @Property({ nullable: true, length: 100 })
   originalContractDuration?: string;
 
+  // XXX-K: Implementation Period (free-text, R-222)
+  @Property({ nullable: true, length: 100 })
+  implementationPeriod?: string;
+
   @Property({ nullable: true, length: 50 })
   contractNumber?: string;
 
@@ -214,11 +218,7 @@ export class ConstructionProject {
   @Property({ columnType: 'jsonb', default: '[]' })
   incidentLog: any[] = [];
 
-  @Property({ columnType: 'jsonb', default: '[]' })
-  riskRegister: any[] = [];
-
-  @Property({ columnType: 'jsonb', default: '[]' })
-  escalationRecords: any[] = [];
+  // XXX-M: riskRegister/escalationRecords removed — Project Governance section removed
 
   // GGG-E: Others-tab data banking (additionalNotes, projectReferences[], specialInstructions, historicalReferences[], customMetadata{})
   @Property({ columnType: 'jsonb', nullable: true })
@@ -283,6 +283,15 @@ export class ConstructionProject {
   // QQQ: UN Sustainable Development Goals
   @Property({ nullable: true, columnType: 'jsonb' })
   sdgGoals?: any;
+
+  // XXX-K: Historical Planning Frameworks (2017-2022)
+  @Property({ nullable: true, columnType: 'jsonb' })
+  rdp2017Alignment?: any;
+
+  // Explicit fieldName: default naming strategy would map to "point_agenda10"
+  // (no underscore before "10"), but the migration column is "point_agenda_10".
+  @Property({ nullable: true, columnType: 'jsonb', fieldName: 'point_agenda_10' })
+  pointAgenda10?: any;
 
   // MC: Beneficiaries dynamic list
   @Property({ nullable: true, columnType: 'jsonb' })

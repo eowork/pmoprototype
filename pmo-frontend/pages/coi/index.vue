@@ -31,7 +31,10 @@ const rejecting = ref(false)
 const actionLoading = ref<string | null>(null)
 
 // OOO-G: Table page-size and sort — persisted in localStorage.
-const itemsPerPage = ref(25)
+// Phase AAAF-1: default page size 5 (content-adaptive table view).
+const itemsPerPage = ref(5)
+// Phase AAAF-2: current page, drives content-adaptive tableHeight.
+const page = ref(1)
 const sortBy = ref<Array<{ key: string; order: 'asc' | 'desc' }>>([{ key: 'projectName', order: 'asc' }])
 
 // LLL-B/C: Table headers + Column Manager.
@@ -75,8 +78,9 @@ onMounted(() => {
     try { hiddenColumns.value = new Set(JSON.parse(stored)) } catch { /* keep default */ }
   }
   filterBannerDismissed.value = localStorage.getItem('coi_filter_banner_dismissed') === 'true'
-  const savedPageSize = localStorage.getItem('coi_items_per_page')
-  if (savedPageSize) itemsPerPage.value = parseInt(savedPageSize, 10) || 25
+  // Phase AAAF-1: read from a new key so the stale `25` default doesn't suppress the new `5`
+  const savedPageSize = localStorage.getItem('coi_items_per_page_v2')
+  if (savedPageSize) itemsPerPage.value = parseInt(savedPageSize, 10) || 5
   const savedSort = localStorage.getItem('coi_sort_by')
   if (savedSort) { try { sortBy.value = JSON.parse(savedSort) } catch { /* keep default */ } }
 })
@@ -85,7 +89,7 @@ watch(hiddenColumns, (v) => {
   if (import.meta.client) localStorage.setItem('coi_hidden_columns', JSON.stringify([...v]))
 }, { deep: true })
 watch(itemsPerPage, (v) => {
-  if (import.meta.client) localStorage.setItem('coi_items_per_page', String(v))
+  if (import.meta.client) localStorage.setItem('coi_items_per_page_v2', String(v))
 })
 watch(sortBy, (v) => {
   if (import.meta.client) localStorage.setItem('coi_sort_by', JSON.stringify(v))
@@ -613,16 +617,23 @@ const onHoldProjects = computed(() =>
     .slice(0, 5)
 )
 
-// QQQ-B3: Dynamic table height — reserve at least 5 rows of space but shrink to fit
-// the actual filtered row count, capped at 580px (avoids ~300px of blank space when
-// only a few results match a filter).
-const tableHeight = computed(() => {
-  const ROW_PX = 52
+// Phase AAAF-2: Content-adaptive table height. Fit the rows actually shown on the current
+// page — short pages render naturally (no internal scroll, no blank space); tall pages
+// (large page sizes) cap and scroll with a fixed header. Supersedes QQQ-B3 / AAAB-B-1,
+// which sized off the TOTAL filtered count and cramped real (taller) rows into ~2 visible.
+const tableHeight = computed<number | undefined>(() => {
+  const total = filteredProjects.value.length
+  if (total === 0) return undefined            // let #no-data render naturally
+  const perPage = itemsPerPage.value === -1 ? total : itemsPerPage.value
+  const remaining = total - (page.value - 1) * perPage
+  const shownOnPage = Math.min(perPage, Math.max(remaining, 0)) || perPage
+
+  const VISIBLE_ROW_LIMIT = 8                   // rows before internal scroll engages
+  if (shownOnPage <= VISIBLE_ROW_LIMIT) return undefined   // natural fit
+
+  const ROW_PX = 64                             // realistic row height (chips + wrap + padding)
   const HEAD_PX = 56
-  const MIN_ROWS = 5
-  const MAX_PX = 580
-  const rowCount = Math.max(filteredProjects.value.length, MIN_ROWS)
-  return Math.min(rowCount * ROW_PX + HEAD_PX, MAX_PX)
+  return VISIBLE_ROW_LIMIT * ROW_PX + HEAD_PX   // capped → fixed-header scroll
 })
 
 const statusChartOptions = computed(() => ({
@@ -870,14 +881,6 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
 
     <!-- Projects Tab -->
     <v-window-item value="projects">
-
-    <!-- GGG-B / MMM-G: Action strip — primary action left, navigation actions right.
-         "Review Projects" removed (redundant with Pending Review KPI + Status filter). -->
-    <div class="d-flex flex-wrap align-center ga-2 mb-3">
-      <v-spacer />
-      <v-btn color="info" variant="tonal" prepend-icon="mdi-chart-bar" size="small" @click="activeTab = 'analytics'">Portfolio Analytics</v-btn>
-      <v-btn color="grey-darken-1" variant="tonal" prepend-icon="mdi-earth" size="small" :to="'/coi/public'">Public View</v-btn>
-    </div>
 
     <!-- LLL-F / NNN-J: Portfolio Summary section banner -->
     <div class="mb-3">
@@ -1190,7 +1193,7 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
     <div class="mb-2">
       <div class="d-flex align-center ga-2 mb-2 flex-wrap">
         <v-icon size="16" color="grey-darken-2">mdi-format-list-bulleted</v-icon>
-        <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label">Project List</span>
+        <span class="text-caption font-weight-bold text-grey-darken-2 text-uppercase coi-section-label pa-0">Project List</span>
         <v-divider class="flex-grow-1 ml-1 mr-2" style="min-width:20px" />
         <v-btn-toggle
           v-model="viewMode"
@@ -1198,11 +1201,11 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
           divided
           mandatory
           color="primary"
-          class="flex-shrink-0"
+          class="flex-shrink-2 mb-1 pa-0"
         >
-          <v-btn value="list" size="small" prepend-icon="mdi-format-list-bulleted" class="px-3">List</v-btn>
-          <v-btn value="card" size="small" prepend-icon="mdi-view-grid-outline" class="px-3">Card</v-btn>
-          <v-btn value="table" size="small" prepend-icon="mdi-table" class="px-3">Table</v-btn>
+          <v-btn value="list" size="small" prepend-icon="mdi-format-list-bulleted" class="px-2 ">List</v-btn>
+          <v-btn value="card" size="small" prepend-icon="mdi-view-grid-outline" class="px-2 ">Card</v-btn>
+          <v-btn value="table" size="small" prepend-icon="mdi-table" class="px-2 ">Table</v-btn>
         </v-btn-toggle>
       </div>
       <div class="text-caption text-grey-darken-1">
@@ -1318,8 +1321,9 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
         :loading="loading"
         :search="search"
         v-model:items-per-page="itemsPerPage"
+        v-model:page="page"
         v-model:sort-by="sortBy"
-        :items-per-page-options="[{ value: 10, title: '10' }, { value: 25, title: '25' }, { value: 50, title: '50' }, { value: -1, title: 'All' }]"
+        :items-per-page-options="[{ value: 5, title: '5' }, { value: 10, title: '10' }, { value: 25, title: '25' }, { value: 50, title: '50' }, { value: -1, title: 'All' }]"
         fixed-header
         :height="tableHeight"
         item-value="id"

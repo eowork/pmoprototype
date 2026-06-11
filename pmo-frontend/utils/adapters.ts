@@ -350,13 +350,16 @@ export interface BackendProjectDetail extends BackendProject {
   custom_key_sections?: { id: string; label: string; typeCode: string }[]
   custom_supporting_sections?: { id: string; label: string; typeCode: string }[]
   incident_log?: Record<string, any>[]
-  risk_register?: Record<string, any>[]
-  escalation_records?: Record<string, any>[]
+  // XXX-M: risk_register/escalation_records removed — Project Governance section removed
   // OU-A: strategic planning arrays
   rdp_alignment?: any[]
   socioeconomic_agenda?: any[]
   csu_likha_goals?: any[]
   sdg_goals?: string[]
+  // XXX-K: Historical Planning Frameworks (2017-2022) + Implementation Period
+  rdp2017_alignment?: any[]
+  point_agenda_10?: any[]
+  implementation_period?: string
   personnel_groups?: {
     csu?: { name: string; position: string; role: string }[]
     contractor?: { name: string; position: string; company: string }[]
@@ -465,6 +468,10 @@ export interface UIProjectDetail extends UIProject {
   socioeconomicAgenda: any[]
   csuLikhaGoals: any[]
   sdgGoals: string[]
+  // XXX-K: Historical Planning Frameworks (2017-2022) + Implementation Period
+  rdp2017Alignment: any[]
+  pointAgenda10: any[]
+  implementationPeriod: string
   implementingAgency: string
   projectStatusCategory: string
   statusUpdates: Record<string, any>[]
@@ -474,8 +481,7 @@ export interface UIProjectDetail extends UIProject {
   customKeySections: { id: string; label: string; typeCode: string }[]
   customSupportingSections: { id: string; label: string; typeCode: string }[]
   incidentLog: Record<string, any>[]
-  riskRegister: Record<string, any>[]
-  escalationRecords: Record<string, any>[]
+  // XXX-M: riskRegister/escalationRecords removed — Project Governance section removed
   projectNotesBanking: {
     additionalNotes?: string
     projectReferences?: { label: string; url?: string; notes?: string }[]
@@ -612,6 +618,9 @@ export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDeta
     socioeconomicAgenda: backend.socioeconomic_agenda || [],
     csuLikhaGoals: backend.csu_likha_goals || [],
     sdgGoals: backend.sdg_goals || [],
+    rdp2017Alignment: backend.rdp2017_alignment || [],
+    pointAgenda10: backend.point_agenda_10 || [],
+    implementationPeriod: backend.implementation_period || '',
     implementingAgency: backend.implementing_agency || '',
     projectStatusCategory: backend.project_status_category || '',
     statusUpdates: (backend.status_updates || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
@@ -622,8 +631,7 @@ export function adaptProjectDetail(backend: BackendProjectDetail): UIProjectDeta
     customSupportingSections: backend.custom_supporting_sections || [],
     // KY-B2: filter out non-object items (guards against [[]] double-wrap corruption)
     incidentLog: (backend.incident_log || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
-    riskRegister: (backend.risk_register || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
-    escalationRecords: (backend.escalation_records || []).filter((r: any) => r && typeof r === 'object' && !Array.isArray(r)),
+    // XXX-M: riskRegister/escalationRecords removed — Project Governance section removed
     projectNotesBanking: (backend as any).project_notes_banking || null,
     personnelGroups: {
       csu: (backend.personnel_groups?.csu || []) as { name: string; position: string; role: string }[],
