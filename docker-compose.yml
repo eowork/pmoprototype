@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pmo_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./pmo-backend
+    restart: unless-stopped
+    # Loads JWT/OAuth/LDAP secrets etc. from the existing local pmo-backend/.env.
+    # The DATABASE_* values below override that file so the backend talks to the
+    # "postgres" service instead of localhost.
+    env_file:
+      - ./pmo-backend/.env
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${POSTGRES_DB:-pmo_dashboard}
+      DATABASE_USER: ${POSTGRES_USER:-postgres}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PORT: 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - backend_uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./pmo-frontend
+    restart: unless-stopped
+    env_file:
+      - ./pmo-frontend/.env
+    environment:
+      # Browser-facing API URL — must be reachable from the user's browser
+      # (the app is an SPA, so requests are made client-side, not container-to-container).
+      NUXT_PUBLIC_API_BASE: http://localhost:${BACKEND_PORT:-3000}
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: 3000
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3001}:3000"
+
+volumes:
+  pgdata:
+  backend_uploads:
