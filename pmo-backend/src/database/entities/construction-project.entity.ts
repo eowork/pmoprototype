@@ -94,8 +94,18 @@ export class ConstructionProject {
   @Property({ nullable: true, type: 'integer' })
   numberOfFloors?: number;
 
-  @Property({ columnType: 'uuid' })
-  fundingSourceId!: string;
+  // AAAK: legacy FK — kept for backward compatibility, now nullable (superseded by
+  // primaryFundingSource + fundingSourceDescription two-level structure below).
+  @Property({ nullable: true, columnType: 'uuid' })
+  fundingSourceId?: string;
+
+  // AAAK: Two-Level Funding — Level 1 (controlled category, used for analytics/filtering)
+  @Property({ nullable: true, length: 30 })
+  primaryFundingSource?: string;
+
+  // AAAK: Two-Level Funding — Level 2 (free-text description, detailed reporting/audit)
+  @Property({ nullable: true, length: 255 })
+  fundingSourceDescription?: string;
 
   @Property({ nullable: true, columnType: 'uuid' })
   subcategoryId?: string;

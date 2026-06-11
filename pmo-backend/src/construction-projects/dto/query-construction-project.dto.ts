@@ -1,6 +1,10 @@
-import { IsOptional, IsEnum, IsUUID } from 'class-validator';
+import { IsOptional, IsEnum, IsUUID, IsIn, IsString } from 'class-validator';
 import { PaginationDto } from '../../common/dto';
-import { ProjectStatus, Campus } from '../../common/enums';
+import {
+  ProjectStatus,
+  Campus,
+  PRIMARY_FUNDING_SOURCE_VALUES,
+} from '../../common/enums';
 
 export class QueryConstructionProjectDto extends PaginationDto {
   @IsOptional()
@@ -18,4 +22,14 @@ export class QueryConstructionProjectDto extends PaginationDto {
   @IsOptional()
   @IsUUID()
   funding_source_id?: string;
+
+  // AAAK: Two-Level Funding — primary controlled-category filter (exact match).
+  @IsOptional()
+  @IsIn(PRIMARY_FUNDING_SOURCE_VALUES)
+  primary_funding_source?: string;
+
+  // AAAK: Two-Level Funding — free-text description filter (partial/ILIKE match).
+  @IsOptional()
+  @IsString()
+  funding_source_description?: string;
 }

@@ -346,3 +346,30 @@ export function leafKeysOf(opts: HierarchyOption[]): string[] {
   walk(opts);
   return out;
 }
+
+/**
+ * Phase AAAK — Two-Level Funding Structure.
+ * Level 1: controlled funding category (used for analytics/filtering/KPIs).
+ * Mirror of backend `PrimaryFundingSource` enum (pmo-backend/src/common/enums/
+ * primary-funding-source.enum.ts) — keep the two lists in sync.
+ */
+export const PRIMARY_FUNDING_SOURCE_OPTIONS: { value: string; title: string }[] = [
+  { value: 'GAA',                title: 'GAA' },
+  { value: 'SPECIAL_GRANT',      title: 'Special Grant' },
+  { value: 'TRUST_FUND',         title: 'Trust Fund' },
+  { value: 'INSTITUTIONAL_FUND', title: 'Institutional Fund' },
+  { value: 'LGU_FUND',           title: 'LGU Fund' },
+  { value: 'PRIVATE_SECTOR',     title: 'Private Sector' },
+  { value: 'FOREIGN_ASSISTED',   title: 'Foreign-Assisted Project' },
+  { value: 'OTHER',              title: 'Other' },
+];
+
+const _primaryFundingIndex = new Map(
+  PRIMARY_FUNDING_SOURCE_OPTIONS.map(o => [o.value, o.title]),
+);
+
+/** Display label for a Level-1 funding category value (falls back to the raw value). */
+export function labelForPrimaryFundingSource(value: string | null | undefined): string {
+  if (!value) return '';
+  return _primaryFundingIndex.get(value) || value;
+}

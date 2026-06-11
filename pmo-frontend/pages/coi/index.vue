@@ -2,6 +2,7 @@
 import { adaptProjects, type UIProject, type BackendProject, type PublicationStatus } from '~/utils/adapters'
 import { getStatusColor, getPublicationStatusColor, STATUS_HEX } from '~/utils/status-colors'
 import { formatDate, formatRelativeDate } from '~/utils/date-utils'
+import { PRIMARY_FUNDING_SOURCE_OPTIONS, labelForPrimaryFundingSource } from '~/utils/coiHierarchies'
 import VueApexCharts from 'vue3-apexcharts'
 
 definePageMeta({
@@ -292,6 +293,7 @@ function formatCurrency(amount: number): string {
 // Phase JB + III-B/C: KPI stats + filter bar + view modes + date/sort
 const filterStatus   = ref('')
 const filterCampus   = ref('')
+const filterFundingSource = ref('') // AAAK: Level-1 primary funding source filter
 const filterDateFrom = ref('')
 const filterDateTo   = ref('')
 const sortKey        = ref<'projectName'|'startDate'|'endDate'|'physicalAccomplishment'|'totalContractAmount'>('projectName')
@@ -324,6 +326,7 @@ const sortOptions = [
 function clearFilters() {
   filterStatus.value   = ''
   filterCampus.value   = ''
+  filterFundingSource.value = ''
   filterDateFrom.value = ''
   filterDateTo.value   = ''
   search.value         = ''
@@ -340,7 +343,7 @@ function clearFilters() {
 }
 
 const hasActiveFilters = computed(() =>
-  !!(filterStatus.value || filterCampus.value || filterDateFrom.value || filterDateTo.value ||
+  !!(filterStatus.value || filterCampus.value || filterFundingSource.value || filterDateFrom.value || filterDateTo.value ||
      search.value || filterProjectCode.value ||
      filterOrigStartFrom.value || filterOrigStartTo.value ||
      filterOrigEndFrom.value || filterOrigEndTo.value ||
@@ -352,6 +355,7 @@ const activeFilterChips = computed(() => {
   const chips: Array<{ label: string; key: string }> = []
   if (filterStatus.value)        chips.push({ label: `Status: ${filterStatus.value}`, key: 'status' })
   if (filterCampus.value)        chips.push({ label: `Campus: ${filterCampus.value}`, key: 'campus' })
+  if (filterFundingSource.value) chips.push({ label: `Funding: ${labelForPrimaryFundingSource(filterFundingSource.value)}`, key: 'fundingSource' })
   if (filterDateFrom.value)      chips.push({ label: `Start ≥ ${filterDateFrom.value}`, key: 'dateFrom' })
   if (filterDateTo.value)        chips.push({ label: `Start ≤ ${filterDateTo.value}`, key: 'dateTo' })
   if (search.value)              chips.push({ label: `Search: "${search.value}"`, key: 'search' })
@@ -371,6 +375,7 @@ function removeFilterChip(key: string) {
   const actions: Record<string, () => void> = {
     status:       () => { filterStatus.value = '' },
     campus:       () => { filterCampus.value = '' },
+    fundingSource:() => { filterFundingSource.value = '' },
     dateFrom:     () => { filterDateFrom.value = '' },
     dateTo:       () => { filterDateTo.value = '' },
     search:       () => { search.value = '' },
@@ -400,6 +405,11 @@ const campusFilterOptions = [
   { title: 'All Campuses', value: '' },
   { title: 'Main Campus', value: 'MAIN' },
   { title: 'Cabadbaran', value: 'CABADBARAN' },
+]
+// AAAK: Level-1 funding source filter options ("All" + 8 controlled categories)
+const fundingSourceFilterOptions = [
+  { title: 'All Funding', value: '' },
+  ...PRIMARY_FUNDING_SOURCE_OPTIONS,
 ]
 
 const stats = ref({
@@ -504,6 +514,7 @@ const filteredProjects = computed(() => {
   let result = projects.value
   if (filterStatus.value) result = result.filter(p => p.status?.toUpperCase() === filterStatus.value)
   if (filterCampus.value) result = result.filter(p => p.campus?.toUpperCase() === filterCampus.value)
+  if (filterFundingSource.value) result = result.filter(p => p.primaryFundingSource === filterFundingSource.value)
   if (search.value) {
     const term = search.value.toLowerCase()
     result = result.filter(p =>
@@ -731,7 +742,11 @@ const fundingSourceChart = computed(() => {
     }
   }
   const map: Record<string, number> = {}
-  projects.value.forEach(p => { const fs = p.fundSource || 'Unknown'; map[fs] = (map[fs] || 0) + 1 })
+  projects.value.forEach(p => {
+    // AAAK: group by Level-1 category label (falls back to legacy fundSource then Unknown)
+    const fs = p.primaryFundingSource ? labelForPrimaryFundingSource(p.primaryFundingSource) : (p.fundSource || 'Unknown')
+    map[fs] = (map[fs] || 0) + 1
+  })
   return {
     series: Object.values(map),
     options: {
@@ -1037,7 +1052,7 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
     <v-card elevation="1" rounded="lg" class="mb-3 pa-3">
       <!-- LLL-B: Primary filter bar — single compact row -->
       <v-row dense align="center">
-        <v-col cols="12" sm="5" md="4">
+        <v-col cols="12" sm="5" md="3">
           <v-text-field
             v-model="search"
             placeholder="Search project name, code, campus…"
@@ -1069,7 +1084,17 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
             hide-details
           />
         </v-col>
-        <v-col cols="12" sm="12" md="4" class="d-flex align-center justify-end flex-wrap ga-1">
+        <v-col cols="6" sm="4" md="2">
+          <v-select
+            v-model="filterFundingSource"
+            :items="fundingSourceFilterOptions"
+            label="Funding Source"
+            variant="outlined"
+            density="compact"
+            hide-details
+          />
+        </v-col>
+        <v-col cols="12" sm="12" md="3" class="d-flex align-center justify-end flex-wrap ga-1">
           <!-- LLL-C: Column Manager (table view only) -->
           <v-menu v-if="viewMode === 'table'" :close-on-content-click="false">
             <template #activator="{ props: mp }">
@@ -1491,7 +1516,12 @@ onMounted(() => { fetchProjects(); fetchAnalytics() })
           <span class="text-body-2">{{ item.projectCode || '—' }}</span>
         </template>
         <template #item.fundSource="{ item }">
-          <span class="text-body-2">{{ item.fundSource || '—' }}</span>
+          <div class="text-body-2">
+            {{ item.primaryFundingSource ? labelForPrimaryFundingSource(item.primaryFundingSource) : (item.fundSource || '—') }}
+          </div>
+          <div v-if="item.fundingSourceDescription" class="text-caption text-grey-darken-1">
+            {{ item.fundingSourceDescription }}
+          </div>
         </template>
         <template #item.originalCompletionDate="{ item }">
           <span class="text-body-2">{{ formatDate(item.originalCompletionDate) }}</span>

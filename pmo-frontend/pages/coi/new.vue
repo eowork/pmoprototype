@@ -40,7 +40,9 @@ const form = ref({
   implementing_agency: '',
   co_implementing_agency: '',
   attached_agency: '',
-  // Funding hybrid (MG)
+  // Funding hybrid (MG) + AAAK two-level funding
+  primary_funding_source: '',
+  funding_source_description: '',
   funding_source_id: '',
   funding_source_type: '',
   additional_funding_sources: [] as { type: string; name: string; notes?: string }[],
@@ -127,7 +129,7 @@ const contractorPersonnelRows = ref<ContractorPersonnelRow[]>([])
 const othersPersonnelRows     = ref<OthersPersonnelRow[]>([])
 
 // Lookup data
-const fundingSources = ref<{ id: string; name: string }[]>([])
+const fundingSources = ref<{ id: string; name: string; type?: string }[]>([])
 const contractors = ref<{ id: string; name: string }[]>([])
 
 // MG: Relaxed project code validation â€" free-form per ECO directive.
@@ -439,6 +441,9 @@ async function handleSubmit() {
       co_implementing_agency: form.value.co_implementing_agency || undefined,
       attached_agency: form.value.attached_agency || undefined,
       // Funding hybrid (MG) â€" cost_amount is the canonical field; backend remaps to contract_amount
+      // AAAK two-level funding: primary (controlled) required, description (free text) optional
+      primary_funding_source: form.value.primary_funding_source || undefined,
+      funding_source_description: form.value.funding_source_description || undefined,
       funding_source_id: form.value.funding_source_id || undefined,
       funding_source_type: form.value.funding_source_type || undefined,
       additional_funding_sources: form.value.additional_funding_sources?.length

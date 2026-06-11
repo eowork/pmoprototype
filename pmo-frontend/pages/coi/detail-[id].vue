@@ -3,7 +3,7 @@ import { adaptProjectDetail, adaptGalleryItem, type UIProjectDetail, type Backen
 import { getStatusColor, getPublicationStatusColor } from '~/utils/status-colors'
 import { formatDate } from '~/utils/date-utils'
 import { KEY_DOC_TYPECODES } from '~/utils/coiFormState'
-import { labelForSdg, labelForRdp, labelForSea, labelForLikha, labelForRdp2017, labelForPointAgenda10 } from '~/utils/coiHierarchies'
+import { labelForSdg, labelForRdp, labelForSea, labelForLikha, labelForRdp2017, labelForPointAgenda10, labelForPrimaryFundingSource } from '~/utils/coiHierarchies'
 import { useCoiProgressReports, type ProgressReport } from '~/composables/useCoiProgressReports'
 import CiDocumentChecklist from '~/components/coi/CiDocumentChecklist.vue'
 import CiPersonnelAccessCard from '~/components/coi/CiPersonnelAccessCard.vue'
@@ -1656,13 +1656,24 @@ onMounted(() => {
                       </v-col>
                     </v-row>
 
-                    <!-- Funding sources -->
-                    <template v-if="project.fundSource || project.additionalFundingSources?.length">
-                      <div class="text-caption text-grey mb-1">Funding Sources</div>
-                      <div class="d-flex flex-wrap ga-2 mb-3">
-                        <v-chip v-if="project.fundSource" size="small" variant="tonal" color="primary">{{ project.fundSource }}</v-chip>
-                        <v-chip v-for="(src, i) in project.additionalFundingSources" :key="i" size="small" variant="tonal" color="success">{{ src.name }}</v-chip>
+                    <!-- AAAK: Two-Level Funding — Funding Source (always, if set) + Funding Description (only if present) -->
+                    <template v-if="project.primaryFundingSource || project.fundingSourceDescription || project.additionalFundingSources?.length">
+                      <div class="text-caption text-grey mb-1">Funding Source</div>
+                      <div class="d-flex flex-wrap ga-2 mb-2">
+                        <v-chip v-if="project.primaryFundingSource" size="small" variant="tonal" color="primary">
+                          {{ labelForPrimaryFundingSource(project.primaryFundingSource) }}
+                        </v-chip>
+                        <v-chip v-else-if="project.fundSource" size="small" variant="tonal" color="primary">{{ project.fundSource }}</v-chip>
+                        <v-chip v-if="project.fundingSourceDescription" size="small" variant="outlined" color="primary">
+                          {{ project.fundingSourceDescription }}
+                        </v-chip>
                       </div>
+                      <template v-if="project.additionalFundingSources?.length">
+                        <div class="text-caption text-grey mb-1">Additional Funding Sources</div>
+                        <div class="d-flex flex-wrap ga-2 mb-3">
+                          <v-chip v-for="(src, i) in project.additionalFundingSources" :key="i" size="small" variant="tonal" color="success">{{ src.name }}</v-chip>
+                        </div>
+                      </template>
                     </template>
                   </v-col>
                 </v-row>

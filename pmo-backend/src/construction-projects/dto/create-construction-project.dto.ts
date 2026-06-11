@@ -3,17 +3,23 @@ import {
   IsNotEmpty,
   IsOptional,
   IsEnum,
+  IsIn,
   IsUUID,
   IsNumber,
   IsInt,
   Min,
+  MaxLength,
   IsDateString,
   IsArray,
   IsObject,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ProjectStatus, Campus } from '../../common/enums';
+import {
+  ProjectStatus,
+  Campus,
+  PRIMARY_FUNDING_SOURCE_VALUES,
+} from '../../common/enums';
 import { AssignmentMetadataDto } from './assignment-metadata.dto';
 
 export class CreateConstructionProjectDto {
@@ -127,9 +133,21 @@ export class CreateConstructionProjectDto {
   @IsNumber()
   number_of_floors?: number;
 
+  // AAAK: legacy FK — now optional (superseded by two-level structure below).
+  @IsOptional()
   @IsUUID()
+  funding_source_id?: string;
+
+  // AAAK: Two-Level Funding — Level 1 (controlled category), required.
+  @IsIn(PRIMARY_FUNDING_SOURCE_VALUES)
   @IsNotEmpty()
-  funding_source_id: string;
+  primary_funding_source: string;
+
+  // AAAK: Two-Level Funding — Level 2 (free-text description), optional.
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  funding_source_description?: string;
 
   @IsOptional()
   @IsUUID()

@@ -94,7 +94,9 @@ const form = ref({
   implementing_agency: '',
   co_implementing_agency: '',
   attached_agency: '',
-  // Funding hybrid (MG)
+  // Funding hybrid (MG) + AAAK two-level funding
+  primary_funding_source: '',
+  funding_source_description: '',
   funding_source_id: '',
   funding_source_type: '',
   additional_funding_sources: [] as { type: string; name: string; notes?: string }[],
@@ -281,7 +283,7 @@ const statusOptions = [
 ]
 
 // Lookup data
-const fundingSources = ref<{ id: string; name: string }[]>([])
+const fundingSources = ref<{ id: string; name: string; type?: string }[]>([])
 const contractors = ref<{ id: string; name: string }[]>([])
 const staffUsers = ref<{ id: string; first_name: string; last_name: string }[]>([])
 
@@ -367,7 +369,9 @@ async function fetchData() {
       implementing_agency: p.implementing_agency || '',
       co_implementing_agency: pAny.co_implementing_agency || '',
       attached_agency: pAny.attached_agency || '',
-      // Funding hybrid (MG)
+      // Funding hybrid (MG) + AAAK two-level funding
+      primary_funding_source: pAny.primary_funding_source || '',
+      funding_source_description: pAny.funding_source_description || '',
       funding_source_id: p.funding_source_id || '',
       funding_source_type: pAny.funding_source_type || '',
       additional_funding_sources: Array.isArray(pAny.additional_funding_sources)
@@ -654,6 +658,9 @@ async function handleSubmit() {
       co_implementing_agency: form.value.co_implementing_agency || undefined,
       attached_agency: form.value.attached_agency || undefined,
       // Funding hybrid (MG) — cost_amount canonical; backend remaps to contract_amount
+      // AAAK two-level funding: primary (controlled) required, description (free text) optional
+      primary_funding_source: form.value.primary_funding_source || undefined,
+      funding_source_description: form.value.funding_source_description || undefined,
       funding_source_id: form.value.funding_source_id || undefined,
       funding_source_type: form.value.funding_source_type || undefined,
       additional_funding_sources: form.value.additional_funding_sources?.length

@@ -48,6 +48,9 @@ export interface BackendProject {
   physical_progress?: number
   funding_source_id?: string
   funding_source_name?: string
+  // AAAK: Two-Level Funding
+  primary_funding_source?: string
+  funding_source_description?: string
   contractor_id?: string
   contractor_name?: string
   start_date?: string
@@ -121,6 +124,9 @@ export interface UIProject {
   totalContractAmount: number
   physicalAccomplishment: number
   fundSource: string
+  // AAAK: Two-Level Funding — Level 1 (controlled category) + Level 2 (free-text description)
+  primaryFundingSource: string
+  fundingSourceDescription: string
   contractor: string
   startDate: string
   endDate: string
@@ -189,6 +195,9 @@ export function adaptProject(backend: BackendProject): UIProject {
     totalContractAmount: Number(backend.contract_amount) || 0,
     physicalAccomplishment: Number(backend.physical_progress) || 0,
     fundSource: backend.funding_source_name || '',
+    // AAAK: Two-Level Funding
+    primaryFundingSource: backend.primary_funding_source || '',
+    fundingSourceDescription: backend.funding_source_description || '',
     contractor: backend.contractor_name || '',
     startDate: backend.start_date || '',
     endDate: backend.end_date || '',
