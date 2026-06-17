@@ -63,6 +63,11 @@ if (import.meta.client) {
 const canEditCurrentProject = computed(() =>
   canEdit('coi') && (isAdmin.value || _canEditFromAccess.value)
 )
+// PHASE BBBD (Track 7, R-331): module access but NOT assigned to THIS project → read-only + notice.
+// Presentation only — the project-level authorization (useCoiAccess) is unchanged.
+const showNotAssignedNotice = computed(
+  () => accessResolved.value && !canEditCurrentProject.value && !isContractorUser.value,
+)
 // PR-B: per-tab edit flags now respect project-level effectivePermissions
 const canEditMilestones = computed(() => canEditMilestonesFromAccess.value)
 const canEditWorkLog    = computed(() => canEditWorkLogFromAccess.value)
@@ -2081,6 +2086,17 @@ onBeforeUnmount(() => {
         </p>
       </div>
     </div>
+
+    <!-- PHASE BBBD (Track 7): project-level access notice (presentation only; authZ unchanged) -->
+    <v-alert
+      v-if="showNotAssignedNotice"
+      type="warning"
+      variant="tonal"
+      class="mb-4"
+      icon="mdi-account-lock-outline"
+    >
+      You have module access but are not assigned to this project. Please contact your administrator.
+    </v-alert>
 
     <!-- Loading State -->
     <v-card v-if="loading" class="pa-6">

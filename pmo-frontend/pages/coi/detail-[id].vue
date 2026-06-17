@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
 import { adaptProjectDetail, adaptGalleryItem, type UIProjectDetail, type BackendProjectDetail, type BackendGalleryItem, type UIGalleryItem, type PublicationStatus } from '~/utils/adapters'
 import { getStatusColor, getPublicationStatusColor } from '~/utils/status-colors'
-import { formatDate } from '~/utils/date-utils'
+import { formatDate } from '~/utils/userFormat'
 import { KEY_DOC_TYPECODES } from '~/utils/coiFormState'
 import { labelForSdg, labelForRdp, labelForSea, labelForLikha, labelForRdp2017, labelForPointAgenda10, labelForPrimaryFundingSource } from '~/utils/coiHierarchies'
 import { useCoiProgressReports, type ProgressReport } from '~/composables/useCoiProgressReports'
@@ -18,36 +18,24 @@ const route = useRoute()
 const router = useRouter()
 const api = useApi()
 const toast = useToast()
-const { isAdmin, isStaff, canEdit } = usePermissions()
+const { isAdmin, isStaff, canEdit, canApprove } = usePermissions()
 const authStore = useAuthStore()
 
 const project = ref<UIProjectDetail | null>(null)
 // KC-E: per-record access logic delegated to composable (canEditCurrentProject, isOwnerOrAssigned)
-const { canEditCurrentProject, isOwnerOrAssigned, canEditAnyTab, effectivePermissions, myAssignment, isContractor: isContractorUser, accessResolved, canViewTab } = useCoiAccess(project)
+const { canEditCurrentProject, isOwnerOrAssigned, canEditAnyTab, effectivePermissions, myAssignment, isContractor: isContractorUser, accessResolved, canViewCoiTab } = useCoiAccess(project)
 const loading = ref(true)
 
 // JR-B: Tab navigation (read-only, freely navigable per JR-D1)
 const activeTab = ref('overview')
 
-// SB-B: tab visibility for assigned users with explicit permissions
-const DETAIL_TAB_PERM_MAP: Record<string, string> = {
-  overview:   'tabProjectProfile',
-  progress:   'tabProgressReport',
-  documents:  'tabAttachments',
-  team:       'tabPersonnel',
-  others:     'tabOthers',
-}
-
-// WC-B: tab visibility delegated to the centralized engine (useCoiAccess.canViewTab).
-// Fail-closed: nothing renders until accessResolved (filter-before-render).
+// PHASE BBBF (Track 2 / Task B2): tab visibility delegated to the centralized LEVEL-based engine
+// (useCoiAccess.canViewCoiTab). Viewer sees only Overview; Contributor+ sees more per level;
+// Audit = Auditor/Admin. Fail-closed: nothing renders until accessResolved (filter-before-render).
 const isTabVisible = computed(() => {
   return (tabValue: string): boolean => {
     if (!accessResolved.value) return false
-    if (tabValue === 'analytics') return true
-    // AAA-B: Audit Log tab is privileged — Admin/SuperAdmin only
-    if (tabValue === 'audit') return isAdmin.value
-    const permKey = DETAIL_TAB_PERM_MAP[tabValue]
-    return permKey ? canViewTab(permKey) : true
+    return canViewCoiTab(tabValue)
   }
 })
 
@@ -158,14 +146,14 @@ const workflowProcessing = ref(false)
 
 // Check if current user is the owner, delegate, or assigned (Phase BK)
 // Show Submit/Resubmit for Review: Staff or assigned user who owns/is assigned to a DRAFT or REJECTED record
+// PHASE BBCH (Track 1, R-372): submit authority is system role Staff+ OR a contribute-capable
+// module level (canEdit('coi') is true for Contributor/Approver/Manager), AND owner/assigned.
 const canSubmitForReview = computed(() => {
   if (!project.value) return false
-  if (!isStaff.value && !isOwnerOrAssigned.value) return false
+  const status = project.value.publicationStatus
+  if (status !== 'DRAFT' && status !== 'REJECTED') return false
   if (!isOwnerOrAssigned.value) return false
-  return (
-    project.value.publicationStatus === 'DRAFT'
-    || project.value.publicationStatus === 'REJECTED'
-  )
+  return isStaff.value || canEdit('coi')
 })
 
 // Show Withdraw button: Original submitter viewing PENDING_REVIEW
@@ -175,10 +163,11 @@ const canWithdraw = computed(() => {
   return project.value.approvalMetadata?.submittedBy === authStore.user?.id
 })
 
-// Show Publish/Reject buttons: Admin viewing PENDING_REVIEW
+// Show Publish/Reject buttons: approval authority (Admin OR Approver/Manager level) + PENDING_REVIEW.
+// PHASE BBCH (Track 1, R-372): was isAdmin-only — now recognizes Layer 3 module levels.
 const canPublishOrReject = computed(() => {
   if (!project.value) return false
-  return isAdmin.value && project.value.publicationStatus === 'PENDING_REVIEW'
+  return canApprove('coi') && project.value.publicationStatus === 'PENDING_REVIEW'
 })
 
 // Show Edit button: Must be owner/assigned or Admin

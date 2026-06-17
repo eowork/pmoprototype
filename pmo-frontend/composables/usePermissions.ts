@@ -55,6 +55,15 @@ const ROLE_PERMISSIONS: Record<RoleName, ModulePermissions> = {
   Auditor: { canView: true, canAdd: false, canEdit: false, canDelete: false },
 }
 
+// PHASE BBBC (Track 8d): per-module access LEVEL → CRUD. For non-admin users a granted module's
+// level governs CRUD (module entry ≠ write). Default grants are Viewer (view-only).
+const LEVEL_PERMISSIONS: Record<string, ModulePermissions> = {
+  Viewer: { canView: true, canAdd: false, canEdit: false, canDelete: false },
+  Contributor: { canView: true, canAdd: true, canEdit: true, canDelete: false },
+  Approver: { canView: true, canAdd: true, canEdit: true, canDelete: false },
+  Manager: { canView: true, canAdd: true, canEdit: true, canDelete: true },
+}
+
 // Phase JT-E-3 — Restricted Editor (section overrides) — DESIGN ONLY (no enforcement here).
 // Override keys: 'coi:contract', 'coi:progress', 'coi:documents', 'coi:personnel'.
 // Pattern: moduleOverrides['coi:contract'] === true → allow contract section actions
@@ -83,6 +92,11 @@ const REFERENCE_DATA_MODULES = ['contractors', 'funding-sources', 'funding_sourc
 
 // QA-A: Modules contractors are permitted to access (sidebar + route guard)
 const CONTRACTOR_ALLOWED_MODULES = ['coi', 'dashboard']
+
+// PHASE BBBE (Track 2): project/operational modules where WRITE is gated by the per-module level
+// (view is universal). Non-admins without a granted level get view-only here (aligns with the
+// backend ModuleAccessGuard: no override ⇒ reads pass, writes 403).
+const GATED_MODULES = ['coi', 'repairs', 'university_operations']
 
 export function usePermissions() {
   const authStore = useAuthStore()
@@ -141,6 +155,11 @@ export function usePermissions() {
     return authStore.user?.moduleOverrides ?? {}
   })
 
+  // PHASE BBBC (Track 8d): per-module CRUD levels.
+  const moduleLevels = computed(() => {
+    return authStore.user?.moduleLevels ?? {}
+  })
+
   /**
    * Get user's module assignments (for approval visibility)
    */
@@ -196,22 +215,20 @@ export function usePermissions() {
       return CONTRACTOR_ALLOWED_MODULES.includes(moduleId.toLowerCase())
     }
 
-    // Check for user override first
-    const override = getModuleOverride(moduleId)
-    if (override !== undefined) {
-      return override
-    }
-
-    // Fall back to role-based defaults
     const role = currentRole.value
     const normalizedId = moduleId.toLowerCase()
 
-    // Admin-only modules (users)
+    // Dashboard is always accessible.
+    if (normalizedId === 'dashboard') return true
+
+    // Admin-only modules (User Management + reference-data management) — Admin/SuperAdmin only.
     if (ADMIN_ONLY_MODULES.includes(normalizedId)) {
       return role === 'Admin' || role === 'SuperAdmin'
     }
 
-    // All other modules accessible by default for authenticated users
+    // PHASE BBBE (Track 2 / Task H): VISIBILITY LAYER — any authenticated CSU user may VIEW
+    // project/operational modules (read-only). "Viewing ≠ modifying." Write capability is gated
+    // separately by canAdd/canEdit (level-based). Supersedes the BBBA default-deny on reads (R-344).
     return true
   }
 
@@ -224,14 +241,31 @@ export function usePermissions() {
       return { canView: true, canAdd: true, canEdit: true, canDelete: true }
     }
 
-    // Check if module access is denied via override
+    const role = currentRole.value
+    const normalizedId = moduleId.toLowerCase()
+
+    // Check if module access is denied via override (explicit revoke).
+    // PHASE BBBE: a revoke removes WRITE but keeps VIEW for gated modules (view is universal).
     const override = getModuleOverride(moduleId)
     if (override === false) {
+      if (GATED_MODULES.includes(normalizeModuleKey(moduleId))) {
+        return { canView: true, canAdd: false, canEdit: false, canDelete: false }
+      }
       return { canView: false, canAdd: false, canEdit: false, canDelete: false }
     }
 
-    const role = currentRole.value
-    const normalizedId = moduleId.toLowerCase()
+    // PHASE BBBC (Track 8d) + BBBE (Track 2): for non-admins, a granted module's LEVEL governs CRUD —
+    // module entry never implies write. On gated modules, NO level ⇒ view-only (write needs a grant,
+    // aligning with the backend ModuleAccessGuard). Admins/SuperAdmins bypass (role matrix below).
+    if (role !== 'Admin' && role !== 'SuperAdmin') {
+      const level = moduleLevels.value[normalizeModuleKey(moduleId)]
+      if (level && LEVEL_PERMISSIONS[level]) {
+        return LEVEL_PERMISSIONS[level]
+      }
+      if (GATED_MODULES.includes(normalizeModuleKey(moduleId))) {
+        return { canView: true, canAdd: false, canEdit: false, canDelete: false }
+      }
+    }
 
     // Admin-only modules
     if (ADMIN_ONLY_MODULES.includes(normalizedId)) {
@@ -286,24 +320,28 @@ export function usePermissions() {
   /**
    * Check if user can approve records in a module (Draft Governance Workflow)
    *
+   * PHASE BBCH (Track 1, R-372): approval authority is Layer 1 (system role) OR Layer 3
+   * (per-module level). The prior implementation read only the system role (isAdmin), so a
+   * user granted Approver/Manager via an approved access request (written to
+   * user_permission_overrides → moduleLevels) was wrongly denied Submit/Approve/Publish even
+   * though their CRUD already worked. Module level is the authority here.
+   *
    * Approval authority:
-   * - SuperAdmin: Can approve any module
-   * - Admin: Can approve modules they are assigned to via user_module_assignments
-   * - Staff/Viewer: Cannot approve (must submit for review)
+   * - SuperAdmin / Admin: approve any module
+   * - Module level Approver / Manager: approve THIS module
+   * - Contributor / Viewer / none: cannot approve (must submit for review)
    *
    * @param moduleId - The module identifier (e.g., 'coi', 'repairs', 'university_operations')
    * @returns true if user can approve records in this module
    */
   function canApprove(moduleId: string): boolean {
-    // SuperAdmin can approve everything
+    // SuperAdmin / Admin can approve everything (Layer 1)
     if (isSuperAdmin.value) return true
+    if (isAdmin.value) return true
 
-    // Only Admins can approve (Staff/Viewer cannot)
-    if (!isAdmin.value) return false
-
-    // Admin must be assigned to the module
-    const normalizedKey = normalizeModuleKey(moduleId)
-    return moduleAssignments.value.includes(normalizedKey)
+    // Layer 3: an Approver/Manager module-level grant confers approval authority for this module.
+    const level = moduleLevels.value[normalizeModuleKey(moduleId)]
+    return level === 'Approver' || level === 'Manager'
   }
 
   /**
@@ -323,10 +361,12 @@ export function usePermissions() {
   })
 
   /**
-   * Check if user can manage users
+   * Check if user can manage users / access System Administration.
+   * PHASE BBBC (Task E, decision 2): SuperAdmin by default; an Admin qualifies ONLY with an
+   * explicit 'users' module grant (override === true) — not by role alone.
    */
   const canManageUsers = computed(() => {
-    return isSuperAdmin.value || canAccessModule('users')
+    return isSuperAdmin.value || moduleOverrides.value['users'] === true
   })
 
   return {
@@ -341,6 +381,7 @@ export function usePermissions() {
     // Module access (for sidebar filtering)
     canAccessModule,
     moduleOverrides,
+    moduleLevels,
     moduleAssignments,
 
     // Permission checks

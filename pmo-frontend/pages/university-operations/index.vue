@@ -45,8 +45,9 @@ const fiscalYearStore = useFiscalYearStore()
 const { selectedFiscalYear, fiscalYearOptions } = storeToRefs(fiscalYearStore)
 
 // Phase DW-B: Fiscal year creation permission
+// PHASE BBBD (Track 8): canonical 'university_operations' key so the access level applies.
 const canCreateFiscalYear = computed(() => {
-  return isSuperAdmin.value || (isAdmin.value && canAdd('operations'))
+  return isSuperAdmin.value || (isAdmin.value && canAdd('university_operations'))
 })
 
 // Fixed Pillar Definitions (BAR1 Standard)

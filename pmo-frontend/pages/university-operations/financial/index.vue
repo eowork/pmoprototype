@@ -226,7 +226,7 @@ function isOwnerOrAssigned(op: any): boolean {
 }
 
 function canEditData(): boolean {
-  if (!currentOperation.value) return canAdd('operations')
+  if (!currentOperation.value) return canAdd('university_operations')
   if (isAdmin.value) {
     if (currentQuarterlyReport.value?.publication_status === 'PUBLISHED') {
       return isSuperAdmin.value || !!currentQuarterlyReport.value?.unlocked_by
@@ -237,7 +237,7 @@ function canEditData(): boolean {
   // Operation-level publication is from UO main page workflow — independent of financial data entry
   if (currentQuarterlyReport.value?.publication_status === 'PUBLISHED') return false
   // Phase FG-2: Staff with OPERATIONS module access can edit any pillar's financial data
-  return canAdd('operations')
+  return canAdd('university_operations')
 }
 
 function canSubmitAllPillars(): boolean {
@@ -1251,8 +1251,8 @@ onMounted(async () => {
                 <!-- Phase HF: Disbursement before % Utilization (Directive 103) -->
                 <th style="width: 130px" class="text-right">Disbursement</th>
                 <th style="width: 100px" class="text-right">% Utilization</th>
-                <!-- Phase FF-4: Use canAdd('operations') so all users with base access can save prefill rows -->
-                <th v-if="canAdd('operations')" style="width: 80px" class="text-center">Actions</th>
+                <!-- Phase FF-4: Use canAdd('university_operations') so all users with base access can save prefill rows -->
+                <th v-if="canAdd('university_operations')" style="width: 80px" class="text-center">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1278,7 +1278,7 @@ onMounted(async () => {
                   >{{ formatPercent(rec.utilization_rate) }}</v-chip>
                   <span v-else class="text-grey">—</span>
                 </td>
-                <td v-if="canAdd('operations')" class="text-center">
+                <td v-if="canAdd('university_operations')" class="text-center">
                   <v-btn
                     icon="mdi-pencil"
                     size="x-small"
