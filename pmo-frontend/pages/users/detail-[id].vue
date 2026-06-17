@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import { formatDateTime as formatDate, formatDate as formatDateSimple } from '~/utils/userFormat'
+import { rankLabel } from '~/utils/userVocab'
+import { labelForCampus } from '~/utils/campus'
+import { labelForAccessModule } from '~/utils/accessControl'
+import type { BackendUserDetail } from '~/utils/adapters'
+
 definePageMeta({
   middleware: ['auth', 'permission'],
 })
@@ -8,39 +14,7 @@ const router = useRouter()
 const api = useApi()
 const toast = useToast()
 
-interface UserRole {
-  id: string
-  name: string
-  is_superadmin: boolean
-  assigned_at: string
-}
-
-interface UserPermission {
-  id: string
-  name: string
-  resource: string
-  action: string
-}
-
-interface UserDetail {
-  id: string
-  email: string
-  first_name: string
-  last_name: string
-  phone?: string
-  avatar_url?: string
-  is_active: boolean
-  last_login_at?: string
-  failed_login_attempts: number
-  account_locked_until?: string
-  metadata?: any
-  created_at: string
-  updated_at: string
-  roles: UserRole[]
-  permissions: UserPermission[]
-}
-
-const user = ref<UserDetail | null>(null)
+const user = ref<BackendUserDetail | null>(null)
 const loading = ref(true)
 const unlocking = ref(false)
 const resetPasswordDialog = ref(false)
@@ -72,29 +46,34 @@ const isAccountLocked = computed(() => {
 })
 
 const isSuperAdmin = computed(() => {
-  return user.value?.roles?.some(r => r.is_superadmin) || false
+  // PHASE BBBD (Track 1c): flag OR rank 10 (unified with auth, R-321).
+  return (
+    (user.value?.roles?.some(r => r.is_superadmin) || false) ||
+    user.value?.rank_level === 10
+  )
 })
 
-// Format date
-function formatDate(dateStr?: string): string {
-  if (!dateStr) return 'Never'
-  return new Date(dateStr).toLocaleDateString('en-PH', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+// formatDate / formatDateSimple imported from utils/userFormat (single source).
 
-// Format date simple
-function formatDateSimple(dateStr?: string): string {
-  if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleDateString('en-PH', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
+// PHASE BBCH (Track 2, R-373): effective module grants from approved access requests
+// (user_permission_overrides), surfaced as module + CRUD-level chips. Revoked (can_access=false)
+// entries are excluded — only live access is shown.
+const moduleGrants = computed(() => {
+  const levels = user.value?.module_levels || {}
+  const overrides = user.value?.module_overrides || {}
+  return Object.keys(overrides)
+    .filter(key => overrides[key])
+    .map(key => ({ module: key, level: levels[key] || 'Viewer' }))
+})
+
+function levelColor(level: string): string {
+  const map: Record<string, string> = {
+    Manager: 'deep-purple',
+    Approver: 'indigo',
+    Contributor: 'teal',
+    Viewer: 'blue-grey',
+  }
+  return map[level] || 'grey'
 }
 
 // Fetch user details
@@ -108,7 +87,7 @@ async function fetchUser() {
   try {
     loading.value = true
     console.log('[User Detail] Fetching user:', userId)
-    const response = await api.get<UserDetail>(`/api/users/${userId}`)
+    const response = await api.get<BackendUserDetail>(`/api/users/${userId}`)
     user.value = response
   } catch (err: unknown) {
     const apiError = err as { message?: string }
@@ -193,10 +172,10 @@ onMounted(() => {
       <div class="d-flex align-center ga-3">
         <v-btn icon="mdi-arrow-left" variant="text" @click="goBack" />
         <div>
-          <h1 class="text-h4 font-weight-bold text-grey-darken-3">
+          <h1 class="text-h5 font-weight-bold text-grey-darken-3">
             {{ fullName || 'User Details' }}
           </h1>
-          <p class="text-subtitle-1 text-grey-darken-1">
+          <p class="text-subtitle-2 text-grey-darken-1">
             View user information and permissions
           </p>
         </div>
@@ -246,7 +225,7 @@ onMounted(() => {
       <!-- Row 1: Basic Info + Roles & Permissions -->
       <v-row class="mb-4">
         <v-col cols="12" md="7">
-          <v-card class="fill-height">
+          <v-card rounded="lg" elevation="1" class="fill-height">
             <v-card-title class="d-flex align-center justify-space-between">
               <span>Basic Information</span>
               <v-chip
@@ -300,12 +279,51 @@ onMounted(() => {
                   </div>
                 </v-col>
               </v-row>
+
+              <!-- PHASE BBBF (Track 5): Professional Information section -->
+              <v-divider class="mb-4" />
+              <div class="d-flex align-center ga-2 mb-3">
+                <v-icon size="18" color="grey-darken-2">mdi-briefcase-outline</v-icon>
+                <span class="text-caption text-grey-darken-2 font-weight-bold text-uppercase">Professional Information</span>
+              </div>
+              <v-row>
+                <v-col cols="12" md="6">
+                  <div class="mb-4">
+                    <div class="text-caption text-grey-darken-1">Username</div>
+                    <div class="text-body-1">{{ user.username || '—' }}</div>
+                  </div>
+                </v-col>
+                <v-col cols="12" md="6">
+                  <div class="mb-4">
+                    <div class="text-caption text-grey-darken-1">Rank</div>
+                    <div class="text-body-1">{{ rankLabel(user.rank_level) }}</div>
+                  </div>
+                </v-col>
+                <v-col cols="12" md="6">
+                  <div class="mb-4">
+                    <div class="text-caption text-grey-darken-1">Position</div>
+                    <div class="text-body-1" style="white-space: pre-wrap">{{ user.metadata?.position || '—' }}</div>
+                  </div>
+                </v-col>
+                <v-col cols="12" md="6">
+                  <div class="mb-4">
+                    <div class="text-caption text-grey-darken-1">Office</div>
+                    <div class="text-body-1" style="white-space: pre-wrap">{{ user.metadata?.office || '—' }}</div>
+                  </div>
+                </v-col>
+                <v-col cols="12" md="6">
+                  <div class="mb-4">
+                    <div class="text-caption text-grey-darken-1">Campus</div>
+                    <div class="text-body-1">{{ labelForCampus(user.campus) }}</div>
+                  </div>
+                </v-col>
+              </v-row>
             </v-card-text>
           </v-card>
         </v-col>
         <v-col cols="12" md="5">
-          <v-card class="fill-height">
-            <v-card-title>Roles & Permissions</v-card-title>
+          <v-card rounded="lg" elevation="1" class="fill-height">
+            <v-card-title>Role Assignments &amp; Module Access</v-card-title>
             <v-divider />
             <v-card-text>
               <div class="mb-4">
@@ -324,6 +342,24 @@ onMounted(() => {
                   </v-chip>
                 </div>
                 <div v-else class="text-grey">No roles assigned</div>
+              </div>
+
+              <!-- PHASE BBCH (Track 2): effective module-level grants from approved access requests -->
+              <div class="mb-4">
+                <div class="text-caption text-grey-darken-1 mb-2">Module Access Grants</div>
+                <div v-if="moduleGrants.length > 0" class="d-flex flex-wrap ga-2">
+                  <v-chip
+                    v-for="grant in moduleGrants"
+                    :key="grant.module"
+                    :color="levelColor(grant.level)"
+                    variant="tonal"
+                    size="small"
+                  >
+                    {{ labelForAccessModule(grant.module) }}
+                    <span class="font-weight-bold ml-1">· {{ grant.level }}</span>
+                  </v-chip>
+                </div>
+                <div v-else class="text-grey">No module grants</div>
               </div>
 
               <div>
@@ -348,7 +384,7 @@ onMounted(() => {
       <!-- Row 2: Account Status + Audit Information -->
       <v-row>
         <v-col cols="12" md="7">
-          <v-card class="fill-height">
+          <v-card rounded="lg" elevation="1" class="fill-height">
             <v-card-title>Account Status</v-card-title>
             <v-divider />
             <v-card-text>
@@ -408,7 +444,7 @@ onMounted(() => {
           </v-card>
         </v-col>
         <v-col cols="12" md="5">
-          <v-card class="fill-height">
+          <v-card rounded="lg" elevation="1" class="fill-height">
             <v-card-title>Audit Information</v-card-title>
             <v-divider />
             <v-card-text>

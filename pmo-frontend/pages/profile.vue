@@ -1,5 +1,8 @@
 <script setup lang="ts">
 // NNN-I: User Profile page — Account Overview + Security (Change Password) tabs.
+import { labelForCampus } from '~/utils/campus'
+import { rankLabel } from '~/utils/userVocab'
+
 definePageMeta({
   middleware: 'auth',
 })
@@ -13,8 +16,12 @@ const authStore = useAuthStore()
 const tab = ref<string>(typeof route.query.tab === 'string' ? route.query.tab : 'overview')
 // Normalize legacy/menu values to the two real tabs.
 if (tab.value === 'settings') tab.value = 'overview'
+// PHASE BBBC (Track 4): land on Security when a forced change is required.
+if (route.query.mustChange === '1') tab.value = 'security'
 
 const user = computed(() => authStore.user)
+// PHASE BBBC (Track 4): forced first-login password change.
+const mustChange = computed(() => user.value?.mustChangePassword === true)
 
 function initials(): string {
   const f = user.value?.firstName?.charAt(0) || ''
@@ -117,6 +124,12 @@ async function changePassword() {
     pwForm.currentPassword = ''
     pwForm.newPassword = ''
     pwForm.confirmPassword = ''
+    // PHASE BBBC (Track 4): refresh profile so the must-change gate releases.
+    const wasForced = route.query.mustChange === '1' || mustChange.value
+    await authStore.initialize()
+    if (wasForced) {
+      navigateTo('/dashboard')
+    }
   } catch (err: any) {
     toast.error(err?.message || 'Failed to change password')
   } finally {
@@ -127,6 +140,17 @@ async function changePassword() {
 
 <template>
   <div>
+    <!-- PHASE BBBC (Track 4): forced password-change notice -->
+    <v-alert
+      v-if="mustChange"
+      type="warning"
+      variant="tonal"
+      class="mb-4"
+      icon="mdi-lock-alert"
+    >
+      You must set a new password before continuing. Please update it in the Security tab below.
+    </v-alert>
+
     <!-- Page header -->
     <div class="mb-4">
       <h1 class="text-h5 font-weight-bold text-grey-darken-3 mb-1">My Profile</h1>
@@ -156,10 +180,27 @@ async function changePassword() {
           </v-tooltip>
 
           <v-divider class="my-4" />
+          <!-- PHASE BBBD (Track 3): unified profile model (Identity / Account). -->
           <div class="text-left">
             <div class="d-flex justify-space-between text-caption mb-2">
+              <span class="text-grey-darken-1">Username</span>
+              <span class="font-weight-medium">{{ user?.username || '—' }}</span>
+            </div>
+            <div class="d-flex justify-space-between text-caption mb-2">
+              <span class="text-grey-darken-1">Position</span>
+              <span class="font-weight-medium">{{ user?.position || '—' }}</span>
+            </div>
+            <div class="d-flex justify-space-between text-caption mb-2">
+              <span class="text-grey-darken-1">Office</span>
+              <span class="font-weight-medium">{{ user?.office || '—' }}</span>
+            </div>
+            <div class="d-flex justify-space-between text-caption mb-2">
               <span class="text-grey-darken-1">Campus</span>
-              <span class="font-weight-medium">{{ user?.campus || '—' }}</span>
+              <span class="font-weight-medium">{{ labelForCampus(user?.campus) }}</span>
+            </div>
+            <div class="d-flex justify-space-between text-caption mb-2">
+              <span class="text-grey-darken-1">Rank</span>
+              <span class="font-weight-medium">{{ rankLabel(user?.rankLevel) }}</span>
             </div>
             <div class="d-flex justify-space-between text-caption mb-2">
               <span class="text-grey-darken-1">Last login</span>

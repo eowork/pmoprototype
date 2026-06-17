@@ -216,9 +216,10 @@ async function handleLogin() {
           Forgot your password?
           <a href="#" @click.prevent="showResetDialog = true" class="text-primary">Request a reset</a>
         </p>
+        <!-- PHASE BBBA (BBBA-0a): public self-registration removed. Accounts are created by
+             an administrator; access is granted via Access Control. -->
         <p class="text-caption text-center text-medium-emphasis mt-1">
-          No account yet?
-          <a href="/register" class="text-primary">Register here</a>
+          Need access? Contact your system administrator.
         </p>
 
         <p class="form-footer">

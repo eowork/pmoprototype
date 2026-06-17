@@ -101,6 +101,7 @@ export interface BackendUser {
   is_superadmin: boolean
   permissions: string[]
   module_overrides?: Record<string, boolean>
+  module_levels?: Record<string, string>  // PHASE BBBC: per-module CRUD level
   module_assignments?: string[]
   pillar_assignments?: string[]  // Phase HN: pillar-based tab access
   rank_level?: number
@@ -110,9 +111,15 @@ export interface BackendUser {
   avatar_url?: string
   phone?: string
   display_name?: string
+  // PHASE BBBD (Track 3): unified profile fields
+  username?: string
+  position?: string
+  office?: string
   last_login_at?: string
   last_password_change_at?: string
   is_sso?: boolean
+  must_change_password?: boolean  // PHASE BBBC: forced first-login change
+  profile_completed?: boolean  // PHASE BBBD: first-login onboarding
 }
 
 // Frontend UI-expected shapes
@@ -169,6 +176,7 @@ export interface UIUser {
   isSuperAdmin: boolean
   permissions: string[]
   moduleOverrides: Record<string, boolean>
+  moduleLevels: Record<string, string>  // PHASE BBBC: per-module CRUD level
   moduleAssignments: string[]
   pillarAssignments: string[]  // Phase HN: pillar-based tab access
   rankLevel: number
@@ -181,6 +189,12 @@ export interface UIUser {
   lastLoginAt: string
   lastPasswordChangeAt: string
   isSso: boolean
+  mustChangePassword: boolean  // PHASE BBBC: forced first-login change
+  profileCompleted: boolean  // PHASE BBBD: first-login onboarding
+  // PHASE BBBD (Track 3): unified profile fields
+  username: string
+  position: string
+  office: string
 }
 
 /**
@@ -252,6 +266,7 @@ export function adaptUser(backend: BackendUser): UIUser {
     isSuperAdmin: backend.is_superadmin,
     permissions: backend.permissions || [],
     moduleOverrides: backend.module_overrides || {},
+    moduleLevels: backend.module_levels || {},
     moduleAssignments: backend.module_assignments || [],
     pillarAssignments: backend.pillar_assignments || [],
     rankLevel: backend.rank_level ?? 100,
@@ -264,6 +279,11 @@ export function adaptUser(backend: BackendUser): UIUser {
     lastLoginAt: backend.last_login_at || '',
     lastPasswordChangeAt: backend.last_password_change_at || '',
     isSso: backend.is_sso ?? false,
+    mustChangePassword: backend.must_change_password ?? false,
+    profileCompleted: backend.profile_completed ?? true,
+    username: backend.username || '',
+    position: backend.position || '',
+    office: backend.office || '',
   }
 }
 
@@ -1247,7 +1267,10 @@ export interface UIUserList {
 
 export function adaptUserList(backend: BackendUserList): UIUserList {
   const roleNames = backend.roles?.map(r => r.name) || []
-  const isSuperAdmin = backend.roles?.some(r => r.is_superadmin) || false
+  // PHASE BBBD (Track 1c): SuperAdmin = the is_superadmin flag OR rank 10 (unified with auth, R-321).
+  const isSuperAdmin =
+    (backend.roles?.some(r => r.is_superadmin) || false) ||
+    (backend.rank_level != null && backend.rank_level <= 10)
 
   return {
     id: backend.id,
@@ -1270,4 +1293,53 @@ export function adaptUserList(backend: BackendUserList): UIUserList {
 
 export function adaptUsersList(backendList: BackendUserList[]): UIUserList[] {
   return backendList.map(adaptUserList)
+}
+
+// PHASE BBBD (Track 10c): shared user-management interfaces (single source per CLAUDE.md #3).
+// Consumed by users/new, users/edit-[id], users/detail-[id] (replacing their inline copies).
+export interface Role {
+  id: string
+  name: string
+  description?: string
+}
+
+export interface UserRoleRef {
+  id: string
+  name: string
+  is_superadmin: boolean
+  assigned_at?: string
+}
+
+export interface UserPermissionRef {
+  id: string
+  name: string
+  resource: string
+  action: string
+}
+
+/** Full user detail (superset) returned by GET /api/users/:id. */
+export interface BackendUserDetail {
+  id: string
+  email: string
+  username?: string
+  first_name: string
+  middle_name?: string
+  last_name: string
+  phone?: string
+  avatar_url?: string
+  is_active: boolean
+  rank_level?: number
+  campus?: string
+  last_login_at?: string
+  last_password_change_at?: string
+  failed_login_attempts: number
+  account_locked_until?: string
+  metadata?: Record<string, any>
+  created_at?: string
+  updated_at?: string
+  roles: UserRoleRef[]
+  permissions?: UserPermissionRef[]
+  // PHASE BBCH (Track 2): effective module grants from approved access requests
+  module_overrides?: Record<string, boolean>
+  module_levels?: Record<string, string>
 }

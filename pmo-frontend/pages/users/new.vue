@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { CAMPUS_OPTIONS } from '~/utils/campus'
+import { RANK_OPTIONS as rankOptions } from '~/utils/userVocab'
+import type { Role } from '~/utils/adapters'
+
 definePageMeta({
   middleware: ['auth', 'permission'],
 })
@@ -6,12 +10,6 @@ definePageMeta({
 const router = useRouter()
 const api = useApi()
 const toast = useToast()
-
-interface Role {
-  id: string
-  name: string
-  description?: string
-}
 
 const form = ref({
   email: '',
@@ -30,8 +28,7 @@ const form = ref({
 // Phase AG: Campus options for office-scoped visibility
 const campusOptions = [
   { title: 'None (No campus filter)', value: '' },
-  { title: 'Butuan Campus', value: 'Butuan Campus' },
-  { title: 'Cabadbaran', value: 'Cabadbaran' },
+  ...CAMPUS_OPTIONS,
 ]
 
 const roles = ref<Role[]>([])
@@ -41,20 +38,7 @@ const submitting = ref(false)
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 
-// Rank levels for university hierarchy
-const rankOptions = [
-  { value: 10, title: 'SuperAdmin (Rank 10)' },
-  { value: 15, title: 'Vice President (Rank 15)' },
-  { value: 20, title: 'Division Chief (Rank 20)' },
-  { value: 30, title: 'Director (Rank 30)' },
-  { value: 40, title: 'Dean (Rank 40)' },
-  { value: 50, title: 'Chairperson (Rank 50)' },
-  { value: 60, title: 'Admin Personnel (Rank 60)' },
-  { value: 70, title: 'Faculty (Rank 70)' },
-  { value: 80, title: 'Clerk/Staff (Rank 80)' },
-  { value: 90, title: 'Student (Rank 90)' },
-  { value: 100, title: 'Viewer (Rank 100)' },
-]
+// Rank options imported from utils/userVocab (single source).
 
 // Validation rules
 const rules = {

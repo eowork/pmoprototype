@@ -12,6 +12,17 @@ const router = useRouter()
 const api = useApi()
 const { isContractor, isAdmin } = usePermissions()
 
+// PHASE BBBA (BBBA-1d): when the default-DENY module guard redirects a user here, surface the
+// pending-approval notice, then clear the query so it doesn't re-fire on refresh.
+const route = useRoute()
+const toast = useToast()
+onMounted(() => {
+  if (route.query.notice === 'access-pending') {
+    toast.warning('Access pending administrator approval.')
+    router.replace({ query: {} })
+  }
+})
+
 const fiscalYearStore = useFiscalYearStore()
 const { selectedFiscalYear, fiscalYearOptions } = storeToRefs(fiscalYearStore)
 
@@ -218,6 +229,9 @@ function formatCurrencyShort(amount: number): string {
     >
       <strong>Executive Dashboard</strong> — Executive view — key metrics and portfolio summary for decision support. Use module tabs for detailed reporting.
     </v-alert>
+
+    <!-- PHASE BBBD (Track 5/Task F): Request Access relocated to the User Menu (/access-request).
+         Dashboard is analytics-first. -->
 
     <!-- KPI Row (AdminKpiRow — Infrastructure total, Delayed, Pending Reviews, UO Compliance) -->
     <AdminKpiRow v-if="!isContractor" :selected-fiscal-year="selectedFiscalYear" />

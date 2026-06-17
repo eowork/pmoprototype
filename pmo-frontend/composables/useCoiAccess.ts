@@ -16,6 +16,26 @@ import type { UIProjectDetail } from '~/utils/adapters'
 // KD-G: tabs eligible for editing. `analytics` is read-only by design; excluded.
 const EDITABLE_TABS = ['overview', 'gallery', 'documents', 'team']
 
+// PHASE BBBF (Track 2 / Task B2): tab visibility by COI access LEVEL for institutional users.
+// Viewer = Overview only; Contributor = + Progress/Documents/Team; Approver/Manager = all (operator-approved).
+const LEVEL_RANK: Record<string, number> = { Viewer: 0, Contributor: 1, Approver: 2, Manager: 3 }
+const TAB_MIN_LEVEL: Record<string, number> = {
+  overview: 0,    // Project Profile / Strategic Alignment / Financial Summary / Gallery / General Info
+  progress: 1,    // Progress & Milestones — Contributor+
+  documents: 1,   // Attachments — Contributor+
+  team: 1,        // Team — Contributor+
+  others: 2,      // Others — Approver+
+  analytics: 2,   // Analytics — Approver+
+  audit: 3,       // Audit Logs — Manager (or Auditor role / Admin)
+}
+const TAB_PERMKEY: Record<string, string> = {
+  overview: 'tabProjectProfile',
+  progress: 'tabProgressReport',
+  documents: 'tabAttachments',
+  team: 'tabPersonnel',
+  others: 'tabOthers',
+}
+
 // KE-C: Tab × Action permission matrix.
 // 'Admin' encompasses SuperAdmin (isAdmin guard handles both).
 // Staff requires assignment check (isOwnerOrAssigned) for write actions.
@@ -33,7 +53,11 @@ const TAB_ACTION_MATRIX: Record<string, Partial<Record<TabAction, string[]>>> = 
 
 export function useCoiAccess(project: Ref<UIProjectDetail | null>) {
   const authStore = useAuthStore()
-  const { isAdmin } = usePermissions()
+  const { isAdmin, moduleLevels } = usePermissions()
+
+  // PHASE BBBF (Track 2): the user's COI access level (institutional users with COI view access but
+  // no explicit grant default to Viewer — view-only Overview).
+  const coiLevel = computed(() => moduleLevels.value['coi'] || 'Viewer')
   // VG-A: session-loaded permission map (stateless at render time)
   const permStore = useProjectPermissionsStore()
 
@@ -143,6 +167,27 @@ export function useCoiAccess(project: Ref<UIProjectDetail | null>) {
     return true                               // institutional non-assigned: role gates apply
   }
 
+  // PHASE BBBF (Track 2 / Task B2): tab visibility by COI access LEVEL (keyed by tab VALUE, not permKey).
+  // This is the authoritative tab gate for the detail page — a Viewer sees only the Overview tab.
+  function canViewCoiTab(tabValue: string): boolean {
+    if (isAdmin.value) return true
+    const role = (authStore.user?.roleName ?? (authStore.user as any)?.role) as string | undefined
+    // Audit log tab: Auditor role (admins handled above).
+    if (tabValue === 'audit') return role === 'Auditor'
+    // Assigned users with explicit project permissions → per-assignment overrides (unchanged engine).
+    const hasExplicitPerms = isOwnerOrAssigned.value && !!myAssignment.value?.permissions
+    if (hasExplicitPerms) {
+      if (tabValue === 'analytics') return true
+      const permKey = TAB_PERMKEY[tabValue]
+      return permKey ? !!(effectivePermissions.value as any)[permKey] : true
+    }
+    if (isContractor.value) return false      // fail-closed: external personnel
+    // Institutional non-assigned: gate by the COI access level.
+    const min = TAB_MIN_LEVEL[tabValue] ?? 0
+    const rank = LEVEL_RANK[coiLevel.value] ?? 0
+    return rank >= min
+  }
+
   const canEditCurrentProject = computed(() => {
     if (!project.value) return false
     if (isAdmin.value) return true
@@ -200,6 +245,7 @@ export function useCoiAccess(project: Ref<UIProjectDetail | null>) {
   return {
     accessResolved,
     canViewTab,
+    canViewCoiTab,
     canEditCurrentProject,
     isOwnerOrAssigned,
     myAssignment,

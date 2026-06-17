@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { adaptUsersList, type UIUserList, type BackendUserList } from '~/utils/adapters'
+import { CAMPUS_OPTIONS } from '~/utils/campus'
+import { RANK_LABELS } from '~/utils/userVocab'
+import { formatDateTime as formatDate } from '~/utils/userFormat'
 
 definePageMeta({
   middleware: ['auth', 'permission'],
@@ -22,10 +25,7 @@ const selectedUsers = ref<string[]>([])
 const bulkProcessing = ref(false)
 const bulkMenuOpen = ref(false)
 
-// Password reset requests (Phase HQ)
-const pendingResetRequests = ref<any[]>([])
-const resetRequestsLoading = ref(false)
-const showResetPanel = ref(true)
+// PHASE BBBB (BBBB-5c): password-reset requests relocated to /admin/password-resets (Access Review).
 
 // PQ-D: Self-registration pending approvals
 const pendingRegistrations = ref<any[]>([])
@@ -38,26 +38,11 @@ const campusFilter = ref<string>('')
 
 const campusFilterOptions = [
   { title: 'All Campuses', value: '' },
-  { title: 'Butuan Campus', value: 'Butuan Campus' },
-  { title: 'Cabadbaran', value: 'Cabadbaran' },
+  ...CAMPUS_OPTIONS,
   { title: 'No Campus Assigned', value: '__none__' },
 ]
 
-// Rank labels mapping
-const RANK_LABELS: Record<number, { label: string; color: string }> = {
-  10: { label: 'SuperAdmin', color: 'deep-purple' },
-  15: { label: 'Vice President', color: 'purple' },
-  20: { label: 'Division Chief', color: 'indigo' },
-  30: { label: 'Director', color: 'blue' },
-  40: { label: 'Dean', color: 'cyan' },
-  50: { label: 'Chairperson', color: 'teal' },
-  60: { label: 'Admin Personnel', color: 'green' },
-  70: { label: 'Faculty', color: 'light-green' },
-  80: { label: 'Clerk/Staff', color: 'amber' },
-  90: { label: 'Student', color: 'orange' },
-  100: { label: 'Viewer', color: 'grey' },
-}
-
+// RANK_LABELS imported from utils/userVocab (single source).
 function getRankLabel(rankLevel: number): string {
   return RANK_LABELS[rankLevel]?.label || 'Unknown'
 }
@@ -128,17 +113,7 @@ function getStatusText(isActive: boolean): string {
   return isActive ? 'Active' : 'Inactive'
 }
 
-// Format date
-function formatDate(dateStr: string): string {
-  if (!dateStr) return 'Never'
-  return new Date(dateStr).toLocaleDateString('en-PH', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+// formatDate imported from utils/userFormat (formatDateTime alias).
 
 // Filtered users
 const filteredUsers = computed(() => {
@@ -189,30 +164,7 @@ async function fetchUsers() {
   }
 }
 
-// Password reset requests
-async function fetchResetRequests() {
-  resetRequestsLoading.value = true
-  try {
-    const response = await api.get<any[]>('/api/users/password-reset-requests')
-    pendingResetRequests.value = response || []
-  } catch {
-    // Silently fail — table may not exist yet
-    pendingResetRequests.value = []
-  } finally {
-    resetRequestsLoading.value = false
-  }
-}
-
-async function markResetComplete(requestId: string) {
-  try {
-    await api.patch(`/api/users/password-reset-requests/${requestId}/complete`)
-    pendingResetRequests.value = pendingResetRequests.value.filter(r => r.id !== requestId)
-    toast.success('Password reset request marked as completed')
-  } catch (err: unknown) {
-    const error = err as { message?: string }
-    toast.error(error.message || 'Failed to complete reset request')
-  }
-}
+// PHASE BBBB (BBBB-5c): reset-request fetch/accept moved to pages/admin/password-resets.vue.
 
 // Phase HV: Bulk access update (Directive 225)
 async function bulkAccessUpdate(type: 'permission' | 'module' | 'pillar', action: 'grant' | 'revoke', key: string) {
@@ -272,7 +224,6 @@ function pendingUserType(user: any): string {
 
 onMounted(() => {
   fetchUsers()
-  fetchResetRequests()
   fetchPendingRegistrations()
 })
 </script>
@@ -293,68 +244,10 @@ onMounted(() => {
         <v-btn v-if="canAdd('users')" color="primary" prepend-icon="mdi-account-plus" @click="createUser">
           New User
         </v-btn>
-        <v-badge
-          v-if="pendingResetRequests.length > 0"
-          :content="pendingResetRequests.length"
-          color="warning"
-          inline
-        >
-          <v-btn
-            variant="tonal"
-            color="warning"
-            size="small"
-            prepend-icon="mdi-lock-reset"
-            @click="showResetPanel = !showResetPanel"
-          >
-            Reset Requests
-          </v-btn>
-        </v-badge>
       </div>
     </div>
 
-    <!-- Pending Password Reset Requests (Phase HQ) -->
-    <v-expand-transition>
-      <v-alert
-        v-if="pendingResetRequests.length > 0 && showResetPanel"
-        type="warning"
-        variant="tonal"
-        class="mb-4"
-        closable
-        @click:close="showResetPanel = false"
-      >
-        <template #title>
-          Pending Password Reset Requests ({{ pendingResetRequests.length }})
-        </template>
-        <v-table density="compact" class="mt-2 bg-transparent">
-          <thead>
-            <tr class="bg-primary text-white">
-              <th>Identifier</th>
-              <th>Notes</th>
-              <th>Requested</th>
-              <th class="text-center">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="req in pendingResetRequests" :key="req.id">
-              <td class="font-weight-medium">{{ req.identifier }}</td>
-              <td>{{ req.notes || '—' }}</td>
-              <td>{{ formatDate(req.requested_at) }}</td>
-              <td class="text-center">
-                <v-btn
-                  size="small"
-                  color="success"
-                  variant="tonal"
-                  prepend-icon="mdi-check"
-                  @click="markResetComplete(req.id)"
-                >
-                  Mark Complete
-                </v-btn>
-              </td>
-            </tr>
-          </tbody>
-        </v-table>
-      </v-alert>
-    </v-expand-transition>
+    <!-- PHASE BBBB (BBBB-5c): password-reset requests moved to Administration → User Management → Password Resets. -->
 
     <!-- PQ-D: Pending Registrations Panel -->
     <v-expansion-panels v-if="pendingRegistrations.length > 0" class="mb-4">

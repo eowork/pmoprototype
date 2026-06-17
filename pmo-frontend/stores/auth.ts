@@ -113,6 +113,18 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // PHASE BBBD (Track 2): live permission refresh without re-login. Re-fetches /auth/me so a
+  // newly-approved access level / SuperAdmin designation propagates to the active session.
+  // Throttled (default 60s) so on-navigation calls stay cheap.
+  const lastRefreshAt = ref(0)
+  async function refreshPermissions(force = false): Promise<void> {
+    if (!token.value || !user.value) return
+    const now = Date.now()
+    if (!force && now - lastRefreshAt.value < 60000) return
+    lastRefreshAt.value = now
+    await fetchCurrentUser()
+  }
+
   return {
     // State
     user,
@@ -131,6 +143,7 @@ export const useAuthStore = defineStore('auth', () => {
     hasPermission,
     hasAnyPermission,
     initialize,
+    refreshPermissions,
     // Loading state from API
     loading: api.loading,
     error: api.error,
