@@ -7,6 +7,7 @@ import {
   Req,
   Res,
   UseGuards,
+  UseFilters,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -22,8 +23,9 @@ import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto, RegisterDto } from './dto';
-import { Public, CurrentUser } from './decorators';
-import { JwtAuthGuard } from './guards';
+import { Public, CurrentUser, Roles } from './decorators';
+import { JwtAuthGuard, RolesGuard } from './guards';
+import { OAuthFailureFilter } from './filters/oauth-failure.filter';
 import { JwtPayload } from '../common/interfaces';
 
 @ApiTags('Authentication')
@@ -56,13 +58,18 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
-  @Public()
+  // PHASE BBBA (BBBA-0a): public self-registration is CLOSED. This endpoint is now an
+  // admin-only account-creation surface (invite). It creates an account with NO role and
+  // NO module access — dashboard-only until an administrator grants permissions.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('Admin')
+  @ApiBearerAuth('JWT-auth')
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  @Throttle({ default: { limit: 3, ttl: 60000 } })
-  @ApiOperation({ summary: 'Self-registration (CSU institutional users)', description: 'Creates a PENDING account for admin review and activation. Does NOT grant immediate access.' })
-  @ApiResponse({ status: 201, description: 'Registration submitted — pending admin activation' })
+  @ApiOperation({ summary: 'Admin-only account creation (CSU institutional users)', description: 'Creates an account with NO module access (dashboard-only) until an administrator grants module permissions. Replaces public self-registration.' })
+  @ApiResponse({ status: 201, description: 'Account created — dashboard-only until access is granted' })
   @ApiResponse({ status: 400, description: 'Validation error or passwords do not match' })
+  @ApiResponse({ status: 403, description: 'Forbidden — administrator role required' })
   @ApiResponse({ status: 409, description: 'Email already registered' })
   async register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
@@ -121,7 +128,15 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async updateProfile(
     @CurrentUser() user: JwtPayload,
-    @Body() body: { displayName?: string; phone?: string },
+    @Body()
+    body: {
+      displayName?: string;
+      phone?: string;
+      position?: string;
+      office?: string;
+      campus?: string;
+      profile_completed?: boolean;
+    },
   ) {
     return this.authService.updateProfile(user.sub, body);
   }
@@ -188,6 +203,9 @@ export class AuthController {
   @Public()
   @Get('google/callback')
   @UseGuards(AuthGuard('google'))
+  // PHASE BBBD (Track 4): on rejection (e.g. non-@carsu.edu.ph), redirect to a branded page
+  // instead of returning raw 401 JSON.
+  @UseFilters(OAuthFailureFilter)
   @ApiOperation({
     summary: 'Google OAuth callback',
     description: 'Handles Google OAuth response and redirects to frontend',

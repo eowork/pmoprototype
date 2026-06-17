@@ -14,6 +14,11 @@ export class UserPermissionOverride {
   @Property({ type: 'boolean', default: false })
   canAccess: boolean = false;
 
+  // PHASE BBBC (Track 8a): per-module access LEVEL governing CRUD (Viewer/Contributor/Approver/
+  // Manager). NULL = legacy/entry-only. Module entry (canAccess) is separate from this CRUD tier.
+  @Property({ nullable: true, length: 30 })
+  grantedLevel?: string;
+
   @Property({ nullable: true, columnType: 'uuid' })
   createdBy?: string;
 

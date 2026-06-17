@@ -40,6 +40,16 @@ export class SetPermissionOverrideDto {
   })
   @IsBoolean()
   can_access: boolean;
+
+  // PHASE BBBC (Track 8a): optional CRUD level (Viewer/Contributor/Approver/Manager).
+  @ApiProperty({
+    description: 'Per-module CRUD level',
+    required: false,
+    example: 'Contributor',
+  })
+  @IsOptional()
+  @IsString()
+  granted_level?: string;
 }
 
 export interface PermissionOverride {
@@ -47,6 +57,7 @@ export interface PermissionOverride {
   user_id: string;
   module_key: ModuleKey;
   can_access: boolean;
+  granted_level?: string | null;
   created_at: Date;
   updated_at: Date;
 }

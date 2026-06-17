@@ -26,15 +26,19 @@ import {
   QueryQuarterlyReportsDto,
 } from './dto';
 import { UpdateOrganizationalInfoDto } from './dto/update-organizational-info.dto';
-import { JwtAuthGuard, RolesGuard } from '../auth/guards';
-import { Roles, CurrentUser } from '../auth/decorators';
+import { JwtAuthGuard, RolesGuard, ModuleAccessGuard } from '../auth/guards';
+import { Roles, CurrentUser, RequireModule } from '../auth/decorators';
 import { JwtPayload } from '../common/interfaces';
 
 @ApiTags('University Operations')
 @ApiBearerAuth('JWT-auth')
 @Controller('university-operations')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('Admin', 'Staff')
+// PHASE BBBE (Track 1): ModuleAccessGuard is the read/write authority — reads open to any
+// authenticated user (visibility), writes require override+level. The class-level
+// @Roles('Admin','Staff') was REMOVED (it blocked dashboard-only users from reading analytics,
+// R-342); method-level @Roles('Admin')/@Roles('SuperAdmin') on sensitive routes are retained.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule('university_operations')
 export class UniversityOperationsController {
   constructor(private readonly service: UniversityOperationsService) {}
 

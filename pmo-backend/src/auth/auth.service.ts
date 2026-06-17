@@ -3,6 +3,8 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { EntityManager } from '@mikro-orm/core';
 import { JwtPayload } from '../common/interfaces';
+import { ActivityLogService } from '../activity-logs/activity-log.service';
+import { ActivityAction } from '../activity-logs/activity-log.entity';
 import { LoginDto, RegisterDto } from './dto';
 import {
   User,
@@ -20,9 +22,14 @@ import {
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  // PHASE BBCH (Track 6, R-377): CSU domain for LDAP-ready account provisioning. Enforced on
+  // registration (new accounts) and on Google SSO; existing accounts are unaffected at login.
+  static readonly ALLOWED_DOMAIN = 'carsu.edu.ph';
+
   constructor(
     private readonly em: EntityManager,
     private readonly jwtService: JwtService,
+    private readonly activityLog: ActivityLogService,
   ) {}
 
   async validateUser(identifier: string, password: string): Promise<any> {
@@ -75,6 +82,13 @@ export class AuthService {
       this.logger.warn(
         `LOGIN_FAILURE: user_id=${user.id}, reason=INVALID_PASSWORD`,
       );
+      void this.activityLog.logAction(
+        { sub: user.id, email: user.email ?? '', roles: [], is_superadmin: false },
+        ActivityAction.FAILED_LOGIN,
+        'auth',
+        user.id,
+        { reason: 'INVALID_PASSWORD' },
+      );
       return null;
     }
 
@@ -96,6 +110,8 @@ export class AuthService {
       last_name: user.lastName,
       rank_level: user.rankLevel,
       campus: user.campus,
+      must_change_password: user.mustChangePassword,
+      profile_completed: user.profileCompleted,
     };
   }
 
@@ -103,11 +119,23 @@ export class AuthService {
     if (dto.password !== dto.confirm_password) {
       throw new BadRequestException('Passwords do not match');
     }
+    // PHASE BBCH (Track 6, R-377): LDAP readiness — restrict NEW accounts to the CSU domain.
+    // Enforced at registration only (not login) so existing non-CSU accounts keep working,
+    // honoring the standing "do not break existing authentication" constraint.
+    const email = dto.email.trim().toLowerCase();
+    if (!email.endsWith(`@${AuthService.ALLOWED_DOMAIN}`)) {
+      throw new BadRequestException(
+        `Only @${AuthService.ALLOWED_DOMAIN} accounts may be registered.`,
+      );
+    }
+    // PHASE BBCH (Track 6, R-377): derive the LDAP-style username from the email local part
+    // (e.g. mzalcantara@carsu.edu.ph → mzalcantara) so it matches the future sAMAccountName.
+    const username = email.split('@')[0];
     // PR-A: raw SQL duplicate check — more reliable than ORM $or with as any cast
     const conn = this.em.getConnection();
     const dup = await conn.execute(
       `SELECT id FROM users WHERE (email = ? OR username = ?) AND deleted_at IS NULL LIMIT 1`,
-      [dto.email, dto.email],
+      [email, username],
     );
     if (dup.length > 0) {
       throw new ConflictException('An account with this email already exists');
@@ -117,13 +145,15 @@ export class AuthService {
     const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
     const hash = await bcrypt.hash(dto.password, 10);
     const user = this.em.create(User, {
-      username: dto.email,
-      email: dto.email,
+      username,
+      email,
       passwordHash: hash,
       firstName,
       lastName,
       status: 'ACTIVE',
       isActive: true,
+      // PHASE BBBC (Track 4): admin-created accounts must change the initial password at first login.
+      mustChangePassword: true,
       metadata: {
         department: dto.department,
         position: dto.position,
@@ -131,7 +161,7 @@ export class AuthService {
         userType: dto.user_type || 'CSU_PERSONNEL',
         userTypeOther: dto.user_type_other,
         registeredAt: new Date().toISOString(),
-        registrationSource: 'self-registration',
+        registrationSource: 'admin-invite',
       },
     });
     // PR-A: catch PostgreSQL 23505 unique constraint violation (race condition guard)
@@ -143,19 +173,12 @@ export class AuthService {
       }
       throw err;
     }
-    // ZG-A: Assign default 'Staff' role immediately — no admin approval gate for self-registration.
-    const staffRole = await this.em.findOne(Role, { name: 'Staff' });
-    if (staffRole) {
-      const userRole = this.em.create(UserRole, {
-        userId: user.id,
-        roleId: staffRole.id,
-        isSuperadmin: false,
-        assignedBy: null,
-      });
-      await this.em.persistAndFlush(userRole);
-    }
-    this.logger.log(`SELF_REGISTRATION: email=${dto.email}, status=ACTIVE`);
-    return { message: 'Your account has been created. You can now sign in with your credentials.' };
+    // PHASE BBBA (BBBA-0b): NO automatic role assignment. New accounts are dashboard-only
+    // (default-DENY) until an administrator grants a role + module access via Access Control.
+    // (Superseded the ZG-A auto-Staff grant, which combined with default-ALLOW let any
+    // registrant self-provision full Staff access.)
+    this.logger.log(`ADMIN_ACCOUNT_CREATE: email=${email}, username=${username}, status=ACTIVE, access=DASHBOARD_ONLY`);
+    return { message: 'Account created. The user has dashboard-only access until an administrator grants module permissions.' };
   }
 
   async login(dto: LoginDto) {
@@ -176,6 +199,14 @@ export class AuthService {
       throw new UnauthorizedException('INVALID_CREDENTIALS');
     }
 
+    // PHASE BBBG (Track 4): first-login detection + last-login tracking. `account` is the
+    // managed User entity (same identity-map row validateUser flushed), so lastLoginAt is current.
+    const isFirstLogin = !!account && !account.lastLoginAt;
+    if (account) {
+      account.lastLoginAt = new Date();
+      await this.em.flush();
+    }
+
     // Aggregate roles
     const userRoles = await this.em.find(
       UserRole,
@@ -191,7 +222,11 @@ export class AuthService {
     const roles = userRoles
       .map((ur) => roleNameById.get(ur.roleId))
       .filter(Boolean) as string[];
-    const is_superadmin = userRoles.some((ur) => ur.isSuperadmin);
+    // PHASE BBBD (Track 1b): rank 10 = SuperAdmin authority IN ADDITION to the is_superadmin flag,
+    // so a user designated "SuperAdmin (Rank 10)" in User Management is recognized as such (R-321).
+    const is_superadmin =
+      userRoles.some((ur) => ur.isSuperadmin) ||
+      (user.rank_level != null && user.rank_level <= 10);
 
     // Aggregate permissions via role_permissions
     let permissions: string[] = [];
@@ -224,6 +259,14 @@ export class AuthService {
         return acc;
       },
       {} as Record<string, boolean>,
+    );
+    // PHASE BBBC (Track 8d): per-module CRUD level for granted modules.
+    const module_levels = overrides.reduce(
+      (acc, o) => {
+        if (o.canAccess && o.grantedLevel) acc[o.moduleKey] = o.grantedLevel;
+        return acc;
+      },
+      {} as Record<string, string>,
     );
 
     // Module assignments
@@ -258,7 +301,13 @@ export class AuthService {
     };
 
     this.logger.log(
-      `LOGIN_SUCCESS: user_id=${user.id}, superadmin=${is_superadmin}`,
+      `LOGIN_SUCCESS: user_id=${user.id}, superadmin=${is_superadmin}, first=${isFirstLogin}`,
+    );
+    void this.activityLog.logAction(
+      payload,
+      isFirstLogin ? ActivityAction.FIRST_LOGIN : ActivityAction.LOGIN,
+      'auth',
+      user.id,
     );
 
     return {
@@ -272,10 +321,13 @@ export class AuthService {
         is_superadmin,
         permissions,
         module_overrides,
+        module_levels,
         module_assignments,
         pillar_assignments,
         rank_level: user.rank_level,
         campus: user.campus,
+        must_change_password: user.must_change_password,
+        profile_completed: user.profile_completed,
         role: roles.length > 0 ? { name: roles[0] } : undefined,
       },
     };
@@ -337,6 +389,14 @@ export class AuthService {
       },
       {} as Record<string, boolean>,
     );
+    // PHASE BBBC (Track 8d): per-module CRUD level for granted modules.
+    const module_levels = overrides.reduce(
+      (acc, o) => {
+        if (o.canAccess && o.grantedLevel) acc[o.moduleKey] = o.grantedLevel;
+        return acc;
+      },
+      {} as Record<string, string>,
+    );
 
     // Module assignments
     const moduleAssignments = await this.em.find(
@@ -377,12 +437,20 @@ export class AuthService {
       display_name: user.displayName,
       last_login_at: user.lastLoginAt,
       last_password_change_at: user.lastPasswordChangeAt,
+      must_change_password: user.mustChangePassword,
+      profile_completed: user.profileCompleted,
+      position: user.metadata?.position,
+      office: user.metadata?.office,
       // NNN-G: SSO-only accounts (Google, no local password) cannot change password
       is_sso: !!user.googleId && !user.passwordHash,
       roles,
-      is_superadmin: rolesData.some((r) => r.is_superadmin),
+      // PHASE BBBD (Track 1b): flag OR rank 10 (R-321).
+      is_superadmin:
+        rolesData.some((r) => r.is_superadmin) ||
+        (user.rankLevel != null && user.rankLevel <= 10),
       permissions,
       module_overrides,
+      module_levels,
       module_assignments,
       pillar_assignments,
       role: roles.length > 0 ? { name: roles[0].name } : undefined,
@@ -428,33 +496,86 @@ export class AuthService {
     }
     user.passwordHash = await bcrypt.hash(dto.newPassword, 12);
     user.lastPasswordChangeAt = new Date();
+    // PHASE BBBC (Track 4): clear the forced-change flag once the user sets their own password.
+    user.mustChangePassword = false;
     await this.em.flush();
     this.logger.log(`PASSWORD_CHANGE: user_id=${userId}`);
+    void this.activityLog.logAction(
+      { sub: userId, email: user.email ?? '', roles: [], is_superadmin: false },
+      ActivityAction.PASSWORD_CHANGE,
+      'auth',
+      userId,
+    );
     return { message: 'Password changed successfully' };
   }
 
-  // NNN-H: authenticated self-service profile update (display name + phone)
+  // NNN-H + PHASE BBBD (Track 5): self-service profile update + onboarding completion.
   async updateProfile(
     userId: string,
-    dto: { displayName?: string; phone?: string },
+    dto: {
+      displayName?: string;
+      phone?: string;
+      position?: string;
+      office?: string;
+      campus?: string;
+      profile_completed?: boolean;
+    },
   ) {
     const user = await this.em.findOne(User, { id: userId });
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
+    // PHASE BBBG (Track 4): capture pre-state so PROFILE_COMPLETED fires only on the false→true transition.
+    const wasProfileIncomplete = !user.profileCompleted;
     if (dto.displayName !== undefined) {
       user.displayName = dto.displayName?.trim() || undefined;
     }
     if (dto.phone !== undefined) {
       user.phone = dto.phone?.trim() || undefined;
     }
+    if (dto.campus !== undefined) {
+      user.campus = dto.campus?.trim() || undefined;
+    }
+    // PHASE BBBD (Track 5): position/office captured in metadata (no structured columns yet).
+    if (dto.position !== undefined || dto.office !== undefined) {
+      user.metadata = {
+        ...(user.metadata || {}),
+        ...(dto.position !== undefined ? { position: dto.position?.trim() } : {}),
+        ...(dto.office !== undefined ? { office: dto.office?.trim() } : {}),
+      };
+    }
+    if (dto.profile_completed !== undefined) {
+      user.profileCompleted = dto.profile_completed;
+    }
     await this.em.flush();
     this.logger.log(`PROFILE_UPDATE: user_id=${userId}`);
+    const actor = { sub: userId, email: user.email ?? '', roles: [], is_superadmin: false };
+    void this.activityLog.logAction(
+      actor,
+      ActivityAction.PROFILE_UPDATE,
+      'auth',
+      userId,
+    );
+    // PHASE BBBG (Track 4): onboarding completion event (transition only).
+    if (dto.profile_completed === true && wasProfileIncomplete) {
+      void this.activityLog.logAction(
+        actor,
+        ActivityAction.PROFILE_COMPLETED,
+        'auth',
+        userId,
+      );
+    }
     return this.getProfile(userId);
   }
 
   async logout(userId: string): Promise<void> {
     this.logger.log(`LOGOUT: user_id=${userId}`);
+    void this.activityLog.logAction(
+      { sub: userId, email: '', roles: [], is_superadmin: false },
+      ActivityAction.LOGOUT,
+      'auth',
+      userId,
+    );
   }
 
   async createPasswordResetRequest(
@@ -468,6 +589,22 @@ export class AuthService {
       });
       await this.em.persistAndFlush(entity);
       this.logger.log(`PASSWORD_RESET_REQUEST: identifier=${identifier}`);
+      // PHASE BBBG (Track 4): audit the request. Public/unauthenticated — resolve the requester
+      // best-effort so the activity log has a valid actor; skip the audit if no account matches.
+      const requester = await this.em.findOne(
+        User,
+        { $or: [{ email: { $ilike: identifier } }, { username: { $ilike: identifier } }] },
+        { filters: false },
+      );
+      if (requester) {
+        void this.activityLog.logAction(
+          { sub: requester.id, email: requester.email ?? identifier, roles: [], is_superadmin: false },
+          ActivityAction.PASSWORD_RESET_REQUESTED,
+          'password_reset',
+          entity.id,
+          { identifier },
+        );
+      }
     } catch (err) {
       this.logger.warn(
         `PASSWORD_RESET_REQUEST_FAILED: identifier=${identifier}, error=${err.message}`,
@@ -506,7 +643,9 @@ export class AuthService {
       sub: userId,
       email: user.email,
       roles,
-      is_superadmin,
+      // PHASE BBBD (Track 1b): flag OR rank 10 (R-321).
+      is_superadmin:
+        is_superadmin || (user.rankLevel != null && user.rankLevel <= 10),
       campus: user.campus || undefined,
     };
 

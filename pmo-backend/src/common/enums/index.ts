@@ -13,3 +13,4 @@ export * from './department-status.enum';
 export * from './setting-data-type.enum';
 export * from './module-type.enum';
 export * from './primary-funding-source.enum';
+export * from './access-level.enum';

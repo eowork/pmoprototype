@@ -21,4 +21,26 @@ export class UpdateUserDto extends PartialType(
       'Password must contain at least one uppercase, one lowercase, and one number',
   })
   password?: string;
+
+  // PHASE BBBG (Track 5): grouped-profile fields. middle_name is a column; office/position/suffix
+  // are stored in metadata (no schema change) — merged in UsersService.update().
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  middle_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  suffix?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  office?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  position?: string;
 }

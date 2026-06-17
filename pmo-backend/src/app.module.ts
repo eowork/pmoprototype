@@ -28,6 +28,7 @@ import { SettingsModule } from './settings/settings.module';
 import { CommonModule } from './common/common.module';
 import { ActivityLogModule } from './activity-logs/activity-log.module';
 import { ContractorAuthModule } from './contractor-auth/contractor-auth.module';
+import { AccessRequestsModule } from './access-requests/access-requests.module';
 import { JwtAuthGuard } from './auth/guards';
 
 @Module({
@@ -100,6 +101,8 @@ import { JwtAuthGuard } from './auth/guards';
     ActivityLogModule,
     // Contractor auth + invite system (Phase PB)
     ContractorAuthModule,
+    // Self-service access requests (Phase BBBA)
+    AccessRequestsModule,
   ],
   controllers: [AppController],
   providers: [

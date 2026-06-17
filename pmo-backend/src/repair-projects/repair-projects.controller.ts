@@ -22,14 +22,16 @@ import {
   CreatePhaseDto,
   CreateTeamMemberDto,
 } from './dto';
-import { JwtAuthGuard, RolesGuard } from '../auth/guards';
-import { Roles, CurrentUser } from '../auth/decorators';
+import { JwtAuthGuard, RolesGuard, ModuleAccessGuard } from '../auth/guards';
+import { Roles, CurrentUser, RequireModule } from '../auth/decorators';
 import { JwtPayload } from '../common/interfaces';
 
 @ApiTags('Repair Projects')
 @ApiBearerAuth('JWT-auth')
 @Controller('repair-projects')
-@UseGuards(JwtAuthGuard, RolesGuard)
+// PHASE BBBA (BBBA-1c): default-DENY module access.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule('repairs')
 export class RepairProjectsController {
   constructor(private readonly service: RepairProjectsService) {}
 

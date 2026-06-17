@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MikroOrmModule } from '@mikro-orm/nestjs';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
+import { ActivityLogModule } from '../activity-logs/activity-log.module';
 import {
   User,
   Role,
@@ -27,6 +28,7 @@ import {
       UserPillarAssignment,
       PasswordResetRequest,
     ]),
+    ActivityLogModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

@@ -60,6 +60,16 @@ export class User {
   @Property({ nullable: true, length: 20 })
   phone?: string;
 
+  // PHASE BBBA (BBBA-1e): first-login profile-completion gate. Existing users are
+  // backfilled to true by migration; new accounts start false.
+  @Property({ type: 'boolean', default: false })
+  profileCompleted: boolean = false;
+
+  // PHASE BBBC (Track 4): force a password change at next login (set on admin reset / new
+  // admin-created accounts; cleared when the user changes their password).
+  @Property({ type: 'boolean', default: false })
+  mustChangePassword: boolean = false;
+
   @Property({ nullable: true, columnType: 'jsonb' })
   metadata?: Record<string, any>;
 

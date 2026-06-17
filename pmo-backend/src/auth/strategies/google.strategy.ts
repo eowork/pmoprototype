@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { Strategy, Profile, VerifyCallback } from 'passport-google-oauth20';
 import { EntityManager } from '@mikro-orm/core';
-import { User, Role, UserRole } from '../../database/entities';
+import { User } from '../../database/entities';
 
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
@@ -35,6 +35,22 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       );
     }
 
+    // PHASE BBBC (Track 5): restrict OAuth to the institutional domain.
+    const allowedDomain = this.configService
+      .get<string>('OAUTH_ALLOWED_DOMAIN', 'carsu.edu.ph')
+      .toLowerCase();
+    if (!email.toLowerCase().endsWith('@' + allowedDomain)) {
+      this.logger.warn(
+        `GOOGLE_LOGIN_REJECTED: email=${email}, reason=DOMAIN_NOT_ALLOWED`,
+      );
+      return done(
+        new UnauthorizedException(
+          `Only @${allowedDomain} accounts may sign in.`,
+        ),
+        false,
+      );
+    }
+
     // Look up user by google_id OR email
     const result = await this.em.getConnection().execute(
       `SELECT id, email, is_active, google_id
@@ -52,9 +68,20 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       const nameParts = displayName.split(' ');
       const firstName = nameParts[0] || '';
       const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+      // PHASE BBBC (Track 5): username derived from the email local-part (e.g. juan.delacruz),
+      // immutable thereafter. Suffix on the rare collision to satisfy the unique constraint.
+      const localPart = email.split('@')[0].toLowerCase();
+      let username = localPart;
+      const taken = await this.em.getConnection().execute(
+        `SELECT 1 FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1`,
+        [username],
+      );
+      if (taken.length > 0) {
+        username = `${localPart}.${Date.now().toString().slice(-4)}`;
+      }
       const newUser = this.em.create(User, {
         email,
-        username: email,
+        username,
         googleId: profile.id,
         firstName,
         lastName,
@@ -65,23 +92,9 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
         metadata: { registrationSource: 'google-oauth', registeredAt: new Date().toISOString() },
       });
       try {
+        // PHASE BBBC (Track 5): NO auto-role. OAuth users land dashboard-only (default-DENY),
+        // consistent with BBBA-0b — access is granted via Access Control / access requests.
         await this.em.persistAndFlush(newUser);
-        // ZH-A: Assign default 'Staff' role — failure is non-blocking.
-        try {
-          const staffRole = await this.em.findOne(Role, { name: 'Staff' });
-          if (staffRole) {
-            const userRole = this.em.create(UserRole, {
-              userId: newUser.id,
-              roleId: staffRole.id,
-              isSuperadmin: false,
-              assignedBy: null,
-            });
-            await this.em.persistAndFlush(userRole);
-            this.logger.log(`GOOGLE_STAFF_ROLE_ASSIGNED: user_id=${newUser.id}`);
-          }
-        } catch (roleErr: any) {
-          this.logger.warn(`GOOGLE_STAFF_ROLE_FAILED: user_id=${newUser.id}, error=${roleErr?.message}`);
-        }
       } catch (err: any) {
         if (err?.code === '23505') {
           // Race condition: email registered between lookup and insert — fetch and continue
