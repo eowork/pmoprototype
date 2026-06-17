@@ -1,0 +1,36 @@
+# Normalize line endings: the repo is developed on Windows but built/run on Linux (Docker,
+# WSL2/Ubuntu). Shell scripts MUST be LF or the container shebang (#!/bin/sh) fails with a
+# misleading "no such file or directory". Enforce LF for all text; treat known binaries as binary.
+
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.ts   text eol=lf
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.json text eol=lf
+*.vue  text eol=lf
+*.css  text eol=lf
+*.scss text eol=lf
+*.html text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.md   text eol=lf
+*.env  text eol=lf
+Dockerfile     text eol=lf
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+
+# Binary assets — never normalize
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.pdf  binary
+*.woff  binary
+*.woff2 binary
+*.ttf  binary
+*.eot  binary
