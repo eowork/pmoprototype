@@ -1240,7 +1240,7 @@ onMounted(async () => {
           </div>
         </v-alert>
 
-        <v-card variant="outlined" class="mb-4">
+        <v-card elevation="1" rounded="lg" class="mb-4">
           <v-table density="compact" class="financial-table">
             <thead>
               <tr class="bg-primary text-white">
@@ -1521,7 +1521,7 @@ onMounted(async () => {
         </template>
 
         <!-- Pillar Total -->
-        <v-card variant="outlined" class="mb-4">
+        <v-card elevation="1" rounded="lg" class="mb-4">
           <v-table density="compact">
             <tbody>
               <tr class="bg-primary-lighten-5 font-weight-bold text-primary">
