@@ -16,8 +16,12 @@ const config: Options<PostgreSqlDriver> = {
   dbName: process.env.DATABASE_NAME || 'pmo_dashboard',
   user: process.env.DATABASE_USER || 'postgres',
   password: process.env.DATABASE_PASSWORD || 'postgres',
-  entities: ['./dist/database/entities/**/*.entity.js'],
-  entitiesTs: ['./src/database/entities/**/*.entity.ts'],
+  // Entities live in multiple locations (database/entities, activity-logs/, contractor-auth/entities/),
+  // so the glob spans the whole tree — NestJS autoLoadEntities sees all 56 via forFeature, but the
+  // standalone migrate.js relies on this glob alone. A narrower path would make createSchema() skip
+  // activity_logs and the contractor tables on a fresh deploy.
+  entities: ['./dist/**/*.entity.js'],
+  entitiesTs: ['./src/**/*.entity.ts'],
   metadataProvider: isProduction ? ReflectMetadataProvider : TsMorphMetadataProvider,
   migrations: {
     tableName: 'mikro_orm_migrations',
