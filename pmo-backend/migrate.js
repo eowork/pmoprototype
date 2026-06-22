@@ -6,6 +6,7 @@
 
 const { MikroORM } = require('@mikro-orm/core');
 const config = require('./dist/database/mikro-orm.config');
+const { seedFreshDatabase } = require('./seed');
 
 async function main() {
   console.log('[migrate] Connecting to database...');
@@ -47,6 +48,9 @@ async function main() {
       console.log(`[migrate] Marked applied: ${m.name}`);
     }
     console.log(`[migrate] Done — ${pending.length} migrations marked applied`);
+
+    // Fresh database has empty tables — seed roles, a SuperAdmin, and reference data
+    await seedFreshDatabase(orm);
 
   } else {
     console.log('[migrate] Existing database — running pending migrations');
