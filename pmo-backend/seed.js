@@ -12,7 +12,7 @@ const bcrypt = require('bcrypt');
 async function seedFreshDatabase(orm) {
   const conn = orm.em.getConnection();
 
-  const suUsername = process.env.SEED_SUPERADMIN_USERNAME || 'superadmin';
+  const suUsername = process.env.SEED_SUPERADMIN_USERNAME || 'admin';
   const suEmail = process.env.SEED_SUPERADMIN_EMAIL || 'admin@carsu.edu.ph';
   const suPassword = process.env.SEED_SUPERADMIN_PASSWORD || 'ChangeMe!2026';
 
