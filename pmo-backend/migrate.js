@@ -41,7 +41,7 @@ async function main() {
     const pending = await migrator.getPendingMigrations();
     for (const m of pending) {
       await conn.execute(
-        "INSERT INTO mikro_orm_migrations (name, executed_at) VALUES ($1, NOW())",
+        'INSERT INTO mikro_orm_migrations (name, executed_at) VALUES (?, NOW())',
         [m.name]
       );
       console.log(`[migrate] Marked applied: ${m.name}`);
