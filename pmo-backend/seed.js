@@ -45,19 +45,25 @@ async function seedFreshDatabase(orm) {
     [suUsername],
   );
 
+  // Reference tables below have no unique constraint on their natural key (the
+  // MikroORM entities don't declare @Unique), so ON CONFLICT can't be used —
+  // guard with WHERE NOT EXISTS instead (idempotent at set level).
   console.log('[seed] Seeding reference data...');
   await conn.execute(`
-    INSERT INTO funding_sources (name, description) VALUES
+    INSERT INTO funding_sources (name, description)
+    SELECT * FROM (VALUES
       ('GAA', 'General Appropriations Act - National government funding'),
       ('Local', 'Locally funded projects from university budget'),
       ('Special Grants', 'External grants and special funding sources'),
       ('CHED', 'Commission on Higher Education funded projects'),
       ('DBM', 'Department of Budget and Management allocations')
-    ON CONFLICT (name) DO NOTHING;
+    ) AS v(name, description)
+    WHERE NOT EXISTS (SELECT 1 FROM funding_sources);
   `);
 
   await conn.execute(`
-    INSERT INTO repair_types (name, description) VALUES
+    INSERT INTO repair_types (name, description)
+    SELECT * FROM (VALUES
       ('Electrical', 'Electrical system repairs and maintenance'),
       ('Plumbing', 'Water and drainage system repairs'),
       ('Structural', 'Building structure repairs (walls, floors, ceilings)'),
@@ -67,11 +73,13 @@ async function seedFreshDatabase(orm) {
       ('Carpentry', 'Wood and furniture repairs'),
       ('IT Infrastructure', 'Network and IT equipment repairs'),
       ('General Maintenance', 'General facility maintenance tasks')
-    ON CONFLICT (name) DO NOTHING;
+    ) AS v(name, description)
+    WHERE NOT EXISTS (SELECT 1 FROM repair_types);
   `);
 
   await conn.execute(`
-    INSERT INTO construction_subcategories (name, description) VALUES
+    INSERT INTO construction_subcategories (name, description)
+    SELECT * FROM (VALUES
       ('Academic Buildings', 'Classrooms, laboratories, lecture halls'),
       ('Administrative Buildings', 'Offices and administrative facilities'),
       ('Student Facilities', 'Dormitories, canteens, student centers'),
@@ -79,7 +87,8 @@ async function seedFreshDatabase(orm) {
       ('Research Facilities', 'Research centers and innovation hubs'),
       ('Infrastructure', 'Roads, utilities, landscaping'),
       ('Library', 'Library buildings and archives')
-    ON CONFLICT (name) DO NOTHING;
+    ) AS v(name, description)
+    WHERE NOT EXISTS (SELECT 1 FROM construction_subcategories);
   `);
 
   await conn.execute(`
@@ -95,14 +104,16 @@ async function seedFreshDatabase(orm) {
   `);
 
   await conn.execute(`
-    INSERT INTO system_settings (setting_key, setting_value, setting_group, data_type, is_public, description) VALUES
+    INSERT INTO system_settings (setting_key, setting_value, setting_group, data_type, is_public, description)
+    SELECT * FROM (VALUES
       ('app.name', 'PMO Dashboard', 'application', 'STRING', true, 'Application display name'),
       ('app.version', '2.3.0', 'application', 'STRING', true, 'Current application version'),
       ('app.academic_year', '2025-2026', 'application', 'STRING', true, 'Current academic year'),
       ('app.campus_default', 'MAIN', 'application', 'STRING', false, 'Default campus for new records'),
       ('session.timeout_minutes', '30', 'security', 'NUMBER', false, 'Session timeout in minutes'),
       ('upload.max_file_size_mb', '10', 'uploads', 'NUMBER', false, 'Maximum upload file size in MB')
-    ON CONFLICT (setting_key) DO NOTHING;
+    ) AS v(setting_key, setting_value, setting_group, data_type, is_public, description)
+    WHERE NOT EXISTS (SELECT 1 FROM system_settings);
   `);
 
   console.log('[seed] Reference data seeded.');
