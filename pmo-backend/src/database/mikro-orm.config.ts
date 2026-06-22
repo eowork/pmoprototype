@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { Options } from '@mikro-orm/core';
+import { existsSync, readFileSync } from 'node:fs';
+import { GeneratedCacheAdapter, Options } from '@mikro-orm/core';
 import { PostgreSqlDriver } from '@mikro-orm/postgresql';
 import { TsMorphMetadataProvider } from '@mikro-orm/reflection';
 
@@ -13,9 +14,26 @@ const config: Options<PostgreSqlDriver> = {
   entities: ['./dist/database/entities/**/*.entity.js'],
   entitiesTs: ['./src/database/entities/**/*.entity.ts'],
   metadataProvider: TsMorphMetadataProvider,
+  // Production (Docker/Linux) loads a build-time combined metadata cache so the JS-only
+  // runtime image never parses TS sources or runs ts-morph at boot. The cache is emitted by
+  // `mikro-orm cache:generate --combined` in the Dockerfile build stage (writes ./metadata.json).
+  // Dev (no metadata.json present) transparently falls back to TsMorphMetadataProvider.
+  metadataCache: {
+    enabled: true,
+    ...(existsSync('./metadata.json')
+      ? {
+          adapter: GeneratedCacheAdapter,
+          options: {
+            data: JSON.parse(readFileSync('./metadata.json', { encoding: 'utf8' })),
+          },
+        }
+      : {}),
+  },
   migrations: {
     tableName: 'mikro_orm_migrations',
-    path: './src/database/mikro-migrations',
+    // Runtime image ships only ./dist; migrations are compiled to dist/database/mikro-migrations.
+    // pathTs keeps dev (ts-node) reading the source .ts migrations.
+    path: './dist/database/mikro-migrations',
     pathTs: './src/database/mikro-migrations',
     glob: '!(*.d).{js,ts}',
   },

@@ -77,9 +77,13 @@ export class UsersController {
   // Phase HQ: Password reset requests (must be before :id to avoid UUID parse)
   @Get('password-reset-requests')
   @Roles('Admin')
-  @ApiOperation({ summary: 'Get pending password reset requests (Admin only)' })
-  getPasswordResetRequests() {
-    return this.service.getPasswordResetRequests();
+  @ApiOperation({
+    summary: 'Get password reset requests (Admin only)',
+    description:
+      'No status → pending queue (legacy default). status=COMPLETED or ALL surfaces history (PHASE BBBG Track 3).',
+  })
+  getPasswordResetRequests(@Query('status') status?: string) {
+    return this.service.getPasswordResetRequests(status);
   }
 
   @Patch('password-reset-requests/:requestId/complete')
@@ -92,7 +96,35 @@ export class UsersController {
     @Param('requestId', ParseUUIDPipe) requestId: string,
     @CurrentUser() actor: JwtPayload,
   ) {
-    return this.service.completePasswordResetRequest(requestId, actor.sub);
+    return this.service.completePasswordResetRequest(requestId, actor);
+  }
+
+  // PHASE BBCH (Track 5): deny a pending reset request (preserves history, audits the decision).
+  @Patch('password-reset-requests/:requestId/deny')
+  @Roles('Admin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Deny a pending password reset request (Admin only)',
+  })
+  denyPasswordResetRequest(
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @CurrentUser() actor: JwtPayload,
+    @Body('notes') notes?: string,
+  ) {
+    return this.service.denyPasswordResetRequest(requestId, actor, notes);
+  }
+
+  // PHASE BBBA (BBBA-1f): identity-unification duplicate-candidate REPORT (read-only).
+  // Must be before :id to avoid UUID parse. No merge action — review only (R-294).
+  @Get('duplicate-candidates')
+  @Roles('Admin')
+  @ApiOperation({
+    summary: 'List duplicate identity candidates (Admin only, read-only)',
+    description:
+      'Heuristic report of likely same-person accounts (shared email, or username matching another account’s email). Read-only — merging is a deferred manual action.',
+  })
+  getDuplicateCandidates() {
+    return this.service.getDuplicateCandidates();
   }
 
   // Phase HV: Cross-user bulk access update (Directive 225)

@@ -7,6 +7,11 @@ definePageMeta({
 // PT-C: prevent horizontal scrollbar on blank layout pages
 useHead({ style: [{ innerHTML: 'html, body { overflow-x: hidden; max-width: 100%; }' }] })
 
+// PHASE BBBA (BBBA-0a): public self-registration is CLOSED. Accounts are created by an
+// administrator (Access Control). This route redirects to login; the form below is retained
+// only for potential future admin-invite repurposing.
+await navigateTo('/login')
+
 const router = useRouter()
 const api = useApi()
 

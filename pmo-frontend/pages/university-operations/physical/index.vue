@@ -23,7 +23,7 @@ const route = useRoute()
 const api = useApi()
 const toast = useToast()
 const authStore = useAuthStore()
-const { isAdmin, isStaff, canAdd, isSuperAdmin } = usePermissions()
+const { isAdmin, isStaff, canAdd, canEdit, isSuperAdmin } = usePermissions()
 
 // Phase DW-C: Centralized fiscal year store
 import { useFiscalYearStore } from '~/stores/fiscalYear'
@@ -792,7 +792,9 @@ function isOwnerOrAssigned(op: any): boolean {
 }
 
 function canEditData(): boolean {
-  if (!currentOperation.value) return canAdd('operations')
+  // PHASE BBBD (Track 8): canonical 'university_operations' key so the access LEVEL governs
+  // (Viewer = read-only; Contributor+ = edit). Previously 'operations' bypassed the level system.
+  if (!currentOperation.value) return canAdd('university_operations')
   // Phase GOV-C: Admin on PUBLISHED quarterly must have explicit unlock approval
   if (isAdmin.value) {
     if (currentQuarterlyReport.value?.publication_status === 'PUBLISHED') {
@@ -803,7 +805,9 @@ function canEditData(): boolean {
   if (currentOperation.value.publication_status === 'PUBLISHED') return false
   // Phase ER-A: Published quarterly report locks indicator/financial edits for non-admin users
   if (currentQuarterlyReport.value?.publication_status === 'PUBLISHED') return false
-  return isOwnerOrAssigned(currentOperation.value)
+  // PHASE BBBD (Track 8): existing-operation edit requires BOTH record assignment AND module-level
+  // edit capability (module access ≠ record access; a Viewer assigned to a record stays read-only).
+  return isOwnerOrAssigned(currentOperation.value) && canEdit('university_operations')
 }
 
 // Phase EM-C: Cross-pillar submit guard — checks quarterly report status

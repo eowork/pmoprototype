@@ -306,37 +306,19 @@ export class ConstructionProjectsService {
     const params: any[] = [];
 
     const queryAny = query as any;
+    // PHASE BBBF (Track 1 / Task B1, R-353): the COI list is universally viewable — all authenticated
+    // institutional users (any role/level with COI access) see/search/filter ALL projects, incl. DRAFT
+    // (operator decision). Per-project edit restrictions apply only INSIDE a project. Contractors remain
+    // scoped to assigned records (security). The former campus/PUBLISHED/own list filter was removed.
     if (queryAny.publication_status) {
-      if (
-        queryAny.publication_status !== 'PUBLISHED' &&
-        user &&
-        !this.isAdmin(user)
-      ) {
-        conditions.push(`(cp.publication_status = ? AND cp.created_by = ?)`);
-        params.push(queryAny.publication_status, user.sub);
-      } else {
-        conditions.push(`cp.publication_status = ?`);
-        params.push(queryAny.publication_status);
-      }
+      conditions.push(`cp.publication_status = ?`);
+      params.push(queryAny.publication_status);
     } else if (user && this.permissionResolver.isContractor(user)) {
-      // QD-B: Contractors see ONLY records they are explicitly assigned to — no campus/published fallback
+      // Contractors see ONLY records they are explicitly assigned to.
       conditions.push(
         `EXISTS (SELECT 1 FROM record_assignments ra WHERE ra.module = 'CONSTRUCTION' AND ra.record_id = cp.id AND ra.user_id = ?)`,
       );
       params.push(user.sub);
-    } else if (user && !this.isAdmin(user)) {
-      const recordCampus = this.normalizeUserCampusToRecordCampus(user.campus);
-      if (recordCampus) {
-        conditions.push(
-          `(cp.campus = ? OR cp.created_by = ? OR EXISTS (SELECT 1 FROM record_assignments ra WHERE ra.module = 'CONSTRUCTION' AND ra.record_id = cp.id AND ra.user_id = ?))`,
-        );
-        params.push(recordCampus, user.sub, user.sub);
-      } else {
-        conditions.push(
-          `(cp.publication_status = 'PUBLISHED' OR cp.created_by = ? OR EXISTS (SELECT 1 FROM record_assignments ra WHERE ra.module = 'CONSTRUCTION' AND ra.record_id = cp.id AND ra.user_id = ?))`,
-        );
-        params.push(user.sub, user.sub);
-      }
     }
 
     if (query.status) {

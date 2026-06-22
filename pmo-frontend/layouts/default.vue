@@ -3,7 +3,18 @@ import { useDisplay } from 'vuetify'
 
 const router = useRouter()
 const authStore = useAuthStore()
-const { canAccessAdmin, canManageUsers, canAccessModule, currentRole, isSuperAdmin, isContractor } = usePermissions()
+const api = useApi()
+const { canAccessAdmin, canManageUsers, canAccessModule, currentRole, isSuperAdmin, isContractor, canApprove } = usePermissions()
+
+// PHASE BBCH (Track 1, R-372): approval authority via Layer 1 (admin) OR Layer 3 (Approver/Manager
+// module level) in any reviewable module — drives Pending Reviews nav visibility.
+const canReviewAny = computed(
+  () =>
+    canAccessAdmin.value ||
+    canApprove('coi') ||
+    canApprove('repairs') ||
+    canApprove('university_operations'),
+)
 
 // Responsive drawer - closed on mobile, open on desktop
 const { mdAndUp } = useDisplay()
@@ -11,6 +22,10 @@ const drawer = ref(mdAndUp.value)
 
 // Dropdown expand states - persist in localStorage
 const referenceDataOpen = ref(false)
+// PHASE BBBB (BBBB-1a): User Management multi-level group expand state.
+const userMgmtOpen = ref(false)
+// PHASE BBBB (BBBB-2a): pending access-request count for the nav badge (admins only).
+const pendingAccessCount = ref(0)
 
 // Initialize states from localStorage
 onMounted(() => {
@@ -22,8 +37,22 @@ onMounted(() => {
     }
     // Dropdown states
     referenceDataOpen.value = localStorage.getItem('sidebar_referenceData') === 'true'
+    userMgmtOpen.value = localStorage.getItem('sidebar_userMgmt') === 'true'
   }
+  // PHASE BBBB (BBBB-2a): load the pending access-request count for the badge.
+  loadPendingAccessCount()
 })
+
+// PHASE BBBB (BBBB-2a): poll-light pending access-request count (admins only).
+async function loadPendingAccessCount() {
+  if (!canAccessAdmin.value) return
+  try {
+    const res = await api.get<{ count: number }>('/api/access-requests/pending-count')
+    pendingAccessCount.value = res?.count ?? 0
+  } catch {
+    // non-fatal — leave at 0
+  }
+}
 
 // Watch and persist drawer state
 watch(drawer, (val) => {
@@ -36,6 +65,11 @@ watch(drawer, (val) => {
 watch(referenceDataOpen, (val) => {
   if (import.meta.client) {
     localStorage.setItem('sidebar_referenceData', String(val))
+  }
+})
+watch(userMgmtOpen, (val) => {
+  if (import.meta.client) {
+    localStorage.setItem('sidebar_userMgmt', String(val))
   }
 })
 
@@ -73,28 +107,34 @@ const referenceData = computed(() => {
 // Check if any reference data modules are accessible
 const hasReferenceDataAccess = computed(() => referenceData.value.length > 0)
 
-// NNN-E: Administration split into two role-scoped groups.
-// Group 1 — Operations & Monitoring (Admin + SuperAdmin): daily operational workflows.
+// PHASE BBBB (BBBB-1a, Option 2): Administration → "User Management" multi-level group.
+// Children: Users, Access Requests (badged), Identity Review, Password Resets.
+interface NavChild { title: string; icon: string; to: string; badge?: number }
+const userManagementItems = computed<NavChild[]>(() => {
+  if (!canManageUsers.value) return []
+  return [
+    { title: 'Users', icon: 'mdi-account-group', to: '/users' },
+    { title: 'Access Requests', icon: 'mdi-account-key-outline', to: '/admin/access-requests', badge: pendingAccessCount.value || undefined },
+    { title: 'Password Resets', icon: 'mdi-lock-reset', to: '/admin/password-resets' },
+    { title: 'Identity Review', icon: 'mdi-account-multiple-check-outline', to: '/admin/identity-review' },
+  ]
+})
+const hasUserManagementAccess = computed(() => userManagementItems.value.length > 0)
+
+// Administration — operational items (daily workflows), outside the User Management group.
 const operationsItems = computed(() => {
   const items: Array<{ title: string; icon: string; to: string }> = []
-  if (canAccessAdmin.value) {
+  // PHASE BBCH (Track 1): Pending Reviews is visible to anyone with approval authority (module
+  // level Approver/Manager included), not just system admins. Activity Logs stays admin-only.
+  if (canReviewAny.value) {
     items.push({ title: 'Pending Reviews', icon: 'mdi-clipboard-check-outline', to: '/admin/pending-reviews' })
-    items.push({ title: 'COI Activity Logs', icon: 'mdi-history', to: '/coi/activity-logs' })
+  }
+  if (canAccessAdmin.value) {
+    items.push({ title: 'Activity Logs', icon: 'mdi-history', to: '/coi/activity-logs' })
   }
   return items
 })
-
-// Group 2 — System Administration (gated by canManageUsers, SuperAdmin in practice): system setup.
-const systemAdminItems = computed(() => {
-  const items: Array<{ title: string; icon: string; to: string }> = []
-  if (canManageUsers.value) {
-    items.push({ title: 'User Management', icon: 'mdi-account-group', to: '/users' })
-  }
-  return items
-})
-
 const hasOperationsAccess = computed(() => operationsItems.value.length > 0)
-const hasSystemAdminAccess = computed(() => systemAdminItems.value.length > 0)
 
 async function handleLogout() {
   await authStore.logout()
@@ -155,6 +195,12 @@ async function handleLogout() {
               title="My Profile"
               to="/profile"
             />
+            <!-- PHASE BBBD (Track 5/Task F): Request Access relocated here from the dashboard. -->
+            <v-list-item
+              prepend-icon="mdi-lock-open-outline"
+              title="Request Access"
+              to="/access-request"
+            />
             <v-list-item
               prepend-icon="mdi-cog-outline"
               title="Account Settings"
@@ -212,34 +258,9 @@ async function handleLogout() {
         />
       </v-list>
 
-      <!-- Reference Data (Collapsible Dropdown) - Only show if user has access -->
-      <template v-if="hasReferenceDataAccess">
-        <v-divider class="my-2" />
-        <v-list nav density="comfortable">
-          <v-list-group v-model="referenceDataOpen" value="referenceData">
-            <template #activator="{ props }">
-              <v-list-item
-                v-bind="props"
-                prepend-icon="mdi-database"
-                title="References"
-                color="primary"
-              />
-            </template>
-            <v-list-item
-              v-for="item in referenceData"
-              :key="item.to"
-              :to="item.to"
-              :prepend-icon="item.icon"
-              :title="item.title"
-              color="primary"
-              rounded="lg"
-              class="mb-1"
-            />
-          </v-list-group>
-        </v-list>
-      </template>
+      <!-- PHASE BBBC (Task A): three labelled administration sections. -->
 
-      <!-- NNN-E: Operations & Monitoring (Admin + SuperAdmin) -->
+      <!-- A. Operations & Monitoring (Admin + SuperAdmin) -->
       <template v-if="hasOperationsAccess">
         <v-divider class="my-2" />
         <v-list nav density="comfortable">
@@ -257,21 +278,65 @@ async function handleLogout() {
         </v-list>
       </template>
 
-      <!-- NNN-E: System Administration (SuperAdmin / user-management access) -->
-      <template v-if="hasSystemAdminAccess">
+      <!-- B. System Administration (SuperAdmin, or Admin with explicit Users access) -->
+      <template v-if="hasUserManagementAccess">
         <v-divider class="my-2" />
         <v-list nav density="comfortable">
           <v-list-subheader>SYSTEM ADMINISTRATION</v-list-subheader>
-          <v-list-item
-            v-for="item in systemAdminItems"
-            :key="item.to"
-            :to="item.to"
-            :prepend-icon="item.icon"
-            :title="item.title"
-            color="primary"
-            rounded="lg"
-            class="mb-1"
-          />
+          <v-list-group v-model="userMgmtOpen" value="userMgmt">
+            <template #activator="{ props }">
+              <v-list-item
+                v-bind="props"
+                prepend-icon="mdi-account-cog"
+                title="User Management"
+                color="primary"
+              />
+            </template>
+            <v-list-item
+              v-for="item in userManagementItems"
+              :key="item.to"
+              :to="item.to"
+              :prepend-icon="item.icon"
+              color="primary"
+              rounded="lg"
+              class="mb-1"
+            >
+              <template #title>
+                <span class="d-inline-flex align-center ga-2">
+                  {{ item.title }}
+                  <v-chip v-if="item.badge" size="x-small" color="error" variant="flat">{{ item.badge }}</v-chip>
+                </span>
+              </template>
+            </v-list-item>
+          </v-list-group>
+        </v-list>
+      </template>
+
+      <!-- C. References (reference-data management) -->
+      <template v-if="hasReferenceDataAccess">
+        <v-divider class="my-2" />
+        <v-list nav density="comfortable">
+          <v-list-subheader>REFERENCES</v-list-subheader>
+          <v-list-group v-model="referenceDataOpen" value="referenceData">
+            <template #activator="{ props }">
+              <v-list-item
+                v-bind="props"
+                prepend-icon="mdi-database"
+                title="Reference Data"
+                color="primary"
+              />
+            </template>
+            <v-list-item
+              v-for="item in referenceData"
+              :key="item.to"
+              :to="item.to"
+              :prepend-icon="item.icon"
+              :title="item.title"
+              color="primary"
+              rounded="lg"
+              class="mb-1"
+            />
+          </v-list-group>
         </v-list>
       </template>
     </v-navigation-drawer>

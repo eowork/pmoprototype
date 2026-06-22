@@ -1374,6 +1374,423 @@
           "unsigned": false,
           "autoincrement": false,
           "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "uuid"
+        },
+        "requested_module": {
+          "name": "requested_module",
+          "type": "varchar(50)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": 50,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "string"
+        },
+        "requested_level": {
+          "name": "requested_level",
+          "type": "varchar(30)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": 30,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "string"
+        },
+        "justification": {
+          "name": "justification",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "text"
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": 20,
+          "precision": null,
+          "scale": null,
+          "default": "'PENDING'",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "string"
+        },
+        "granted_level": {
+          "name": "granted_level",
+          "type": "varchar(30)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": 30,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "string"
+        },
+        "decision_note": {
+          "name": "decision_note",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "text"
+        },
+        "decided_by": {
+          "name": "decided_by",
+          "type": "uuid",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "uuid"
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamptz(6)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": 6,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "datetime"
+        },
+        "requested_at": {
+          "name": "requested_at",
+          "type": "timestamptz(6)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": 6,
+          "precision": null,
+          "scale": null,
+          "default": "now()",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "datetime"
+        }
+      },
+      "name": "access_requests",
+      "schema": "public",
+      "indexes": [
+        {
+          "columnNames": [
+            "id"
+          ],
+          "composite": false,
+          "constraint": false,
+          "keyName": "access_requests_pkey",
+          "unique": true,
+          "primary": true
+        },
+        {
+          "columnNames": [
+            "status"
+          ],
+          "composite": false,
+          "constraint": false,
+          "keyName": "access_requests_status_index",
+          "unique": false,
+          "primary": false
+        },
+        {
+          "columnNames": [
+            "user_id"
+          ],
+          "composite": false,
+          "constraint": false,
+          "keyName": "access_requests_user_id_index",
+          "unique": false,
+          "primary": false
+        }
+      ],
+      "checks": [],
+      "foreignKeys": {},
+      "nativeEnums": {
+        "building_status_enum": {
+          "name": "building_status_enum",
+          "schema": "public",
+          "items": [
+            "OPERATIONAL",
+            "UNDER_CONSTRUCTION",
+            "RENOVATION",
+            "CLOSED"
+          ]
+        },
+        "building_type_enum": {
+          "name": "building_type_enum",
+          "schema": "public",
+          "items": [
+            "ACADEMIC",
+            "ADMINISTRATIVE",
+            "RESIDENTIAL",
+            "OTHER"
+          ]
+        },
+        "campus_enum": {
+          "name": "campus_enum",
+          "schema": "public",
+          "items": [
+            "MAIN",
+            "CABADBARAN",
+            "BOTH"
+          ]
+        },
+        "condition_enum": {
+          "name": "condition_enum",
+          "schema": "public",
+          "items": [
+            "POOR",
+            "FAIR",
+            "GOOD",
+            "VERY_GOOD",
+            "EXCELLENT"
+          ]
+        },
+        "contractor_status_enum": {
+          "name": "contractor_status_enum",
+          "schema": "public",
+          "items": [
+            "ACTIVE",
+            "SUSPENDED",
+            "BLACKLISTED"
+          ]
+        },
+        "department_status_enum": {
+          "name": "department_status_enum",
+          "schema": "public",
+          "items": [
+            "ACTIVE",
+            "INACTIVE"
+          ]
+        },
+        "fund_type_enum": {
+          "name": "fund_type_enum",
+          "schema": "public",
+          "items": [
+            "RAF_PROGRAMS",
+            "RAF_PROJECTS",
+            "RAF_CONTINUING",
+            "IGF_MAIN",
+            "IGF_CABADBARAN"
+          ]
+        },
+        "media_type_enum": {
+          "name": "media_type_enum",
+          "schema": "public",
+          "items": [
+            "IMAGE",
+            "VIDEO",
+            "DOCUMENT",
+            "OTHER"
+          ]
+        },
+        "module_type": {
+          "name": "module_type",
+          "schema": "public",
+          "items": [
+            "CONSTRUCTION",
+            "REPAIR",
+            "OPERATIONS",
+            "ALL"
+          ]
+        },
+        "operation_type_enum": {
+          "name": "operation_type_enum",
+          "schema": "public",
+          "items": [
+            "HIGHER_EDUCATION",
+            "ADVANCED_EDUCATION",
+            "RESEARCH",
+            "TECHNICAL_ADVISORY"
+          ]
+        },
+        "project_status_enum": {
+          "name": "project_status_enum",
+          "schema": "public",
+          "items": [
+            "PLANNING",
+            "ONGOING",
+            "COMPLETED",
+            "ON_HOLD",
+            "CANCELLED",
+            "PROPOSAL",
+            "COMPLETE"
+          ]
+        },
+        "project_type_enum": {
+          "name": "project_type_enum",
+          "schema": "public",
+          "items": [
+            "CONSTRUCTION",
+            "REPAIR",
+            "RESEARCH",
+            "EXTENSION",
+            "TRAINING",
+            "OTHER"
+          ]
+        },
+        "publication_status_enum": {
+          "name": "publication_status_enum",
+          "schema": "public",
+          "items": [
+            "DRAFT",
+            "PENDING_REVIEW",
+            "PUBLISHED",
+            "REJECTED"
+          ]
+        },
+        "repair_status_enum": {
+          "name": "repair_status_enum",
+          "schema": "public",
+          "items": [
+            "REPORTED",
+            "INSPECTED",
+            "APPROVED",
+            "IN_PROGRESS",
+            "COMPLETED",
+            "CANCELLED"
+          ]
+        },
+        "room_status_enum": {
+          "name": "room_status_enum",
+          "schema": "public",
+          "items": [
+            "AVAILABLE",
+            "OCCUPIED",
+            "UNDER_MAINTENANCE",
+            "UNAVAILABLE"
+          ]
+        },
+        "room_type_enum": {
+          "name": "room_type_enum",
+          "schema": "public",
+          "items": [
+            "CLASSROOM",
+            "LABORATORY",
+            "OFFICE",
+            "CONFERENCE",
+            "AUDITORIUM",
+            "OTHER"
+          ]
+        },
+        "semester_enum": {
+          "name": "semester_enum",
+          "schema": "public",
+          "items": [
+            "FIRST",
+            "SECOND",
+            "SUMMER"
+          ]
+        },
+        "setting_data_type_enum": {
+          "name": "setting_data_type_enum",
+          "schema": "public",
+          "items": [
+            "STRING",
+            "NUMBER",
+            "BOOLEAN",
+            "JSON",
+            "DATE",
+            "DATETIME"
+          ]
+        },
+        "urgency_level_enum": {
+          "name": "urgency_level_enum",
+          "schema": "public",
+          "items": [
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ]
+        }
+      },
+      "comment": null
+    },
+    {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": true,
+          "nullable": false,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": "gen_random_uuid()",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "uuid"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
           "nullable": true,
           "unique": false,
           "length": null,
@@ -43572,6 +43989,22 @@
           "comment": null,
           "enumItems": [],
           "mappedType": "uuid"
+        },
+        "granted_level": {
+          "name": "granted_level",
+          "type": "varchar(30)",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": 30,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "string"
         }
       },
       "name": "user_permission_overrides",
@@ -45032,6 +45465,38 @@
           "comment": "Phase HU: audit — user id of creator",
           "enumItems": [],
           "mappedType": "uuid"
+        },
+        "profile_completed": {
+          "name": "profile_completed",
+          "type": "bool",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": "false",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "boolean"
+        },
+        "must_change_password": {
+          "name": "must_change_password",
+          "type": "bool",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": false,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": "false",
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "boolean"
         }
       },
       "name": "users",

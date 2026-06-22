@@ -39,6 +39,12 @@ services:
       - "${BACKEND_PORT:-3000}:3000"
     volumes:
       - backend_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
   frontend:
     build:
@@ -53,7 +59,8 @@ services:
       NITRO_HOST: 0.0.0.0
       NITRO_PORT: 3000
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "${FRONTEND_PORT:-3001}:3000"
 

@@ -26,21 +26,21 @@ export class SettingsController {
   constructor(private readonly service: SettingsService) {}
 
   @Get()
-  @Roles('Admin', 'Staff')
+  @Roles() // PHASE BBBE (Track 1): settings reads (e.g. fiscal-year options) open to any authenticated user; the service filters admin-only settings by isAdmin
   findAll(@Query() query: QuerySettingDto, @CurrentUser() user: JwtPayload) {
     const isAdmin = user.roles?.includes('Admin') || false;
     return this.service.findAll(query, isAdmin);
   }
 
   @Get('group/:group')
-  @Roles('Admin', 'Staff')
+  @Roles() // PHASE BBBE (Track 1): settings reads (e.g. fiscal-year options) open to any authenticated user; the service filters admin-only settings by isAdmin
   findByGroup(@Param('group') group: string, @CurrentUser() user: JwtPayload) {
     const isAdmin = user.roles?.includes('Admin') || false;
     return this.service.findByGroup(group, isAdmin);
   }
 
   @Get(':key')
-  @Roles('Admin', 'Staff')
+  @Roles() // PHASE BBBE (Track 1): settings reads (e.g. fiscal-year options) open to any authenticated user; the service filters admin-only settings by isAdmin
   findByKey(@Param('key') key: string, @CurrentUser() user: JwtPayload) {
     const isAdmin = user.roles?.includes('Admin') || false;
     return this.service.findByKey(key, isAdmin);

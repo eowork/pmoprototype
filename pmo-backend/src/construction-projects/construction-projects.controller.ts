@@ -44,21 +44,24 @@ import {
   CreateDocumentFolderDto,
   UpdateDocumentFolderDto,
 } from './dto';
-import { JwtAuthGuard, RolesGuard } from '../auth/guards';
-import { Roles, CurrentUser } from '../auth/decorators';
+import { JwtAuthGuard, RolesGuard, ModuleAccessGuard } from '../auth/guards';
+import { Roles, CurrentUser, RequireModule } from '../auth/decorators';
 import { JwtPayload } from '../common/interfaces';
 
 @ApiTags('Construction Projects')
 @ApiBearerAuth('JWT-auth')
 @Controller('construction-projects')
-@UseGuards(JwtAuthGuard, RolesGuard)
+// PHASE BBBA (BBBA-1c): default-DENY module access. Public surface lives in the
+// separate PublicConstructionController, so gating the whole class is safe.
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleAccessGuard)
+@RequireModule('coi')
 export class ConstructionProjectsController {
   constructor(private readonly service: ConstructionProjectsService) {}
 
   // --- Read Operations: All authenticated roles can view ---
 
   @Get()
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor', 'Contractor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({
     summary: 'List all construction projects (non-Admin only see PUBLISHED; Contractors see only assigned)',
   })
@@ -70,14 +73,14 @@ export class ConstructionProjectsController {
   }
 
   @Get('analytics/summary')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'COI analytics summary — counts by status, campus, publication_status' })
   getAnalyticsSummary() {
     return this.service.getAnalyticsSummary();
   }
 
   @Get('analytics/financial-summary')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'COI financial analytics — aggregated appropriation, obligation, disbursement' })
   getFinancialSummary() {
     return this.service.getFinancialSummary();
@@ -99,7 +102,7 @@ export class ConstructionProjectsController {
 
   // --- Document Governance reference (static; must precede :id) ---
   @Get('document-types')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'List all CPES document types (reference)' })
   findDocumentTypes() {
     return this.service.findDocumentTypes();
@@ -107,7 +110,7 @@ export class ConstructionProjectsController {
 
   // ZX-3: Grouped document types for the attachment hub (static; must precede :id)
   @Get('document-types/grouped')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'List document types grouped by group_code' })
   findDocumentTypesGrouped() {
     return this.service.findDocumentTypesGrouped();
@@ -115,7 +118,7 @@ export class ConstructionProjectsController {
 
   // ZX-3: Flat templateUrl status map (static; must precede :id)
   @Get('document-types/template-status')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'Flat map of typeCode → templateUrl for all active types' })
   getDocumentTypeTemplateStatus() {
     return this.service.getDocumentTypeTemplateStatus();
@@ -123,7 +126,7 @@ export class ConstructionProjectsController {
 
   // VE-A: per-project permission map for the current user (static; must precede :id)
   @Get('my-permissions')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor', 'Contractor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({
     summary: 'Get the current user project-level permission map (projectId → permissions)',
   })
@@ -132,7 +135,7 @@ export class ConstructionProjectsController {
   }
 
   @Get(':id')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor', 'Contractor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'Get construction project details' })
   findOne(
     @Param('id', ParseUUIDPipe) id: string,
@@ -243,7 +246,7 @@ export class ConstructionProjectsController {
   // --- Milestones ---
 
   @Get(':id/milestones')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'List project milestones' })
   findMilestones(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findMilestones(id);
@@ -314,7 +317,7 @@ export class ConstructionProjectsController {
   // --- Timeline Diary Entries (Phase JW-G) ---
 
   @Get(':id/timeline-entries')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'List project timeline diary entries' })
   findTimelineEntries(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findTimelineEntries(id);
@@ -359,7 +362,7 @@ export class ConstructionProjectsController {
   // --- MOV Evidence Entries (Phase KO) ---
 
   @Get(':id/mov-entries')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({
     summary: 'List MOV evidence entries (optionally filter by related entity)',
   })
@@ -417,7 +420,7 @@ export class ConstructionProjectsController {
   // (see controller top) to avoid NestJS route-order collision with ParseUUIDPipe.
 
   @Get(':id/document-checklist')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({
     summary:
       'Get per-project document compliance checklist (lazy-initialized on first call)',
@@ -480,7 +483,7 @@ export class ConstructionProjectsController {
   // --- KD-E: Project Diary ---
 
   @Get(':id/diary-entries')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'List project diary entries (newest first)' })
   findDiaryEntries(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findDiaryEntries(id);
@@ -528,7 +531,7 @@ export class ConstructionProjectsController {
   // --- Revision Orders (Phase ND) ---
 
   @Get(':id/revision-orders')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'List revision orders for the project' })
   findRevisionOrders(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findRevisionOrders(id);
@@ -573,7 +576,7 @@ export class ConstructionProjectsController {
   // --- Progress Reports (Phase NE) ---
 
   @Get(':id/progress-reports')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'List progress reports for the project' })
   findProgressReports(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findProgressReports(id);
@@ -618,7 +621,7 @@ export class ConstructionProjectsController {
   // --- Gallery ---
 
   @Get(':id/gallery')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'List project gallery items' })
   findGallery(
     @Param('id', ParseUUIDPipe) id: string,
@@ -628,7 +631,7 @@ export class ConstructionProjectsController {
   }
 
   @Get(':id/gallery/:galleryId')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'Get gallery item details' })
   findGalleryItem(
     @Param('id', ParseUUIDPipe) id: string,
@@ -686,7 +689,7 @@ export class ConstructionProjectsController {
   // ============================================================
 
   @Get(':id/documents')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'List project documents (files + Drive links)' })
   async listDocuments(@Param('id', ParseUUIDPipe) id: string) {
     const data = await this.service.listProjectDocuments(id);
@@ -694,7 +697,7 @@ export class ConstructionProjectsController {
   }
 
   @Get(':id/document-folders')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'List project document folders as a nested tree' })
   async listDocumentFolders(@Param('id', ParseUUIDPipe) id: string) {
     const data = await this.service.listDocumentFolders(id);
@@ -776,7 +779,7 @@ export class ConstructionProjectsController {
 
   // CCC-A: Stream a stored document with its original filename + DOWNLOAD audit
   @Get(':id/documents/:docId/download')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'Stream a stored document with original filename + DOWNLOAD audit' })
   downloadDocument(
     @Param('id', ParseUUIDPipe) id: string,
@@ -789,7 +792,7 @@ export class ConstructionProjectsController {
 
   // ZT-7: Submission history for a checklist item
   @Get(':id/document-checklist/:itemId/submissions')
-  @Roles('Admin', 'Staff', 'Viewer', 'Auditor')
+  @Roles() // PHASE BBBE (Track 1): read open to any authenticated user (visibility layer)
   @ApiOperation({ summary: 'List submission versions for a checklist item' })
   getDocumentSubmissions(
     @Param('id', ParseUUIDPipe) id: string,

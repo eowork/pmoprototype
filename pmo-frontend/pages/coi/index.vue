@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { adaptProjects, type UIProject, type BackendProject, type PublicationStatus } from '~/utils/adapters'
 import { getStatusColor, getPublicationStatusColor, STATUS_HEX } from '~/utils/status-colors'
-import { formatDate, formatRelativeDate } from '~/utils/date-utils'
+import { formatDate } from '~/utils/userFormat'
+import { formatRelativeDate } from '~/utils/date-utils'
 import { PRIMARY_FUNDING_SOURCE_OPTIONS, labelForPrimaryFundingSource } from '~/utils/coiHierarchies'
 import VueApexCharts from 'vue3-apexcharts'
 
@@ -13,7 +14,7 @@ const router = useRouter()
 const api = useApi()
 const toast = useToast()
 const authStore = useAuthStore()
-const { canAdd, canEdit, canDelete, isAdmin, isStaff, isSuperAdmin } = usePermissions()
+const { canAdd, canEdit, canDelete, isAdmin, isStaff, isSuperAdmin, canApprove } = usePermissions()
 
 const projects = ref<UIProject[]>([])
 const search = ref('')
@@ -160,9 +161,10 @@ function canEditItem(project: UIProject): boolean {
 }
 
 // Submit/Resubmit for Review: Owner/assigned + DRAFT or REJECTED status
+// PHASE BBCH (Track 1, R-372): owner/assigned + (Staff system role OR contribute-capable level).
 function canSubmitForReview(project: UIProject): boolean {
-  if (!isStaff.value && !isOwnerOrAssigned(project)) return false
   if (!isOwnerOrAssigned(project)) return false
+  if (!(isStaff.value || canEdit('coi'))) return false
   return project.publicationStatus === 'DRAFT' || project.publicationStatus === 'REJECTED'
 }
 
@@ -173,10 +175,11 @@ function canWithdraw(project: UIProject): boolean {
   return project.approvalMetadata?.submittedBy === authStore.user?.id
 }
 
-// Approve: Admin + PENDING_REVIEW status + NOT self-submitted
-// Self-approval prevention: UI hides button if user is the submitter (backend also enforces)
+// Approve: approval authority (Admin OR Approver/Manager level) + PENDING_REVIEW + NOT self-submitted.
+// PHASE BBCH (Track 1, R-372): was isAdmin-only — now recognizes Layer 3 module levels.
+// Self-approval prevention: UI hides button if user is the submitter (backend also enforces).
 function canApproveItem(project: UIProject): boolean {
-  if (!isAdmin.value) return false
+  if (!canApprove('coi')) return false
   if (project.publicationStatus !== 'PENDING_REVIEW') return false
   // Prevent self-approval - hide button for own submissions (SuperAdmin excluded from this check)
   const currentUserId = authStore.user?.id
@@ -186,9 +189,9 @@ function canApproveItem(project: UIProject): boolean {
   return true
 }
 
-// Reject: Admin + PENDING_REVIEW status only
+// Reject: approval authority + PENDING_REVIEW status only
 function canRejectItem(project: UIProject): boolean {
-  return isAdmin.value && project.publicationStatus === 'PENDING_REVIEW'
+  return canApprove('coi') && project.publicationStatus === 'PENDING_REVIEW'
 }
 
 // --- Meatball Menu Actions ---

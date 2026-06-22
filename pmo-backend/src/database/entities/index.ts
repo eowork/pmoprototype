@@ -42,6 +42,7 @@ export { UserPermissionOverride } from './user-permission-override.entity';
 export { UserModuleAssignment } from './user-module-assignment.entity';
 export { UserPillarAssignment } from './user-pillar-assignment.entity';
 export { PasswordResetRequest } from './password-reset-request.entity';
+export { AccessRequest } from './access-request.entity';
 export { UniversityOperation } from './university-operation.entity';
 export { OperationIndicator } from './operation-indicator.entity';
 export { OperationFinancial } from './operation-financial.entity';

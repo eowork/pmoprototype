@@ -195,21 +195,40 @@ export class UniversityOperationsService {
   // ─── Phase CM/CN: Authorization Validation Helpers ───────────────────────────
 
   /**
-   * Phase CM: Validates that the requesting user owns the operation or has Admin role.
-   * Staff can only modify operations they created or are assigned to.
-   * Throws ForbiddenException if validation fails.
+   * Phase BBBG (Track 1): Level-aware operation ownership check. Resolves the user's UO
+   * module level from user_permission_overrides so Approver/Manager get module-wide write
+   * authority without being blocked by the record-ownership check. Contributor is still
+   * scoped to records they created or are assigned to.
    */
   private async validateOperationOwnership(
     operationId: string,
     userId: string,
     user: JwtPayload,
   ): Promise<void> {
-    // Admins can modify any operation
     if (this.isAdmin(user)) {
       return;
     }
 
-    // Check if user created the operation
+    // Resolve UO module level from the permission-override system (authoritative source).
+    const overrideRows = await this.em.getConnection().execute(
+      `SELECT granted_level FROM user_permission_overrides
+       WHERE user_id = ? AND module_key = 'university_operations' AND can_access = true`,
+      [userId],
+    );
+    const grantedLevel: string | null = overrideRows[0]?.granted_level ?? null;
+
+    // Approver and Manager have module-wide write authority — no record-ownership check needed.
+    if (grantedLevel === 'Approver' || grantedLevel === 'Manager') {
+      return;
+    }
+
+    // Viewer without a level grant cannot write (already blocked by ModuleAccessGuard, but
+    // belt-and-suspenders: deny here too so the service is self-contained).
+    if (!grantedLevel || grantedLevel === 'Viewer') {
+      throw new ForbiddenException('Insufficient module level to modify this operation.');
+    }
+
+    // Contributor: must be the record creator or an assigned user.
     const result = await this.em.getConnection().execute(
       `SELECT created_by FROM university_operations WHERE id = ? AND deleted_at IS NULL`,
       [operationId],
@@ -263,28 +282,29 @@ export class UniversityOperationsService {
   }
 
   /**
-   * Phase FG-1: Validates financial CUD access using module assignment instead of operation ownership.
-   * Financial data is shared across all users with OPERATIONS module access.
-   * Physical indicator CUD continues using validateOperationOwnership() (unchanged).
+   * Phase BBBG (Track 1): Level-aware financial access. Replaces the legacy
+   * user_module_assignments check so financial write authority is governed by
+   * user_permission_overrides.granted_level (Contributor+ may write; Viewer denied),
+   * consistent with validateOperationOwnership and the ModuleAccessGuard.
    */
   private async validateFinancialAccess(
     userId: string,
     user: JwtPayload,
   ): Promise<void> {
-    // Admins can modify any financial record
     if (this.isAdmin(user)) {
       return;
     }
 
-    // Staff: check user_module_assignments for OPERATIONS or ALL
-    const result = await this.em.getConnection().execute(
-      `SELECT 1 FROM user_module_assignments WHERE user_id = ? AND (module = 'OPERATIONS' OR module = 'ALL')`,
+    const overrideRows = await this.em.getConnection().execute(
+      `SELECT granted_level FROM user_permission_overrides
+       WHERE user_id = ? AND module_key = 'university_operations' AND can_access = true`,
       [userId],
     );
+    const grantedLevel: string | null = overrideRows[0]?.granted_level ?? null;
 
-    if (result.length === 0) {
+    if (!grantedLevel || grantedLevel === 'Viewer') {
       throw new ForbiddenException(
-        'You do not have permission to modify financial records. OPERATIONS module assignment required.',
+        'You do not have permission to modify financial records. Contributor or higher UO module level required.',
       );
     }
   }

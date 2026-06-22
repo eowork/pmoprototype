@@ -301,7 +301,7 @@ async function downloadDoc(doc: RepoDoc) {
             variant="outlined" density="compact" hide-details clearable
           />
         </v-col>
-        <v-col cols="12" sm="2" md="3" class="d-flex justify-end align-center ga-2">
+        <v-col cols="12" sm="15" md="3" class="d-flex justify-end align-center ga-1">
           <v-btn-toggle v-model="modalSort" mandatory density="compact" variant="outlined">
             <v-btn value="date-desc" icon="mdi-sort-calendar-descending" size="medium" density="compact" />
             <v-btn value="date-asc" icon="mdi-sort-calendar-ascending" size="medium" density="compact" />
@@ -451,7 +451,7 @@ async function downloadDoc(doc: RepoDoc) {
         </div>
 
         <template v-if="fileModalDocs.length">
-          <div class="text-overline text-weight-bold mb-1">
+          <div class="text-overline font-weight-bold mb-1">
             <v-icon size="14" class="mr-1">mdi-file-multiple-outline</v-icon>
             Files ({{ fileModalDocs.length }})
           </div>
@@ -489,7 +489,7 @@ async function downloadDoc(doc: RepoDoc) {
         <!-- ZZZ-C: EXTERNAL LINKS section (separate from files) -->
         <template v-if="linkModalDocs.length">
           <v-divider class="my-3" />
-          <div class="text-overline text-weight-bold mb-1">
+          <div class="text-overline font-weight-bold mb-1">
             <v-icon size="14" class="mr-1">mdi-link-variant</v-icon>
             External Links ({{ linkModalDocs.length }})
           </div>

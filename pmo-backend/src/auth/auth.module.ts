@@ -8,6 +8,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { LdapStrategy } from './strategies/ldap.strategy';
 import { JwtAuthGuard, RolesGuard } from './guards';
+import { ActivityLogModule } from '../activity-logs/activity-log.module';
 import { MikroOrmModule } from '@mikro-orm/nestjs';
 import {
   User,
@@ -34,6 +35,7 @@ import {
       UserPillarAssignment,
       PasswordResetRequest,
     ]),
+    ActivityLogModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

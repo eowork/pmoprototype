@@ -16,10 +16,21 @@ const router = useRouter()
 const toast = useToast()
 const { isAdmin, isSuperAdmin, canApprove } = usePermissions()
 
-// Redirect non-admin users
+// PHASE BBCH (Track 1, R-372): the review queue is reachable by anyone with approval authority —
+// Admin/SuperAdmin (Layer 1) OR an Approver/Manager module level (Layer 3) in any reviewable module.
+// Per-item actions remain individually gated by canApprove(item.module).
+const canReviewAny = computed(
+  () =>
+    isAdmin.value ||
+    canApprove('coi') ||
+    canApprove('repairs') ||
+    canApprove('university_operations'),
+)
+
+// Redirect users without any approval authority
 onMounted(() => {
-  if (!isAdmin.value) {
-    toast.error('Access denied. Admin role required.')
+  if (!canReviewAny.value) {
+    toast.error('Access denied. Approval authority required.')
     router.push('/dashboard')
   }
 })

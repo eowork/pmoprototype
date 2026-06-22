@@ -8,7 +8,7 @@
  * SECURITY: Backend must still enforce permissions. This is UX enhancement only.
  */
 export default defineNuxtRouteMiddleware((to) => {
-  const { canManageUsers, isSuperAdmin, isAdmin, canAdd, canEdit, isContractor } = usePermissions()
+  const { canManageUsers, isSuperAdmin, isAdmin, canAdd, canEdit, isContractor, canApprove } = usePermissions()
 
   // QB: Contractor route isolation — allow only /dashboard, /coi, /login, /contractor paths
   if (isContractor.value) {
@@ -34,6 +34,12 @@ export default defineNuxtRouteMiddleware((to) => {
     return // Skip all other guards for contractors
   }
 
+  // PHASE BBBE (Track 2 / Task H): module VIEW routes (/coi, /repairs, /university-operations and
+  // their detail pages) are open to all authenticated users — the dashboard/list/analytics/overview
+  // are universally viewable. WRITE routes (/coi/new, /coi/edit-*, …) remain gated by canAdd/canEdit
+  // below (level-based), and the backend ModuleAccessGuard is authoritative. The former BBBA-1b
+  // default-deny view redirect was removed (it caused the broken-dashboard 403 UX, R-342/R-344).
+
   // User management routes: SuperAdmin or Admin with canManageUsers permission
   if (to.path.startsWith('/users')) {
     if (!canManageUsers.value && !isSuperAdmin.value) {
@@ -42,8 +48,23 @@ export default defineNuxtRouteMiddleware((to) => {
     }
   }
 
-  // Admin-only routes
-  if (to.path.startsWith('/admin')) {
+  // PHASE BBCH (Track 1, R-372): the review queue is open to approval authority (Admin OR a
+  // module-level Approver/Manager). Carve it out before the broad /admin admin-only guard so a
+  // non-admin approver can reach it by URL; per-item actions stay gated by canApprove(item.module).
+  if (to.path.startsWith('/admin/pending-reviews')) {
+    const canReviewAny =
+      isSuperAdmin.value ||
+      canManageUsers.value ||
+      canApprove('coi') ||
+      canApprove('repairs') ||
+      canApprove('university_operations')
+    if (!canReviewAny) {
+      console.warn('[Permission] Access denied to /admin/pending-reviews - no approval authority')
+      return navigateTo('/dashboard')
+    }
+  }
+  // Admin-only routes (everything else under /admin)
+  else if (to.path.startsWith('/admin')) {
     if (!isSuperAdmin.value && !canManageUsers.value) {
       console.warn('[Permission] Access denied to /admin - insufficient permissions')
       return navigateTo('/dashboard')

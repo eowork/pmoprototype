@@ -1,13 +1,7 @@
-// Shared date formatting utilities. Replaces inline formatDate in coi/index.vue,
-// coi/detail-[id].vue, and adds a relative-time formatter.
-
-export function formatDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return '—'
-  const d = new Date(dateStr)
-  return Number.isNaN(d.getTime())
-    ? '—'
-    : d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
-}
+// Shared relative-time formatter.
+// PHASE BBCH (Track 7, R-378): `formatDate` was removed from here — it duplicated the
+// auto-imported `formatDate` in utils/userFormat.ts (the authoritative single source),
+// which produced a Nuxt "Duplicated imports" warning. Use formatDate from userFormat.
 
 export function formatRelativeDate(dateStr: string | null | undefined): string {
   if (!dateStr) return '—'
