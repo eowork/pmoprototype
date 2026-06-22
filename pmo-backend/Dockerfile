@@ -8,7 +8,7 @@ RUN npm run build
 # Emit a combined metadata cache (./metadata.json) from the compiled entities so the runtime
 # image needs no TS sources / ts-morph parsing at boot. Consumed via GeneratedCacheAdapter
 # in mikro-orm.config.ts. Metadata discovery does not touch the database, so this is safe at build time.
-RUN npx mikro-orm cache:generate --combined
+RUN npx mikro-orm cache:generate --combined --ts-node
 
 FROM node:20-alpine AS runtime
 WORKDIR /app
