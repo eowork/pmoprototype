@@ -26,7 +26,6 @@
   },
   "mikro-orm": {
     "configPaths": [
-      "./src/database/mikro-orm.config.ts",
       "./dist/database/mikro-orm.config.js"
     ]
   },
