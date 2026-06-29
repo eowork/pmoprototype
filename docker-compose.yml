@@ -26,6 +26,10 @@ services:
     env_file:
       - ./pmo-backend/.env
     environment:
+      # Force production in the container — overrides NODE_ENV=development from the
+      # dev .env (env_file). Dev mode would select TsMorphMetadataProvider, which
+      # reads ./src/*.entity.ts (absent from the compiled image) and crashes startup.
+      NODE_ENV: production
       DATABASE_HOST: postgres
       DATABASE_PORT: 5432
       DATABASE_NAME: ${POSTGRES_DB:-pmo_dashboard}
