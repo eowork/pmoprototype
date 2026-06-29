@@ -1,9 +1,15 @@
 'use strict';
 // Docker deployment migration bootstrap.
-// Fresh database: creates full schema from compiled entities, then fake-marks
-// all existing migrations as applied (schema IS already at current entity state).
+// Fresh database: loads the AUTHORITATIVE schema dump (schema/coredata_schema.sql,
+// pg_dump --schema-only of the source DB) then fake-marks all migrations applied.
+// This is used INSTEAD of entity createSchema() because createSchema omits ~50
+// migration-added, raw-SQL columns that are populated and app-used (ADR-023).
+// Set SEED_SKIP=true to load schema WITHOUT the base seed (data-clone scenario,
+// where a full data dump supplies its own reference data).
 // Existing database: runs any pending migrations normally via migrator.up().
 
+const fs = require('fs');
+const path = require('path');
 const { MikroORM } = require('@mikro-orm/core');
 const config = require('./dist/database/mikro-orm.config');
 const { seedFreshDatabase } = require('./seed');
@@ -20,14 +26,18 @@ async function main() {
   const isFresh = rows[0]?.tbl === null;
 
   if (isFresh) {
-    console.log('[migrate] Fresh database — creating schema from entities');
+    console.log('[migrate] Fresh database — loading authoritative schema dump');
 
-    // Build all tables/indexes from current entity metadata
-    const generator = orm.getSchemaGenerator();
-    await generator.createSchema();
-    console.log('[migrate] Schema created');
+    // Load the complete schema (all tables + the migration/raw-SQL columns that
+    // entity createSchema would omit). Executed as one simple-protocol query.
+    const schemaPath = path.join(__dirname, 'schema', 'coredata_schema.sql');
+    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+    await conn.execute(schemaSql);
+    // Reset search_path defensively (the dump's was stripped during sanitization).
+    await conn.execute('SET search_path TO public');
+    console.log('[migrate] Schema loaded from ' + schemaPath);
 
-    // The mikro_orm_migrations table is not an entity; create it manually
+    // mikro_orm_migrations is part of the dump (empty); ensure it exists regardless
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS mikro_orm_migrations (
         id serial PRIMARY KEY,
@@ -36,8 +46,8 @@ async function main() {
       )
     `);
 
-    // Fake-mark every migration as applied — schema is already at current state,
-    // so running any ALTER migrations on top would cause "already exists" errors
+    // Fake-mark every migration as applied — the dumped schema is already at the
+    // current state, so running ALTER migrations on top would error.
     const migrator = orm.getMigrator();
     const pending = await migrator.getPendingMigrations();
     for (const m of pending) {
@@ -45,12 +55,15 @@ async function main() {
         'INSERT INTO mikro_orm_migrations (name, executed_at) VALUES (?, NOW())',
         [m.name]
       );
-      console.log(`[migrate] Marked applied: ${m.name}`);
     }
     console.log(`[migrate] Done — ${pending.length} migrations marked applied`);
 
-    // Fresh database has empty tables — seed roles, a SuperAdmin, and reference data
-    await seedFreshDatabase(orm);
+    if (process.env.SEED_SKIP === 'true') {
+      console.log('[migrate] SEED_SKIP=true — skipping base seed (data-clone mode)');
+    } else {
+      // Fresh empty schema — seed roles, a SuperAdmin, and reference data
+      await seedFreshDatabase(orm);
+    }
 
   } else {
     console.log('[migrate] Existing database — running pending migrations');

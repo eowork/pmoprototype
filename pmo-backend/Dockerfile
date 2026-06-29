@@ -15,6 +15,7 @@ COPY --from=build /app/package*.json ./
 COPY docker-entrypoint.sh ./
 COPY migrate.js ./
 COPY seed.js ./
+COPY schema ./schema
 RUN chmod +x docker-entrypoint.sh
 EXPOSE 3000
 ENTRYPOINT ["./docker-entrypoint.sh"]

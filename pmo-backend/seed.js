@@ -28,11 +28,13 @@ async function seedFreshDatabase(orm) {
 
   console.log(`[seed] Seeding SuperAdmin user (${suUsername} / ${suEmail})...`);
   const hash = await bcrypt.hash(suPassword, 10);
+  // users.username/email are PARTIAL unique indexes (WHERE deleted_at IS NULL) in the
+  // authoritative schema, so ON CONFLICT can't match them — guard with NOT EXISTS instead.
   await conn.execute(
     `INSERT INTO users (username, email, password_hash, first_name, last_name, status, is_active, must_change_password)
-     VALUES (?, ?, ?, 'Super', 'Admin', 'ACTIVE', true, false)
-     ON CONFLICT (username) DO NOTHING;`,
-    [suUsername, suEmail, hash],
+     SELECT ?, ?, ?, 'Super', 'Admin', 'ACTIVE', true, false
+     WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = ?);`,
+    [suUsername, suEmail, hash, suUsername],
   );
 
   // Promote to SuperAdmin via the Admin role (is_superadmin flag is authoritative)
@@ -103,9 +105,11 @@ async function seedFreshDatabase(orm) {
     ON CONFLICT (code) DO NOTHING;
   `);
 
+  // data_type is an enum (setting_data_type_enum) in the authoritative schema — the
+  // VALUES literals are typed text, so cast explicitly.
   await conn.execute(`
     INSERT INTO system_settings (setting_key, setting_value, setting_group, data_type, is_public, description)
-    SELECT * FROM (VALUES
+    SELECT setting_key, setting_value, setting_group, data_type::setting_data_type_enum, is_public, description FROM (VALUES
       ('app.name', 'PMO Dashboard', 'application', 'STRING', true, 'Application display name'),
       ('app.version', '2.3.0', 'application', 'STRING', true, 'Current application version'),
       ('app.academic_year', '2025-2026', 'application', 'STRING', true, 'Current academic year'),
@@ -126,7 +130,7 @@ async function seedFreshDatabase(orm) {
   await conn.execute(`
     INSERT INTO pillar_indicator_taxonomy
       (pillar_type, indicator_name, indicator_code, uacs_code, indicator_order, indicator_type, unit_type, description, is_active)
-    SELECT v.* FROM (VALUES
+    SELECT v.pillar_type::operation_type_enum, v.indicator_name, v.indicator_code, v.uacs_code, v.indicator_order, v.indicator_type, v.unit_type, v.description, v.is_active FROM (VALUES
   ('HIGHER_EDUCATION', 'Percentage of first-time licensure exam takers that pass the licensure exams', 'HE-OC-01', '', 1, 'OUTCOME', 'PERCENTAGE', 'Measures the quality of graduates through board exam performance. Calculated as: (Number of first-time passers / Total first-time takers) × 100', true),
   ('HIGHER_EDUCATION', 'Percentage of graduates (2 years prior) that are employed', 'HE-OC-02', '', 2, 'OUTCOME', 'PERCENTAGE', 'Measures graduate employability rate within 2 years of graduation. Calculated as: (Employed graduates / Total graduates 2 years prior) × 100', true),
   ('HIGHER_EDUCATION', 'Percentage of undergraduate students enrolled in CHED-identified and RDC-identified priority programs', 'HE-OP-01', '', 3, 'OUTPUT', 'PERCENTAGE', 'Measures alignment with national and regional priority program enrollment. Calculated as: (Students in priority programs / Total undergraduate enrollment) × 100', true),
