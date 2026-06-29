@@ -7,15 +7,30 @@ import { GlobalExceptionFilter } from './common/filters';
 import { LoggingInterceptor } from './common/interceptors';
 import { join } from 'path';
 import { ConfigService } from '@nestjs/config';
+import type { Request, Response, NextFunction } from 'express';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // KY-A1: Serve uploaded files as static assets at /uploads prefix
+  // KY-A1: Serve uploaded files as static assets at /uploads prefix.
+  // SECURITY (T2): /uploads is unauthenticated, so restrict it to IMAGE types only
+  // (gallery images render in <img> and public project pages show galleries by design).
+  // Documents (PDF/DOCX/etc.) must NOT be reachable here — they are served exclusively
+  // through the guarded streaming endpoint (.../documents/:docId/download, JWT + guards).
+  // This closes the hole where any document was downloadable by direct /uploads URL.
   const configService = app.get(ConfigService);
   const uploadDir = configService.get<string>('UPLOAD_DIR', './uploads');
   const absoluteUploadDir = join(process.cwd(), uploadDir);
+  const UPLOADS_IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|svg)$/i;
+  app.use('/uploads', (req: Request, res: Response, next: NextFunction) => {
+    if (!UPLOADS_IMAGE_EXT.test(req.path)) {
+      return res
+        .status(403)
+        .json({ statusCode: 403, message: 'Forbidden: documents are served via the authenticated download endpoint.' });
+    }
+    next();
+  });
   app.useStaticAssets(absoluteUploadDir, { prefix: '/uploads' });
 
   // LLL-E3: Serve seeded document templates (public, no auth) at /templates prefix.
