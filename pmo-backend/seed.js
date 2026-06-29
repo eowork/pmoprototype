@@ -1,20 +1,34 @@
 'use strict';
 // Docker fresh-database seed.
 // Invoked by migrate.js ONLY on a fresh database (empty schema), so it can never
-// alter an existing deployment's auth or data. All inserts are ON CONFLICT DO
-// NOTHING / idempotent. Seeds: base roles, a first SuperAdmin, and reference data.
+// alter an existing deployment's auth or data. All inserts are idempotent (NOT
+// EXISTS guards / ON CONFLICT). Seeds: base roles, three SuperAdmins, reference
+// data, and the BAR1 taxonomy.
 //
-// SuperAdmin credentials are taken from env (with safe defaults) so each
-// deployment can set its own. Change SEED_SUPERADMIN_PASSWORD before go-live.
+// SuperAdmins are fully provisioned (profile_completed, rank_level, Admin role +
+// is_superadmin, module=ALL) so none are trapped in onboarding. Passwords are
+// env-overridable (SEED_PMOADMIN_PASSWORD / SEED_ADMIN_PASSWORD). Change them
+// before go-live.
 
 const bcrypt = require('bcrypt');
 
 async function seedFreshDatabase(orm) {
   const conn = orm.em.getConnection();
 
-  const suUsername = process.env.SEED_SUPERADMIN_USERNAME || 'admin';
-  const suEmail = process.env.SEED_SUPERADMIN_EMAIL || 'admin@carsu.edu.ph';
-  const suPassword = process.env.SEED_SUPERADMIN_PASSWORD || 'ChangeMe!2026';
+  // Three SuperAdmins are always provisioned so the system never has zero admins.
+  // Each is FULLY set up (profile_completed=true, rank_level=10, Admin role +
+  // is_superadmin, module=ALL) so none get trapped in the onboarding wizard.
+  // 'pmu' is a Google-OAuth account (no local password): google.strategy matches by
+  // email, so its first sign-in lands on this pre-seeded SuperAdmin row.
+  // Passwords are env-overridable.
+  const SUPERADMINS = [
+    { username: 'pmoadmin', email: 'pmoadmin@carsu.edu.ph', firstName: 'PMO', lastName: 'Admin',
+      password: process.env.SEED_PMOADMIN_PASSWORD || 'pmocore' },
+    { username: 'admin', email: 'admin@carsu.edu.ph', firstName: 'Super', lastName: 'Admin',
+      password: process.env.SEED_ADMIN_PASSWORD || process.env.SEED_SUPERADMIN_PASSWORD || 'pmoadmincore' },
+    { username: 'pmu', email: 'pmu@carsu.edu.ph', firstName: 'PMU', lastName: 'Admin',
+      password: null }, // Google OAuth only — no local password
+  ];
 
   console.log('[seed] Seeding base roles...');
   await conn.execute(`
@@ -26,26 +40,40 @@ async function seedFreshDatabase(orm) {
     ON CONFLICT (name) DO NOTHING;
   `);
 
-  console.log(`[seed] Seeding SuperAdmin user (${suUsername} / ${suEmail})...`);
-  const hash = await bcrypt.hash(suPassword, 10);
-  // users.username/email are PARTIAL unique indexes (WHERE deleted_at IS NULL) in the
-  // authoritative schema, so ON CONFLICT can't match them — guard with NOT EXISTS instead.
-  await conn.execute(
-    `INSERT INTO users (username, email, password_hash, first_name, last_name, status, is_active, must_change_password)
-     SELECT ?, ?, ?, 'Super', 'Admin', 'ACTIVE', true, false
-     WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = ?);`,
-    [suUsername, suEmail, hash, suUsername],
-  );
+  for (const su of SUPERADMINS) {
+    console.log(`[seed] Seeding SuperAdmin ${su.username} (${su.email}, ${su.password ? 'local' : 'Google OAuth'})...`);
+    // Google users have no local password (password_hash = '' per google.strategy).
+    const hash = su.password ? await bcrypt.hash(su.password, 10) : '';
 
-  // Promote to SuperAdmin via the Admin role (is_superadmin flag is authoritative)
-  await conn.execute(
-    `INSERT INTO user_roles (user_id, role_id, is_superadmin, assigned_by, created_by)
-     SELECT u.id, r.id, true, u.id, u.id
-     FROM users u, roles r
-     WHERE u.username = ? AND r.name = 'Admin'
-     ON CONFLICT (user_id, role_id) DO UPDATE SET is_superadmin = true;`,
-    [suUsername],
-  );
+    // Fully provisioned: profile_completed=true (skip onboarding) + rank_level=10.
+    // username/email are PARTIAL unique indexes (WHERE deleted_at IS NULL), so ON
+    // CONFLICT can't match — guard with NOT EXISTS.
+    await conn.execute(
+      `INSERT INTO users (username, email, password_hash, first_name, last_name, status, is_active, must_change_password, profile_completed, rank_level)
+       SELECT ?, ?, ?, ?, ?, 'ACTIVE', true, false, true, 10
+       WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = ?);`,
+      [su.username, su.email, hash, su.firstName, su.lastName, su.username],
+    );
+
+    // Promote to SuperAdmin via the Admin role (is_superadmin flag is authoritative).
+    await conn.execute(
+      `INSERT INTO user_roles (user_id, role_id, is_superadmin, assigned_by, created_by)
+       SELECT u.id, r.id, true, u.id, u.id
+       FROM users u, roles r
+       WHERE u.username = ? AND r.name = 'Admin'
+       ON CONFLICT (user_id, role_id) DO UPDATE SET is_superadmin = true;`,
+      [su.username],
+    );
+
+    // Grant module access (ALL) so the UI reflects full access, matching live superadmins.
+    await conn.execute(
+      `INSERT INTO user_module_assignments (user_id, module)
+       SELECT u.id, 'ALL' FROM users u
+       WHERE u.username = ?
+       AND NOT EXISTS (SELECT 1 FROM user_module_assignments m WHERE m.user_id = u.id AND m.module = 'ALL');`,
+      [su.username],
+    );
+  }
 
   // Reference tables below have no unique constraint on their natural key (the
   // MikroORM entities don't declare @Unique), so ON CONFLICT can't be used —
@@ -153,7 +181,7 @@ d. whose research work resulted in an extension program', 'AE-OC-01', '', 1, 'OU
     WHERE NOT EXISTS (SELECT 1 FROM pillar_indicator_taxonomy WHERE is_active = true);
   `);
 
-  console.log(`[seed] Done. Log in with username "${suUsername}" / the SEED_SUPERADMIN_PASSWORD value.`);
+  console.log(`[seed] Done. SuperAdmins: ${SUPERADMINS.map((s) => s.username).join(', ')} (pmu = Google OAuth).`);
 }
 
 module.exports = { seedFreshDatabase };
