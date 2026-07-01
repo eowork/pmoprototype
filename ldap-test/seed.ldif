@@ -1,5 +1,6 @@
 # PMO CORE — LDAP test directory seed
-# Loaded by bitnami/openldap at first startup via LDAP_CUSTOM_LDIF_DIR.
+# Loaded by osixia/openldap:1.5.0 at first startup via --copy-service.
+# Mounted at: /container/service/slapd/assets/config/bootstrap/ldif/custom/
 # Contains the ou=users branch and one test entry per local DB user.
 #
 # mail attribute MUST match the user's email in the local `users` table.

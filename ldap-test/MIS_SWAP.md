@@ -12,7 +12,7 @@ The entire swap is a `.env` change + container restart. No code changes.
 ## Current test values (local OpenLDAP)
 
 ```env
-LDAP_URL=ldap://openldap:1389
+LDAP_URL=ldap://openldap:389
 LDAP_BIND_DN=cn=admin,dc=carsu,dc=edu,dc=ph
 LDAP_BIND_PASSWORD=testldapadmin
 LDAP_SEARCH_BASE=ou=users,dc=carsu,dc=edu,dc=ph
@@ -37,7 +37,7 @@ LDAP_TLS_REJECT_UNAUTHORIZED=true
 
 | Setting | Test | MIS/AD | Why different |
 |---------|------|--------|---------------|
-| `LDAP_URL` | `ldap://openldap:1389` | `ldaps://ldap.carsu.edu.ph:636` | Production uses LDAPS (TLS on port 636) |
+| `LDAP_URL` | `ldap://openldap:389` | `ldaps://ldap.carsu.edu.ph:636` | Production uses LDAPS (TLS on port 636) |
 | `LDAP_BIND_DN` | `cn=admin,...` | `cn=svc-pmo,ou=ServiceAccounts,...` | MIS provisions a dedicated service account |
 | `LDAP_SEARCH_FILTER` | `(mail={{username}})` | `(sAMAccountName={{username}})` | AD users log in with Windows username, not email |
 | `LDAP_TLS_REJECT_UNAUTHORIZED` | `false` | `true` | Production requires valid TLS cert |

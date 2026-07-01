@@ -76,17 +76,17 @@ services:
   # See ldap-test/MIS_SWAP.md for the full procedure and MIS swap guide.
   openldap:
     profiles: ["ldap-test"]
-    image: bitnami/openldap:2
+    image: osixia/openldap:1.5.0
+    command: ["--copy-service"]
     environment:
-      LDAP_ROOT: dc=carsu,dc=edu,dc=ph
-      LDAP_ADMIN_USERNAME: admin
+      LDAP_ORGANISATION: CSU CORE
+      LDAP_DOMAIN: carsu.edu.ph
       LDAP_ADMIN_PASSWORD: testldapadmin
-      LDAP_CUSTOM_LDIF_DIR: /ldifs
-      ALLOW_EMPTY_PASSWORD: "no"
+      LDAP_TLS: "false"
     volumes:
-      - ./ldap-test/seed.ldif:/ldifs/seed.ldif:ro
+      - ./ldap-test/seed.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/seed.ldif:ro
     ports:
-      - "1389:1389"
+      - "1389:389"
 
 volumes:
   pgdata:
