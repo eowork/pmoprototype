@@ -40,8 +40,11 @@ async function bootstrap() {
     prefix: '/templates',
   });
 
-  // Enable CORS for frontend integration (future)
-  app.enableCors();
+  // Restrict CORS to the known frontend origin. FRONTEND_URL defaults to localhost:3001
+  // so dev behavior is unchanged. Set FRONTEND_URL in .env for production deployments.
+  app.enableCors({
+    origin: configService.get<string>('FRONTEND_URL', 'http://localhost:3001'),
+  });
 
   // Global validation pipe
   app.useGlobalPipes(
@@ -66,45 +69,49 @@ async function bootstrap() {
     exclude: ['health'], // Health check at root
   });
 
-  // Swagger/OpenAPI documentation
-  const config = new DocumentBuilder()
-    .setTitle('PMO Dashboard API')
-    .setDescription(
-      'Project Management Office REST API for managing construction projects, repairs, university operations, and administrative functions.',
-    )
-    .setVersion('2.8.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'Enter JWT token',
-      },
-      'JWT-auth',
-    )
-    .addTag('Health', 'Health check endpoints')
-    .addTag('Authentication', 'User authentication and authorization')
-    .addTag('Users', 'User management (Admin only)')
-    .addTag('Projects', 'Base project management')
-    .addTag('Construction Projects', 'Construction project management')
-    .addTag('Repair Projects', 'Repair project management')
-    .addTag('University Operations', 'University operations management')
-    .addTag('GAD Parity', 'Gender and Development parity data')
-    .addTag('Reference: Contractors', 'Contractor reference data')
-    .addTag('Reference: Funding Sources', 'Funding source reference data')
-    .addTag('Reference: Departments', 'Department reference data')
-    .addTag('Reference: Repair Types', 'Repair type reference data')
-    .addTag(
-      'Reference: Subcategories',
-      'Construction subcategory reference data',
-    )
-    .addTag('System Settings', 'System configuration settings')
-    .addTag('File Uploads', 'File upload management')
-    .addTag('Documents', 'Document attachment management')
-    .addTag('Media', 'Media attachment management')
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  // Swagger/OpenAPI — available in development only.
+  // Production Docker sets NODE_ENV=production (forced in docker-compose.yml),
+  // so /api/docs returns 404 in deployed environments.
+  if (configService.get('NODE_ENV') !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('PMO Dashboard API')
+      .setDescription(
+        'Project Management Office REST API for managing construction projects, repairs, university operations, and administrative functions.',
+      )
+      .setVersion('2.8.0')
+      .addBearerAuth(
+        {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Enter JWT token',
+        },
+        'JWT-auth',
+      )
+      .addTag('Health', 'Health check endpoints')
+      .addTag('Authentication', 'User authentication and authorization')
+      .addTag('Users', 'User management (Admin only)')
+      .addTag('Projects', 'Base project management')
+      .addTag('Construction Projects', 'Construction project management')
+      .addTag('Repair Projects', 'Repair project management')
+      .addTag('University Operations', 'University operations management')
+      .addTag('GAD Parity', 'Gender and Development parity data')
+      .addTag('Reference: Contractors', 'Contractor reference data')
+      .addTag('Reference: Funding Sources', 'Funding source reference data')
+      .addTag('Reference: Departments', 'Department reference data')
+      .addTag('Reference: Repair Types', 'Repair type reference data')
+      .addTag(
+        'Reference: Subcategories',
+        'Construction subcategory reference data',
+      )
+      .addTag('System Settings', 'System configuration settings')
+      .addTag('File Uploads', 'File upload management')
+      .addTag('Documents', 'Document attachment management')
+      .addTag('Media', 'Media attachment management')
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
