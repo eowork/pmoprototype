@@ -88,16 +88,17 @@ docker exec -i "$DB_CONTAINER" \
 
 echo "      Database restored."
 
-# --- Uploads restore ---
+# --- Restart backend before uploads restore (docker cp requires running container) ---
 echo "[3/4] Restoring uploaded files..."
-docker exec "$BACKEND_CONTAINER" rm -rf /app/uploads 2>/dev/null || true
+docker compose -f "$PROJECT_DIR/docker-compose.yml" start backend
+echo "      Waiting for backend to start..."
+sleep 8
 docker cp "$BACKUP_DIR/uploads.tar.gz" "$BACKEND_CONTAINER:/tmp/uploads.tar.gz"
-docker exec "$BACKEND_CONTAINER" tar -xzf /tmp/uploads.tar.gz -C /app
-docker exec "$BACKEND_CONTAINER" rm /tmp/uploads.tar.gz
+docker exec "$BACKEND_CONTAINER" bash -c "rm -rf /app/uploads && tar -xzf /tmp/uploads.tar.gz -C /app && rm /tmp/uploads.tar.gz"
 echo "      Uploads restored."
 
-# --- Restart backend ---
-echo "[4/4] Starting backend..."
+# --- Wait for health ---
+echo "[4/4] Waiting for backend health..."
 docker compose -f "$PROJECT_DIR/docker-compose.yml" start backend
 
 # Wait for health

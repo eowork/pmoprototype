@@ -1,7 +1,7 @@
 # CSU CORE Dashboard — Operations Runbook
 
 > **Audience:** MIS staff responsible for day-to-day operation
-> **Covers:** Start/stop, logs, backup, restore, user lockout, prohibited commands
+> **Covers:** Start/stop, logs, backup, restore, user lockout, prohibited commands, incident response
 > **Last verified:** 2026-07-01
 
 All commands run in the **WSL Ubuntu terminal** from the project directory:
@@ -312,3 +312,112 @@ Docker Desktop should auto-start with Windows. If not:
 1. Open Docker Desktop from the Start menu
 2. Wait for the whale icon in the system tray to show "Docker Desktop is running"
 3. Then in WSL Ubuntu: `docker compose up -d`
+
+---
+
+## Incident Response
+
+### Severity Classification
+
+| Level | Definition | Example |
+|---|---|---|
+| **S1 — Critical** | System completely unavailable; data loss; security breach | All containers down; database corrupted; unauthorized access |
+| **S2 — High** | Core feature broken; users cannot submit reports | Authentication failing; quarterly report save returns 500 |
+| **S3 — Medium** | Single feature broken; workaround exists | Analytics chart not rendering; one module inaccessible |
+| **S4 — Low** | Cosmetic or minor inconvenience | Label misaligned; filter not resetting |
+
+---
+
+### Escalation Contacts
+
+Fill in these contacts before go-live. Keep a printed copy near the server.
+
+| Role | Name | Contact |
+|---|---|---|
+| MIS Successor (primary) | | |
+| MIS Director | | |
+| PMO Director | | |
+| Server / Network Admin | | |
+| Outgoing Developer (if reachable) | Angelo Alcantara | meoangeloalcantara@gmail.com |
+
+---
+
+### S1 Response Procedure
+
+**Step 1 — Assess**
+```bash
+docker compose ps
+# Are all containers running and healthy?
+```
+
+```bash
+curl http://localhost:3000/health
+# Is the backend responding?
+```
+
+**Step 2 — Attempt recovery**
+```bash
+docker compose up -d
+# Restart any stopped containers
+```
+
+If the database is corrupted or data is missing:
+```bash
+# List available backups
+ls backups/
+
+# Restore from the most recent backup (REPLACES all current data)
+bash restore.sh <timestamp>
+# Example: bash restore.sh 20260702_020001
+```
+
+**Step 3 — Notify**
+- Notify MIS Director and PMO Director immediately by phone/message
+- State: what is affected, when it started, what you have done
+
+**Step 4 — Post-incident report**
+Within 24 hours of an S1 or S2 incident, submit a written summary to the MIS Director:
+- What happened and when
+- Root cause (if known)
+- Actions taken
+- Resolution time
+- Preventive measures
+
+---
+
+### Health Check
+
+Verify system health at any time:
+
+```bash
+curl http://localhost:3000/health
+```
+
+Expected response:
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-07-01T...",
+  "uptime": 12345,
+  "version": "2.8.0",
+  "checks": {
+    "database": { "status": "healthy", "latency": 3 },
+    "memory": { "status": "healthy" }
+  }
+}
+```
+
+If `status` is `"degraded"` or `"error"`, check container logs immediately.
+
+---
+
+### Security Incident Procedure
+
+If you suspect unauthorized access (unfamiliar user accounts, unexpected data changes):
+
+1. Check activity logs in the PMO CORE admin panel (SuperAdmin → Activity Log)
+2. Check backend logs: `docker compose logs backend --tail=200 | grep -i "401\|403\|login"`
+3. If a user account was compromised: deactivate it via User Management immediately
+4. If a JWT secret compromise is suspected: rotate `AUTH_JWT_SECRET` in `pmo-backend/.env` and restart backend — this invalidates ALL active sessions (all users must re-login)
+5. Notify MIS Director and document the incident
+
