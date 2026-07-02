@@ -94,15 +94,11 @@ docker compose -f "$PROJECT_DIR/docker-compose.yml" start backend
 echo "      Waiting for backend to start..."
 sleep 8
 docker cp "$BACKUP_DIR/uploads.tar.gz" "$BACKEND_CONTAINER:/tmp/uploads.tar.gz"
-docker exec "$BACKEND_CONTAINER" bash -c "rm -rf /app/uploads && tar -xzf /tmp/uploads.tar.gz -C /app && rm /tmp/uploads.tar.gz"
+docker exec "$BACKEND_CONTAINER" sh -c "rm -rf /app/uploads/* /app/uploads/.[!.]* 2>/dev/null; tar -xzf /tmp/uploads.tar.gz -C /app && rm /tmp/uploads.tar.gz"
 echo "      Uploads restored."
 
 # --- Wait for health ---
 echo "[4/4] Waiting for backend health..."
-docker compose -f "$PROJECT_DIR/docker-compose.yml" start backend
-
-# Wait for health
-echo "      Waiting for backend health..."
 for i in $(seq 1 12); do
   if docker compose -f "$PROJECT_DIR/docker-compose.yml" ps | grep backend | grep -q "healthy"; then
     break
