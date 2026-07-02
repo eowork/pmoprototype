@@ -29,7 +29,8 @@ Prepare these items on a USB drive or send them to the dry-run laptop before you
 |---|---|---|
 | Root `.env` file | `D:\Programming\pmo-dash\.env` on dev machine | Copy to USB |
 | Backend `.env` file | `D:\Programming\pmo-dash\pmo-backend\.env` | Copy to USB |
-| `pmoadmin` password | Value of `SEED_PMOADMIN_PASSWORD` in backend `.env` | Write it down |
+| Frontend `.env` file | `D:\Programming\pmo-dash\pmo-frontend\.env` | Copy to USB |
+| `pmoadmin` password | Value of `SEED_PMOADMIN_PASSWORD` in backend `.env` | Write it down separately — do not rely on memory |
 | GitHub access | Repo is public — no credentials needed | None |
 
 ### Optional (for full data verification)
@@ -150,26 +151,45 @@ ls
 
 ### Step 2B — Configure Environment Files
 
-**Copy the `.env` files from the USB drive.** The USB drive appears in WSL at `/mnt/<drive-letter>/`.
+**Copy the `.env` files from the USB drive.**
 
-Find your USB drive letter in Windows File Explorer first (e.g., `E:\`), then:
+First, check if the USB drive is visible in WSL:
+
+```bash
+ls /mnt/
+# Expected: c  d  e  (one letter per Windows drive, including USB)
+```
+
+If your USB drive letter is not listed, mount it manually (replace `e` with your actual USB letter):
+
+```bash
+sudo mkdir -p /mnt/e
+sudo mount -t drvfs E: /mnt/e
+```
+
+Find your USB drive letter in Windows File Explorer (e.g., `E:\`), then copy all three `.env` files:
 
 ```bash
 # Copy root .env
-cp /mnt/e/DRYRUN_FILES/.env ~/pmo-dash/.env
+cp "/mnt/e/master-files/root-files/.env" ~/pmo-dash/.env
 
 # Copy backend .env
-cp /mnt/e/DRYRUN_FILES/pmo-backend.env ~/pmo-dash/pmo-backend/.env
+cp "/mnt/e/master-files/pmo-backend/.env" ~/pmo-dash/pmo-backend/.env
+
+# Copy frontend .env
+cp "/mnt/e/master-files/pmo-frontend/.env" ~/pmo-dash/pmo-frontend/.env
 ```
 
-> Replace `/mnt/e/DRYRUN_FILES/` with the actual path to your USB files.
+> Adjust the path after `/mnt/e/` to match the folder structure on your USB.
+> If any path has spaces (e.g., a folder named "Meo Angelo Alcantara"), wrap the entire path in double quotes.
 
-**Verify both files are in place:**
+**Verify all three files are in place:**
 
 ```bash
 ls -la ~/pmo-dash/.env
 ls -la ~/pmo-dash/pmo-backend/.env
-# Both should show file sizes > 0
+ls -la ~/pmo-dash/pmo-frontend/.env
+# All three should show file sizes > 0
 ```
 
 **Check required variables are set in backend `.env`:**
@@ -177,6 +197,14 @@ ls -la ~/pmo-dash/pmo-backend/.env
 ```bash
 grep -E "DATABASE_PASSWORD|AUTH_JWT_SECRET|SEED_PMOADMIN_PASSWORD" ~/pmo-dash/pmo-backend/.env
 # All three should appear with non-empty values
+```
+
+If `SEED_PMOADMIN_PASSWORD` is missing, add it manually:
+
+```bash
+nano ~/pmo-dash/pmo-backend/.env
+# Add line: SEED_PMOADMIN_PASSWORD=<your_password>
+# Ctrl+O to save, Ctrl+X to exit
 ```
 
 ---
